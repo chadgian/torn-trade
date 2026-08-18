@@ -1,48 +1,11 @@
-name: Migrate Torn Trade Analyzer
+name: Completed migration record
 
 on:
-  issues:
-    types: [opened]
-
-permissions:
-  contents: write
-  issues: write
+  workflow_dispatch:
 
 jobs:
-  migrate:
-    if: github.event.issue.title == 'migrate-torn-trade-analyzer'
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Copy current production userscript
-        run: |
-          curl -fsSL 'https://raw.githubusercontent.com/chadgian/systems_by_AI/main/torn-trade-analyzer.user.js' -o torn-trade-analyzer.user.js
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('torn-trade-analyzer.user.js')
-          s=p.read_text()
-          old='https://raw.githubusercontent.com/chadgian/systems_by_AI/main/torn-trade-analyzer.user.js'
-          new='https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.user.js'
-          assert old in s, 'old update URL not found'
-          s=s.replace(old,new)
-          assert '// @version      0.1.20' in s
-          assert "const VERSION = '0.1.20';" in s
-          assert s.count(new) >= 2
-          p.write_text(s)
-          PY
-      - name: Verify JavaScript
-        run: node --check torn-trade-analyzer.user.js
-      - name: Publish migrated script
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add torn-trade-analyzer.user.js
-          git commit -m 'Migrate Torn Trade Analyzer v0.1.20'
-          git push
-      - name: Close migration issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close '${{ github.event.issue.number }}' --comment 'Migration completed and production userscript published to this repository.'
+      - run: echo 'Torn Trade Analyzer migration completed; workflow intentionally disabled.'
