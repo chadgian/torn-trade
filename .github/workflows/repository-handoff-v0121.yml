@@ -1,50 +1,11 @@
-name: Torn Trade Analyzer v0.1.21 repository handoff
+name: Completed repository handoff record
 
 on:
-  issues:
-    types: [opened]
-
-permissions:
-  contents: write
-  issues: write
+  workflow_dispatch:
 
 jobs:
-  publish:
-    if: github.event.issue.title == 'publish-v0121-repository-handoff'
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Bump migration release
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('torn-trade-analyzer.user.js')
-          s=p.read_text()
-          assert '// @version      0.1.20' in s
-          assert "const VERSION = '0.1.20';" in s
-          newurl='https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.user.js'
-          assert s.count(newurl) >= 2
-          s=s.replace('// @version      0.1.20','// @version      0.1.21',1)
-          s=s.replace("const VERSION = '0.1.20';","const VERSION = '0.1.21';",1)
-          p.write_text(s)
-          r=Path('README.md')
-          x=r.read_text()
-          x=x.replace('**Current version:** v0.1.20','**Current version:** v0.1.21',1)
-          r.write_text(x)
-          PY
-      - name: Verify JavaScript
-        run: node --check torn-trade-analyzer.user.js
-      - name: Publish handoff release
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add torn-trade-analyzer.user.js README.md
-          git commit -m 'Torn Trade Analyzer v0.1.21 repository handoff'
-          git push
-      - name: Close issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close '${{ github.event.issue.number }}' --comment 'v0.1.21 handoff release published from the new repository.'
+      - run: echo 'v0.1.21 repository handoff completed; workflow intentionally disabled.'
