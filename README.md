@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.20
+**Current version:** v0.1.21
 
 ## Install
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.20
+// @version      0.1.21
 // @description  Fast Torn trade analytics with spacious scrollable daily profit charts, top-anchored exact-value tooltips, acquisition-date attribution, FIFO ledger, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.20';
+  const VERSION = '0.1.21';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
