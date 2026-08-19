@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.21
+**Current version:** v0.1.22
 
 ## Install
 
@@ -28,7 +28,7 @@ Torn Trade Analyzer builds a local trading/item ledger from Torn API data and tu
 
 - Automatic acquisition and sale discovery from Torn logs.
 - Completed **Player Trade** support with detailed outgoing/incoming item quantities.
-- Incremental syncing: previously known records are skipped and only missing/new data is added where possible.
+- Incremental syncing: previously known records are skipped while live-period syncs also recheck the most recent 72 hours of User Logs so delayed travel/market logs can be recovered.
 - Persistent/resumable sync across Torn page reloads and navigation.
 - **FIFO accounting** for realized profit.
 - Profit is attributed to the **date the matched acquisition lot was originally acquired**, while Sold quantity remains on the actual sale date.
@@ -87,7 +87,7 @@ Sync is designed to avoid repeating work unnecessarily:
 
 - Existing normalized transaction IDs are skipped.
 - Previously verified Player Trade IDs can skip repeated detailed-trade requests.
-- After historical coverage is established, routine syncs focus mainly on the interval since the last successful sync, with a small overlap for safety.
+- After historical coverage is established, routine live-period syncs still recheck the most recent **72 hours of User Logs** and **6 hours of Player Trades**. This deliberately catches late-visible Torn logs while deterministic transaction IDs prevent duplicate accounting.
 - A pending sync can resume after Torn navigation/page reload.
 
 For the first sync after a major parser/accounting change, a larger date range or **All** may still be useful to establish complete local history.
@@ -123,3 +123,12 @@ Please **never include your API key**.
 ## License / use
 
 This repository contains a community userscript intended for personal Torn gameplay analytics. Review the source before installing and use it at your own discretion.
+
+
+## v0.1.22 freshness fix
+
+- Live-period Sync now rechecks the most recent 72 hours of User Logs instead of only a five-minute overlap.
+- This is intended to recover delayed Foreign Market/travel purchases that may appear after a previous sync already advanced coverage.
+- Player Trades use a six-hour recent recheck window; already verified trade details remain skipped.
+- Foreign Market acquisition rows and quantities detected in the latest scan are shown in Settings diagnostics.
+- Item-log parsing accepts additional item/cash field aliases and nested purchase/travel structures for resilience against API schema variation.

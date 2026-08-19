@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.21
-// @description  Fast Torn trade analytics with spacious scrollable daily profit charts, top-anchored exact-value tooltips, acquisition-date attribution, FIFO ledger, and incremental sync. Data stays on-device.
+// @version      0.1.22
+// @description  Fast Torn trade analytics with recent-log freshness recovery, spacious interactive profit charts, acquisition-date attribution, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.21';
+  const VERSION = '0.1.22';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -706,7 +706,7 @@
     const hiddenHtml=hiddenItems.length?`<div class="tta-hiddenlist">${hiddenItems.map(x=>`<div class="tta-hiddenrow"><span>${esc(x.name)} <small>#${x.id}</small></span><button class="tta-btn secondary" data-act="restoreItem" data-id="${x.id}">Restore</button></div>`).join('')}</div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="restoreAllItems">Restore all hidden items</button></div>`:'<div class="tta-banner">No hidden items.</div>';
     return `${header('Settings','Storage, API access & reset',true)}<div class="tta-content tta-settings">
       <div class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(status)}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${esc(masked)}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn" data-act="saveApiKey">Save & test</button></div><div class="tta-keynote">Stored only in this device's local storage and sent only to Torn's official API. It is never uploaded to GitHub or sent to us. Use a custom key with <strong>User → Log</strong>; for free-item history, do not restrict away categories such as Crime success, City finds, Mission rewards, Seasonal gift, and similar reward logs.</div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved API key</button></div>':''}</div>
-      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized transaction entries · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
+      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized transaction entries · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in last scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) · ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
   }
 
   function loadingHtml() {
@@ -923,13 +923,13 @@
     data=data||{};
     const out=[];
     const push=(id,q=1)=>{id=Number(id);q=Number(q)||1;if(id>0&&q>0)out.push({id,qty:q});};
-    const itemKeys=new Set(['items','item','items_bought','items_sold','item_bought','item_sold','items_gained','item_gained','items_received','item_received','reward_items','reward_item','loot_items','loot_item','found_items','found_item']);
+    const itemKeys=new Set(['items','item','item_id','itemid','item_ids','itemids','items_bought','items_sold','item_bought','item_sold','items_gained','item_gained','items_received','item_received','reward_items','reward_item','loot_items','loot_item','found_items','found_item']);
     const visit=(v,defaultQty=1,depth=0)=>{
       if(v==null||depth>8)return;
       if(typeof v==='number' || (typeof v==='string' && /^\d+$/.test(v))){push(v,defaultQty);return;}
       if(Array.isArray(v)){v.forEach(z=>visit(z,defaultQty,depth+1));return;}
       if(typeof v!=='object')return;
-      const id=v.id??v.item_id??v.itemId;
+      const id=v.id??v.item_id??v.itemId??v.itemID??v.itemid;
       const hasQty=('qty'in v)||('quantity'in v)||('amount'in v)||('count'in v);
       if(id!=null && (hasQty || (depth>0 && Object.keys(v).length<10))){
         const q=v.qty??v.quantity??v.amount??v.count??defaultQty;
@@ -942,7 +942,7 @@
           else if(Array.isArray(val)) push(k,val[0]??defaultQty);
           else if(val && typeof val==='object') push(k,val.qty??val.quantity??val.amount??val.count??defaultQty);
         } else if(itemKeys.has(lk)) visit(val,v.quantity??v.qty??v.amount??v.count??defaultQty,depth+1);
-        else if(val && typeof val==='object' && depth<2 && /item|reward|loot|gain|receive|find|found/.test(lk)) visit(val,defaultQty,depth+1);
+        else if(val && typeof val==='object' && depth<3 && /item|reward|loot|gain|receive|find|found|purchase|bought|buy|sale|sold|sell|abroad|foreign|travel|market|shop/.test(lk)) visit(val,defaultQty,depth+1);
       });
     };
     const q=data.quantity??data.qty??data.amount??data.count??1;
@@ -951,7 +951,7 @@
   }
 
   function cashTotal(data, qtyValue) {
-    const totalKeys=['cost_total','total_cost','total','price_total','money','amount_paid','proceeds','revenue','sale_total','total_value'];
+    const totalKeys=['cost_total','total_cost','total','price_total','total_price','money','amount_paid','price_paid','cost_paid','proceeds','revenue','sale_total','total_value'];
     for(const k of totalKeys){const v=Number(data?.[k]);if(Number.isFinite(v)&&v>0)return v;}
     const eachKeys=['cost_each','price_each','unit_price','price','cost','value_each'];
     for(const k of eachKeys){const v=Number(data?.[k]);if(Number.isFinite(v)&&v>0)return v*Math.max(1,qtyValue||1);}
@@ -1233,6 +1233,10 @@
   const SYNC_JOB_SCHEMA_VERSION = 1;
   const SYNC_CACHE_SCHEMA_VERSION = 1;
   const INCREMENTAL_OVERLAP_SEC = 300;
+  // Torn User Logs can appear after an earlier sync has already advanced coverage.
+  // Always recheck a recent safety window; deterministic transaction IDs make this duplicate-safe.
+  const RECENT_LOG_RECHECK_SEC = 72 * 3600;
+  const RECENT_TRADE_RECHECK_SEC = 6 * 3600;
   let resumeBootStarted=false,resumableTxMap=null,resumableTxJob='',syncCacheMem=null;
 
   function ensureSyncCache() {
@@ -1251,11 +1255,16 @@
   function incrementalPeriod(period,kind) {
     const c=ensureSyncCache(),fromKey=kind==='trade'?'tradeCoverageFrom':'logCoverageFrom',toKey=kind==='trade'?'tradeCoverageTo':'logCoverageTo';
     const rawFrom=c[fromKey],coveredFrom=rawFrom==null?NaN:Number(rawFrom),coveredTo=Number(c[toKey])||0;
+    const overlap=kind==='trade'?RECENT_TRADE_RECHECK_SEC:RECENT_LOG_RECHECK_SEC,now=nowSec(),liveEdge=period.to>=now-INCREMENTAL_OVERLAP_SEC;
     if(Number.isFinite(coveredFrom)&&coveredFrom<=period.from&&coveredTo>0){
-      if(period.to<=coveredTo)return null;
-      return {from:Math.max(period.from,coveredTo-INCREMENTAL_OVERLAP_SEC),to:period.to,incremental:true};
+      // A fully-covered live period is still refreshed because Torn logs may become visible late.
+      if(period.to<=coveredTo){
+        if(!liveEdge)return null;
+        return {from:Math.max(period.from,now-overlap),to:period.to,incremental:true,recheck:true};
+      }
+      return {from:Math.max(period.from,coveredTo-overlap),to:period.to,incremental:true,recheck:liveEdge};
     }
-    return {from:period.from,to:period.to,incremental:false};
+    return {from:period.from,to:period.to,incremental:false,recheck:false};
   }
   function updateSyncCoverage(job) {
     const c=ensureSyncCache();
@@ -1344,7 +1353,7 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
   function createResumableSyncJob() {
     stripSyncRunMarkers();
@@ -1378,7 +1387,7 @@
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
-        const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;parsedRows.push(...parsed);
+        const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
       }
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
@@ -1449,7 +1458,7 @@
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
-    if(job.logScanPeriod){job.phase='logs-filtered';checkpointSyncJob(job,`${job.logScanPeriod.incremental?'Scanning only new/missing logs':'Establishing log baseline'} · ${dateStr(job.logScanPeriod.from)} – ${dateStr(Math.min(job.logScanPeriod.to,nowSec()))}`);}
+    if(job.logScanPeriod){const scanLabel=job.logScanPeriod.incremental?(job.logScanPeriod.recheck?'Refreshing recent logs + missing history':'Scanning new/missing logs'):'Establishing log baseline';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} · ${dateStr(job.logScanPeriod.from)} – ${dateStr(Math.min(job.logScanPeriod.to,nowSec()))}`);}
     else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered · skipping log scan.');}
   }
   function finishResumableSync(job) {
@@ -1457,8 +1466,8 @@
     state.sync.lastSync=nowSec();state.sync.firstSyncComplete=true;state.sync.autoDiscoveryComplete=true;
     const oldCoverage=Number(state.sync.coverageFrom);state.sync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;state.sync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,nowSec()));state.sync.diagnostics=d;save('sync',state.sync);
     const mode=d.mode==='unfiltered-fallback'?'compatibility scan':'filtered scan';
-    if(!freshCount)setSyncProgress(`Sync up to date for ${job.periodText} · ${qty(d.existingRowsSkipped||0)} existing rows skipped · ${qty(d.tradeDetailsSkipped||0)} verified trade details skipped.`);
-    else setSyncProgress(`Incremental sync complete · ${qty(freshCount)} new item rows · ${qty(d.existingRowsSkipped||0)} existing rows skipped · ${qty(d.tradeDetailsSkipped||0)} verified trades skipped · ${qty(d.tradeDetails||0)} missing trade details fetched.`);
+    if(!freshCount)setSyncProgress(`Sync up to date through ${dateTimeStr(state.sync.lastSync)} · recent ${qty(d.recentLogRecheckHours||72)}h User Logs refreshed · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
+    else setSyncProgress(`Incremental sync complete · ${qty(freshCount)} new item rows · ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen in this scan · ${qty(d.existingRowsSkipped||0)} existing rows skipped · ${qty(d.tradeDetails||0)} missing trade details fetched.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
   async function runResumableSync(job,resumed=false) {
