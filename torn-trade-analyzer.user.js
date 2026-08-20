@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.24
-// @description  Fast Torn trade analytics with TCT day-gap recovery, current-server sync bounds, interactive profit charts, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.1.25
+// @description  Fast Torn trade analytics with continuous TCT timelines, TCT day-gap recovery, current-server sync bounds, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.24';
+  const VERSION = '0.1.25';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -381,6 +381,9 @@
   // Torn City Time (TCT) follows Torn's server timestamp. Use UTC calendar boundaries
   // for sync planning so device timezone never decides which Torn day was checked.
   function tctDayStart(ts) { return Math.floor((Number(ts)||0)/86400)*86400; }
+  function tctWeekStart(ts) { const d=new Date((Number(ts)||0)*1000),wd=(d.getUTCDay()+6)%7;d.setUTCHours(0,0,0,0);d.setUTCDate(d.getUTCDate()-wd);return Math.floor(d.getTime()/1000); }
+  function tctMonthStart(ts) { const d=new Date((Number(ts)||0)*1000);return Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1)/1000); }
+  function nextTctMonthStart(ts) { const d=new Date((Number(ts)||0)*1000);return Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)/1000); }
   function tctDateStr(ts) { return new Date((Number(ts)||0)*1000).toLocaleDateString(undefined,{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}); }
   function tctDateTimeStr(ts) { return new Date((Number(ts)||0)*1000).toLocaleString(undefined,{timeZone:'UTC',year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}); }
   function subtractCalendarMonthTct(serverNow) {
@@ -590,23 +593,34 @@
     const cacheKey=`${periodCacheKey()}|${state.granularity}|${itemId==null?'all':Number(itemId)}`;
     if(perfCache.series.has(cacheKey))return perfCache.series.get(cacheKey);
     const {from,to}=dateRange(),m=new Map(),rows=itemId==null?acquisitionLedgerRows():ledgerRowsForItem(Number(itemId));
-    const keyFn=state.granularity==='week'?weekKey:state.granularity==='month'?monthKey:dayKey;
+    const keyFn=state.granularity==='week'?tctWeekStart:state.granularity==='month'?tctMonthStart:tctDayStart;
     for(const row of rows){
       if(row.acquiredAt<from||row.acquiredAt>to||row.soldQty<=0)continue;
       const k=keyFn(row.acquiredAt);m.set(k,(m.get(k)||0)+(Number(row.realizedProfit)||0));
     }
-    const boundary=Math.min(to,nowSec());
-    // Keep a live/current bucket visible even when today's acquisition-attributed profit is $0.
-    // This prevents a current sync from looking stale merely because the latest realized-profit lot is older.
-    if(m.size&&boundary>=from){const k=keyFn(boundary);if(!m.has(k))m.set(k,0);}
+    const boundary=Math.min(to,Number(state.sync?.lastSync)||nowSec(),nowSec());
+    if(boundary>=from){
+      let start;
+      if(state.dateMode==='all'){
+        const existing=[...m.keys()].sort((a,b)=>a-b);
+        start=existing.length?existing[0]:keyFn(boundary);
+      }else start=keyFn(from);
+      const end=keyFn(boundary);
+      if(state.granularity==='month'){
+        for(let k=start;k<=end;k=nextTctMonthStart(k))if(!m.has(k))m.set(k,0);
+      }else{
+        const step=state.granularity==='week'?7*86400:86400;
+        for(let k=start;k<=end;k+=step)if(!m.has(k))m.set(k,0);
+      }
+    }
     const result=[...m.entries()].sort((a,b)=>a[0]-b[0]).map(([t,v])=>({t,v}));perfCache.series.set(cacheKey,result);return result;
   }
 
   function chartBucketLabel(ts) {
     const d=new Date((Number(ts)||0)*1000);
-    if(state.granularity==='month')return d.toLocaleDateString(undefined,{month:'long',year:'numeric'});
-    if(state.granularity==='week')return `Week of ${dateStr(ts)}`;
-    return dateStr(ts);
+    if(state.granularity==='month')return d.toLocaleDateString(undefined,{timeZone:'UTC',month:'long',year:'numeric'});
+    if(state.granularity==='week')return `Week of ${tctDateStr(ts)}`;
+    return tctDateStr(ts);
   }
   function hideChartTooltip(wrap,force=false) {
     if(!wrap)return;const tip=wrap.querySelector('.tta-charttooltip');if(!tip)return;
@@ -631,7 +645,7 @@
     const grid=[0,.25,.5,.75,1].map(p=>{const yy=padT+p*innerH;const val=max-p*(max-min);return `<line class="tta-grid" x1="${padL}" y1="${yy}" x2="${w-padR}" y2="${yy}"/><text class="tta-axis" x="3" y="${yy+3}">${esc(money(val,true))}</text>`}).join('');
     const bars=series.map((p,i)=>{const cx=padL+gap*i+gap/2;const yy=y(p.v);const top=Math.min(yy,zero);const bh=Math.max(2,Math.abs(zero-yy));const label=`${chartBucketLabel(p.t)}: ${money(p.v)}`;return `<rect class="tta-profitbar ${p.v>=0?'tta-bar-pos':'tta-bar-neg'}" data-profit="${Number(p.v)||0}" data-time="${Number(p.t)||0}" tabindex="0" role="button" aria-label="${esc(label)}" x="${cx-bw/2}" y="${top}" width="${bw}" height="${bh}" rx="2"><title>${esc(label)}</title></rect>`}).join('');
     const labelStride=dayMode?Math.max(1,Math.ceil(series.length/12)):Math.max(1,Math.ceil(series.length/6));
-    const labels=series.map((p,i)=>{if(series.length>10 && i%labelStride!==0 && i!==series.length-1)return''; const d=new Date(p.t*1000);const lab=state.granularity==='month'?d.toLocaleDateString(undefined,{month:'short'}):d.toLocaleDateString(undefined,{month:'short',day:'numeric'});const x=padL+gap*i+gap/2;return `<text class="tta-axis" text-anchor="middle" x="${x}" y="${h-6}">${esc(lab)}</text>`}).join('');
+    const labels=series.map((p,i)=>{if(series.length>10 && i%labelStride!==0 && i!==series.length-1)return''; const d=new Date(p.t*1000);const lab=state.granularity==='month'?d.toLocaleDateString(undefined,{timeZone:'UTC',month:'short'}):d.toLocaleDateString(undefined,{timeZone:'UTC',month:'short',day:'numeric'});const x=padL+gap*i+gap/2;return `<text class="tta-axis" text-anchor="middle" x="${x}" y="${h-6}">${esc(lab)}</text>`}).join('');
     return `<div class="tta-chartinteractive ${dayMode?'day':''}" ${dayMode?`style="--tta-chart-width:${w}px"`:''}><div class="tta-charttooltip" role="status" aria-live="polite" data-pinned="0"></div><div class="tta-chartviewport"><svg class="tta-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Interactive profit chart; hover or tap a bar for exact profit">${grid}<line class="tta-zero" x1="${padL}" y1="${zero}" x2="${w-padR}" y2="${zero}"/>${bars}${labels}</svg></div></div>`;
   }
 

@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.24
+**Current version:** v0.1.25
 
 ## Install
 
@@ -36,6 +36,7 @@ Torn Trade Analyzer builds a local trading/item ledger from Torn API data and tu
 - Acquisition History ledger with chronological acquisition lots, source, cost, FIFO-matched sale proceeds, realized profit, and Sold/Partial/Unsold status.
 - Searchable, sortable and filterable ledger.
 - Interactive Day / Week / Month profit charts with exact-value hover/tap tooltips.
+- Profit charts use Torn City Time (TCT/UTC) calendar buckets and keep every date/week/month in sequence, including zero-profit buckets, so checked days never visually disappear.
 - Scrollable Day charts so larger date ranges remain readable on mobile.
 - Item Market, Bazaar, Foreign Market, Torn Shop, player trades, crimes, finds, gifts/rewards and other recognized acquisition sources.
 - Local caching for faster analytics and reduced repeated API work.
@@ -151,3 +152,11 @@ This repository contains a community userscript intended for personal Torn gamep
 - Every Sync identifies uncovered TCT day ranges in the selected period, starts from the earliest missing segment, and fills those gaps through the current TCT target.
 - The current TCT day is refreshed through the current server time, and the recent safety window remains in place for delayed Torn logs.
 - Deterministic transaction IDs still prevent duplicate accounting when covered days are rechecked.
+
+
+## v0.1.25 continuous TCT timeline
+
+- Day/Week/Month profit charts now use TCT (UTC) boundaries instead of the device timezone.
+- Every bucket between the selected period start and the latest successfully synced TCT time is generated, even when profit is $0.
+- This prevents dates from disappearing simply because there was no realized acquisition-attributed profit on that day.
+- Sync coverage remains separate from activity: a checked-empty TCT day is still a checked day.
