@@ -1,0 +1,1 @@
+PASS: v0.1.24 syntax + TCT server target + per-day gap coverage + current-day refresh
