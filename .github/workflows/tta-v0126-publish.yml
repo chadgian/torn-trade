@@ -1,47 +1,11 @@
-name: Torn Trade Analyzer v0.1.26 abroad verification
+name: Torn Trade Analyzer v0.1.26 abroad verification (disabled)
 
 on:
-  issues:
-    types: [opened]
-
-permissions:
-  contents: write
-  issues: write
+  workflow_dispatch:
 
 jobs:
-  publish:
-    if: github.event.issue.title == 'publish-tta-v0126-abroad-verify'
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply patch
-        run: python .github/scripts/tta_v0126_patch.py
-      - name: Validate JavaScript syntax
-        run: node --check torn-trade-analyzer.user.js
-      - name: Validate release invariants
-        run: |
-          grep -F '// @version      0.1.26' torn-trade-analyzer.user.js
-          grep -F 'const MAX_LOG_IDS_PER_REQUEST = 10;' torn-trade-analyzer.user.js
-          grep -F 'async function runAbroadBuyVerification(job)' torn-trade-analyzer.user.js
-          grep -F "log:'4201'" torn-trade-analyzer.user.js
-          grep -F 'Dedicated Abroad Buy (4201) verification:' torn-trade-analyzer.user.js
-          grep -F '**Current version:** v0.1.26' README.md
-      - name: Commit production release
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add torn-trade-analyzer.user.js README.md
-          git commit -m 'Torn Trade Analyzer v0.1.26 dedicated abroad verification'
-          git push
-      - name: Write verifier marker
-        run: |
-          echo 'PASS: v0.1.26 syntax + 10-ID log batches + dedicated 4201 verification + acquisition diagnostics' > .tta-v0126-status.txt
-          git add .tta-v0126-status.txt
-          git commit -m 'Verify Torn Trade Analyzer v0.1.26'
-          git push
-      - name: Close trigger issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment 'Published and verified v0.1.26.'
+      - run: echo 'v0.1.26 release workflow disabled after successful publish.'
