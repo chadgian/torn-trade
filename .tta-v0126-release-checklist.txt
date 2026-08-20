@@ -1,0 +1,1 @@
+Checklist: 10-ID log batches; dedicated 4201 verification; diagnostics; syntax validation; README update.
