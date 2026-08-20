@@ -1,0 +1,1 @@
+Use GitHub issue title publish-tta-v0125-continuous-tct to run the one-time publisher.
