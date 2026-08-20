@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.25
+**Current version:** v0.1.26
 
 ## Install
 
@@ -160,3 +160,12 @@ This repository contains a community userscript intended for personal Torn gamep
 - Every bucket between the selected period start and the latest successfully synced TCT time is generated, even when profit is $0.
 - This prevents dates from disappearing simply because there was no realized acquisition-attributed profit on that day.
 - Sync coverage remains separate from activity: a checked-empty TCT day is still a checked day.
+
+
+## v0.1.26 abroad acquisition verification
+
+- User Log filtering is split into batches of at most 10 log IDs.
+- Every Sync performs an independent `4201` (Item abroad Buy) verification pass, so Foreign Market acquisitions do not depend on a larger mixed-log filter batch.
+- The dedicated verification uses the selected finite period; for All History it checks the latest 30 days to keep routine API usage bounded.
+- Settings diagnostics show raw 4201 rows, parsed rows/items, the latest raw Abroad Buy timestamp, and the latest parsed acquisition timestamp.
+- Existing transaction IDs remain duplicate-safe, so the dedicated verification can recover missing purchases without double-counting rows already stored.

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.25
-// @description  Fast Torn trade analytics with continuous TCT timelines, TCT day-gap recovery, current-server sync bounds, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.1.26
+// @description  Fast Torn trade analytics with dedicated abroad-buy verification, continuous TCT timelines, gap recovery, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,12 +14,12 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.25';
+  const VERSION = '0.1.26';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
   const REQUEST_GAP_MS = 700; // ~86 requests/minute, keeping headroom under Torn's 100/min user limit.
-  const MAX_LOG_IDS_PER_REQUEST = 24;
+  const MAX_LOG_IDS_PER_REQUEST = 10;
   const CATALOG_SCHEMA_VERSION = 2;
   const KNOWN_TRANSACTION_LOGS = new Map([
     [1103, {side:'buy', source:'Item Market'}],
@@ -749,7 +749,7 @@
     const hiddenHtml=hiddenItems.length?`<div class="tta-hiddenlist">${hiddenItems.map(x=>`<div class="tta-hiddenrow"><span>${esc(x.name)} <small>#${x.id}</small></span><button class="tta-btn secondary" data-act="restoreItem" data-id="${x.id}">Restore</button></div>`).join('')}</div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="restoreAllItems">Restore all hidden items</button></div>`:'<div class="tta-banner">No hidden items.</div>';
     return `${header('Settings','Storage, API access & reset',true)}<div class="tta-content tta-settings">
       <div class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(status)}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${esc(masked)}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn" data-act="saveApiKey">Save & test</button></div><div class="tta-keynote">Stored only in this device's local storage and sent only to Torn's official API. It is never uploaded to GitHub or sent to us. Use a custom key with <strong>User → Log</strong>; for free-item history, do not restrict away categories such as Crime success, City finds, Mission rewards, Seasonal gift, and similar reward logs.</div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved API key</button></div>':''}</div>
-      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized transaction entries · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in last scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) · ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
+      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized transaction entries · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in mixed scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) · ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Dedicated Abroad Buy (4201) verification: ${qty(state.sync.diagnostics.abroadVerifyRawRows||0)} raw log(s) · ${qty(state.sync.diagnostics.abroadVerifyParsedRows||0)} parsed row(s) · ${qty(state.sync.diagnostics.abroadVerifyQty||0)} item(s).${state.sync.diagnostics.abroadVerifyLatestRawTimestamp?`<br>Latest raw Abroad Buy log: ${esc(tctDateTimeStr(state.sync.diagnostics.abroadVerifyLatestRawTimestamp))} TCT.`:''}${state.sync.diagnostics.latestParsedAcquisitionTimestamp?`<br>Latest parsed acquisition: ${esc(tctDateTimeStr(state.sync.diagnostics.latestParsedAcquisitionTimestamp))} TCT.`:''}<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
   }
 
   function loadingHtml() {
@@ -1451,7 +1451,7 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
   function createResumableSyncJob() {
     stripSyncRunMarkers();
@@ -1485,7 +1485,8 @@
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
-        const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
+        if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
+        const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
       }
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
@@ -1501,6 +1502,42 @@
     }
     return !syncJobCancelled(job);
   }
+  async function runAbroadBuyVerification(job) {
+    const serverNow=Number(job.tctNow)||nowSec();
+    const verifyFrom=Number(job.period?.from)>0?Number(job.period.from):Math.max(0,serverNow-30*86400);
+    const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
+    if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped · no overlapping selected period.');return true;}
+    let cursor=verifyTo,page=0,previousSignature='';
+    while(!syncJobCancelled(job)){
+      page++;checkpointSyncJob(job,`Abroad Buy verification · page ${page} · ${tctDateStr(verifyFrom)} – ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
+      const data=await syncApiGet('/user/log',{limit:100,log:'4201',from:verifyFrom,to:cursor}),rows=Array.isArray(data?.log)?data.log:[];
+      job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+1;
+      job.diagnostics.abroadVerifyRawRows=(Number(job.diagnostics.abroadVerifyRawRows)||0)+rows.length;
+      if(!rows.length)break;
+      const parsedRows=[];
+      for(const r of rows){
+        const ts=Number(r?.timestamp)||0;if(ts<verifyFrom||ts>verifyTo)continue;
+        job.diagnostics.abroadVerifyLatestRawTimestamp=Math.max(Number(job.diagnostics.abroadVerifyLatestRawTimestamp)||0,ts);
+        job.diagnostics.latestRawLogTimestamp=Math.max(Number(job.diagnostics.latestRawLogTimestamp)||0,ts);
+        const parsed=parseLogEntry(r).filter(t=>t.side==='buy'&&t.source==='Foreign Market');
+        for(const t of parsed){
+          job.diagnostics.abroadVerifyParsedRows=(Number(job.diagnostics.abroadVerifyParsedRows)||0)+1;
+          job.diagnostics.abroadVerifyQty=(Number(job.diagnostics.abroadVerifyQty)||0)+(Number(t.qty)||0);
+          job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);
+        }
+        parsedRows.push(...parsed);
+      }
+      checkpointTransactionRows(job,parsedRows);
+      const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);if(!timestamps.length)break;
+      const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
+      if(oldest<=verifyFrom)break;
+      let nextTo=oldest;if(signature===previousSignature)nextTo=oldest-1;
+      if(!Number.isFinite(nextTo)||nextTo>=cursor)break;
+      previousSignature=signature;cursor=nextTo;await sleep(REQUEST_GAP_MS);
+    }
+    job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete · ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs · ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
+  }
+
   function compactTradeHeader(row) {
     const id=Number(row?.id)||0,ts=Number(row?.completed_at||row?.timestamp)||0,n=Number(row?.items);
     return id>0&&ts>0?{id,completed_at:ts,items:Number.isFinite(n)?n:null}:null;
@@ -1595,9 +1632,10 @@
         else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
           if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows · starting compatibility scan…');}
-          else{job.phase='trades-list';checkpointSyncJob(job,`Checking only missing player trades for ${job.periodText}…`);}
+          else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently…');}
         }
-        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='trades-list';checkpointSyncJob(job,`Checking only missing player trades for ${job.periodText}…`);}
+        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently…');}
+        else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
         else if(job.phase==='finalize'){finishResumableSync(job);break;}
