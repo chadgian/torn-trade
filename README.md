@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.23
+**Current version:** v0.1.24
 
 ## Install
 
@@ -141,3 +141,13 @@ This repository contains a community userscript intended for personal Torn gamep
 - Old checkpoints are not automatically resumed on page load once their end time is stale.
 - Profit charts now append the current selected Day/Week/Month bucket at `$0` when necessary, so an up-to-date sync does not visually look two days old simply because there was no acquisition-attributed profit today.
 - The existing 72-hour User Log recheck remains enabled for delayed overseas/travel acquisition logs.
+
+
+## v0.1.24 TCT day-gap sync
+
+- Sync now gets the current Torn server timestamp first and treats that as the authoritative Torn City Time (TCT) target.
+- Finite selected periods are tracked by TCT calendar-day coverage, independent of the phone/browser timezone.
+- A day can be marked scanned even when it contains zero item transactions, so an empty day is no longer confused with an unchecked day.
+- Every Sync identifies uncovered TCT day ranges in the selected period, starts from the earliest missing segment, and fills those gaps through the current TCT target.
+- The current TCT day is refreshed through the current server time, and the recent safety window remains in place for delayed Torn logs.
+- Deterministic transaction IDs still prevent duplicate accounting when covered days are rechecked.
