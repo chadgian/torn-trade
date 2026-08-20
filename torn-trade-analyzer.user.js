@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.22
-// @description  Fast Torn trade analytics with recent-log freshness recovery, spacious interactive profit charts, acquisition-date attribution, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.1.23
+// @description  Fast Torn trade analytics with current-server sync bounds, stale-checkpoint recovery, recent-log refresh, interactive profit charts, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.22';
+  const VERSION = '0.1.23';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -570,6 +570,10 @@
       if(row.acquiredAt<from||row.acquiredAt>to||row.soldQty<=0)continue;
       const k=keyFn(row.acquiredAt);m.set(k,(m.get(k)||0)+(Number(row.realizedProfit)||0));
     }
+    const boundary=Math.min(to,nowSec());
+    // Keep a live/current bucket visible even when today's acquisition-attributed profit is $0.
+    // This prevents a current sync from looking stale merely because the latest realized-profit lot is older.
+    if(m.size&&boundary>=from){const k=keyFn(boundary);if(!m.has(k))m.set(k,0);}
     const result=[...m.entries()].sort((a,b)=>a[0]-b[0]).map(([t,v])=>({t,v}));perfCache.series.set(cacheKey,result);return result;
   }
 
@@ -1237,6 +1241,7 @@
   // Always recheck a recent safety window; deterministic transaction IDs make this duplicate-safe.
   const RECENT_LOG_RECHECK_SEC = 72 * 3600;
   const RECENT_TRADE_RECHECK_SEC = 6 * 3600;
+  const STALE_SYNC_JOB_SEC = 5 * 60;
   let resumeBootStarted=false,resumableTxMap=null,resumableTxJob='',syncCacheMem=null;
 
   function ensureSyncCache() {
@@ -1304,6 +1309,22 @@
     }catch(e){return false;}
   }
   function clearSyncJob(){saveSyncJob(null);}
+  function syncJobIsStale(job) {
+    if(!job?.period)return false;
+    const now=nowSec(),end=Number(job.period.to)||0,updated=Number(job.updatedAt)||0;
+    return (end>0&&end<now-STALE_SYNC_JOB_SEC)||(updated>0&&updated<now-6*3600);
+  }
+  function syncJobMatchesCurrentSelection(job) {
+    if(!job?.period)return false;
+    const wanted=selectedPeriodBounds(),fromDiff=Math.abs((Number(job.period.from)||0)-wanted.from);
+    return fromDiff<=STALE_SYNC_JOB_SEC&&!syncJobIsStale(job);
+  }
+  function discardStaleSyncJob(job) {
+    if(!job)return;
+    commitTradeVerifications(job);
+    abandonResumableMarkers(job);
+    clearSyncJob();
+  }
   function syncJobCancelled(job){return !!(state.syncCancel||job?.cancelled);}
   function checkpointSyncJob(job,progress='') {
     if(progress){job.progress=String(progress);setSyncProgress(job.progress);}
@@ -1450,7 +1471,21 @@
     }
     if(!syncJobCancelled(job)){job.phase='finalize';checkpointSyncJob(job,'Finalizing cached history and FIFO inputs…');return true;}return false;
   }
+  async function refreshLiveSyncBounds(job) {
+    let serverNow=nowSec();
+    try{const t=await apiGet('/user/timestamp');serverNow=Number(t?.timestamp)||serverNow;}catch(_){}
+    const wanted=selectedPeriodBounds(new Date(serverNow*1000));
+    const isLive=wanted.to>=serverNow-120;
+    if(!isLive)return;
+    job.period={from:wanted.from,to:wanted.to};
+    job.periodText=wanted.from>0?`${dateStr(wanted.from)} – ${dateStr(Math.min(wanted.to,serverNow))}`:'all available history';
+    job.logScanPeriod=incrementalPeriod(job.period,'log');
+    job.tradeScanPeriod=incrementalPeriod(job.period,'trade');
+    job.logCursorTo=job.logScanPeriod?.to||job.period.to;
+    job.tradeListParams=null;
+  }
   async function prepareResumableSync(job) {
+    await refreshLiveSyncBounds(job);
     await ensureCatalog();setBusyDetail('Verifying API access and incremental coverage…');
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User → Log access.');
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
@@ -1506,6 +1541,9 @@
     if(!hasApiKey()){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');return;}
     let job=options?.job||loadSyncJob();
     if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
+    // Manual Sync must never stay trapped on an old saved window. Keep recent checkpoints resumable,
+    // but retire stale/mismatched ones while preserving already-downloaded rows and verified trades.
+    if(job&&!options?.job&&!syncJobMatchesCurrentSelection(job)){discardStaleSyncJob(job);job=null;setSyncProgress('Old sync checkpoint retired · starting a fresh scan through current Torn server time…');}
     if(!job)job=createResumableSyncJob();
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup');
   }
@@ -1513,6 +1551,8 @@
     if(resumeBootStarted||state.syncing)return;
     const job=loadSyncJob();if(!job)return;
     if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}
+    // Do not auto-resume checkpoints whose end time is already stale; the next manual Sync starts fresh.
+    if(syncJobIsStale(job)){discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync for current data.');return;}
     resumeBootStarted=true;syncAll({job,resume:true});
   }
   function persistSyncCancellation() {

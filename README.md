@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.22
+**Current version:** v0.1.23
 
 ## Install
 
@@ -132,3 +132,12 @@ This repository contains a community userscript intended for personal Torn gamep
 - Player Trades use a six-hour recent recheck window; already verified trade details remain skipped.
 - Foreign Market acquisition rows and quantities detected in the latest scan are shown in Settings diagnostics.
 - Item-log parsing accepts additional item/cash field aliases and nested purchase/travel structures for resilience against API schema variation.
+
+
+## v0.1.23 live-date / stale checkpoint fix
+
+- Manual Sync no longer resumes an old saved checkpoint indefinitely. A stale or date-range-mismatched checkpoint is retired safely, while rows already downloaded remain cached.
+- Fresh sync setup asks Torn's `/user/timestamp` endpoint for current server time and refreshes the live scan window before requesting logs/trades.
+- Old checkpoints are not automatically resumed on page load once their end time is stale.
+- Profit charts now append the current selected Day/Week/Month bucket at `$0` when necessary, so an up-to-date sync does not visually look two days old simply because there was no acquisition-attributed profit today.
+- The existing 72-hour User Log recheck remains enabled for delayed overseas/travel acquisition logs.
