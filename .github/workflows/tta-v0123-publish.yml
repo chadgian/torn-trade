@@ -1,0 +1,47 @@
+name: Torn Trade Analyzer v0.1.23 live-date fix
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  publish:
+    if: github.event.issue.title == 'publish-tta-v0123-live-date'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply patch
+        run: python .github/scripts/tta_v0123_patch.py
+      - name: Validate JavaScript syntax
+        run: node --check torn-trade-analyzer.user.js
+      - name: Validate release invariants
+        run: |
+          grep -F '// @version      0.1.23' torn-trade-analyzer.user.js
+          grep -F 'const STALE_SYNC_JOB_SEC = 5 * 60;' torn-trade-analyzer.user.js
+          grep -F "await apiGet('/user/timestamp')" torn-trade-analyzer.user.js
+          grep -F "if(m.size&&boundary>=from)" torn-trade-analyzer.user.js
+          grep -F 'Old sync checkpoint retired' torn-trade-analyzer.user.js
+          grep -F '**Current version:** v0.1.23' README.md
+      - name: Commit production release
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js README.md
+          git commit -m 'Torn Trade Analyzer v0.1.23 live-date freshness fix'
+          git push
+      - name: Write verifier marker
+        run: |
+          echo 'PASS: v0.1.23 syntax + Torn server time + stale checkpoint retirement + current chart bucket' > .tta-v0123-status.txt
+          git add .tta-v0123-status.txt
+          git commit -m 'Verify Torn Trade Analyzer v0.1.23'
+          git push
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment 'Published and verified v0.1.23.'
