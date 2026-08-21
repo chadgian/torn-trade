@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.27
-// @description  Fast Torn trade analytics with compact launcher, 7/14/30-day presets, dedicated abroad-buy verification, continuous TCT timelines, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.1.28
+// @description  Fast Torn trade analytics with a cyber terminal/data-pulse launcher, 7/14/30-day presets, dedicated abroad-buy verification, continuous TCT timelines, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.27';
+  const VERSION = '0.1.28';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -160,7 +160,7 @@
       #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
       #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
       #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center}
-      #tta-fab .tta-fabicon{display:block;font-size:18px;line-height:1;pointer-events:none}
+      #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
       #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
       #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
       #tta-fab.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
@@ -239,13 +239,17 @@
     fab.addEventListener('click',e=>{if(fab.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}openAnalyzer();});
     window.addEventListener('resize',()=>applyFabPosition(fab),{passive:true});
   }
+  function fabIconSvg() {
+    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect class="tta-terminal-frame" x="2.5" y="3.25" width="19" height="17.5" rx="3"/><path class="tta-terminal-bar" d="M3.25 7h17.5"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path class="tta-terminal-prompt" d="M5.4 10.1l2 1.8-2 1.8"/><path class="tta-terminal-cursor" d="M8.8 13.7h2.2"/><path class="tta-data-pulse" d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19"/></svg></span>`;
+  }
+
   function updateFabState() {
     const fab=document.getElementById('tta-fab');if(!fab)return;
     const syncing=!!state.syncing;
     fab.classList.toggle('syncing',syncing);
     fab.setAttribute('aria-label',syncing?'Trade Analytics syncing':'Trade Analytics');
     fab.title=syncing?'Trade history sync is running · tap to reopen':'Open Trade Analytics';
-    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':'<span class="tta-fabicon" aria-hidden="true">📈</span>';
+    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
     fab.style.display=state.open?'none':'inline-flex';
     requestAnimationFrame(()=>applyFabPosition(fab));
   }
@@ -253,7 +257,7 @@
     injectCss();
     if (!document.getElementById('tta-fab')) {
       const fab = document.createElement('button'); fab.id = 'tta-fab';
-      fab.innerHTML = '<span class="tta-fabicon" aria-hidden="true">📈</span>';
+      fab.innerHTML = fabIconSvg();
       document.body.appendChild(fab);bindFabDrag(fab);requestAnimationFrame(()=>applyFabPosition(fab));
     } else { const fab=document.getElementById('tta-fab');bindFabDrag(fab);applyFabPosition(fab); }
     if (!document.getElementById('tta-root')) {
