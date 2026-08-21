@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.27
+**Current version:** v0.1.28
 
 ## Install
 
@@ -177,3 +177,10 @@ This repository contains a community userscript intended for personal Torn gamep
 - The former **1 month** preset was removed; saved users on that preset are migrated to **30 days**.
 - The draggable floating launcher is now a compact 40x40 icon-only button so it covers less of the Torn interface.
 - While sync is running, the compact launcher shows only the spinner and remains tappable to reopen sync progress.
+
+
+## v0.1.28 launcher icon
+
+- Replaced the floating launcher emoji with a custom inline SVG terminal/data-pulse icon.
+- The icon uses the analyzer's green/blue cyber palette and remains a compact 40×40 draggable button.
+- During sync, the launcher still switches to the compact spinner-only state.
