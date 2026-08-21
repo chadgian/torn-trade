@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Trade Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.26
-// @description  Fast Torn trade analytics with dedicated abroad-buy verification, continuous TCT timelines, gap recovery, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.1.27
+// @description  Fast Torn trade analytics with compact launcher, 7/14/30-day presets, dedicated abroad-buy verification, continuous TCT timelines, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.26';
+  const VERSION = '0.1.27';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -72,6 +72,9 @@
     busy: {active:false,title:'',detail:'',cancellable:false},
     demo: false,
   };
+
+  // v0.1.27 removes the old calendar-month preset. Migrate saved users to 30 days.
+  if(state.dateMode==='month'){state.dateMode='30d';save('dateMode','30d');}
 
   function load(k, fallback) {
     try {
@@ -156,7 +159,8 @@
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
       #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
       #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;min-height:42px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:18px;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 12px 35px #0009;padding:11px 14px;font:700 12px/1.1 system-ui;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-align:center}
+      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+      #tta-fab .tta-fabicon{display:block;font-size:18px;line-height:1;pointer-events:none}
       #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
       #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
       #tta-fab.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
@@ -241,7 +245,7 @@
     fab.classList.toggle('syncing',syncing);
     fab.setAttribute('aria-label',syncing?'Trade Analytics syncing':'Trade Analytics');
     fab.title=syncing?'Trade history sync is running · tap to reopen':'Open Trade Analytics';
-    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span><span>Syncing…</span>':'<span class="dot"></span><span>Trade Analytics</span>';
+    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':'<span class="tta-fabicon" aria-hidden="true">📈</span>';
     fab.style.display=state.open?'none':'inline-flex';
     requestAnimationFrame(()=>applyFabPosition(fab));
   }
@@ -249,7 +253,7 @@
     injectCss();
     if (!document.getElementById('tta-fab')) {
       const fab = document.createElement('button'); fab.id = 'tta-fab';
-      fab.innerHTML = '<span class="dot"></span><span>Trade Analytics</span>';
+      fab.innerHTML = '<span class="tta-fabicon" aria-hidden="true">📈</span>';
       document.body.appendChild(fab);bindFabDrag(fab);requestAnimationFrame(()=>applyFabPosition(fab));
     } else { const fab=document.getElementById('tta-fab');bindFabDrag(fab);applyFabPosition(fab); }
     if (!document.getElementById('tta-root')) {
@@ -367,8 +371,8 @@
     const nowMs=nowDate.getTime();
     let from=0,to=Math.floor(nowMs/1000)+60;
     if(state.dateMode==='7d') from=Math.floor((nowMs-7*86400*1000)/1000);
+    else if(state.dateMode==='14d') from=Math.floor((nowMs-14*86400*1000)/1000);
     else if(state.dateMode==='30d') from=Math.floor((nowMs-30*86400*1000)/1000);
-    else if(state.dateMode==='month') from=Math.floor(subtractCalendarMonth(nowDate).getTime()/1000);
     else if(state.dateMode==='custom') {
       if(state.customFrom) from=Math.floor(new Date(state.customFrom+'T00:00:00').getTime()/1000);
       if(state.customTo) to=Math.min(to,Math.floor(new Date(state.customTo+'T23:59:59').getTime()/1000));
@@ -396,8 +400,8 @@
     serverNow=Math.floor(Number(serverNow)||nowSec());
     let from=0,to=serverNow;
     if(state.dateMode==='7d')from=serverNow-7*86400;
+    else if(state.dateMode==='14d')from=serverNow-14*86400;
     else if(state.dateMode==='30d')from=serverNow-30*86400;
-    else if(state.dateMode==='month')from=subtractCalendarMonthTct(serverNow);
     else if(state.dateMode==='custom'){
       if(state.customFrom){const x=Date.parse(state.customFrom+'T00:00:00Z')/1000;if(Number.isFinite(x))from=Math.floor(x);}
       if(state.customTo){const x=Date.parse(state.customTo+'T23:59:59Z')/1000;if(Number.isFinite(x))to=Math.min(to,Math.floor(x));}
@@ -703,7 +707,7 @@
       ${needsBackfill?`<div class="tta-banner"><strong>More history needed:</strong> This period starts ${esc(dateStr(requested.from))}, earlier than the local cache. Press <strong>Sync</strong> to backfill it.</div>`:''}
       <div class="tta-period"><div><small>Date period</small><strong>${esc(periodLabel)}</strong><span class="tta-periodhint">${esc(lastSync)} · ${qty(state.transactions.length)} cached rows</span></div><button class="tta-btn secondary" data-act="sync" ${state.syncing?'disabled':''}>${state.syncing?'<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>':'↻ Sync history'}</button></div>
       ${state.syncProgress?`<div class="tta-banner tta-status-banner"><span class="tta-status-dot"></span><span id="tta-sync-progress-text">${esc(state.syncProgress)}</span></div>`:''}
-      <div class="tta-chips">${[['7d','7 days'],['30d','30 days'],['month','1 month'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>
+      <div class="tta-chips">${[['7d','7 days'],['14d','14 days'],['30d','30 days'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>
       ${state.dateMode==='custom'?`<div class="tta-customdates"><input type="date" data-custom="from" value="${esc(state.customFrom)}"><input type="date" data-custom="to" value="${esc(state.customTo)}"></div>`:''}
       <div class="tta-summary"><div class="tta-stat main"><label>Profit · acquisition date</label><b class="${s.profit>=0?'pos':'neg'}">${money(s.profit)}</b></div><div class="tta-stat"><label>Acquired</label><b>${qty(s.bought)}</b></div><div class="tta-stat"><label>Sold</label><b>${qty(s.sold)}</b></div></div>
       <div class="tta-chartcard"><div class="tta-charthead"><h3>Profit by acquisition date</h3><div class="tta-seg">${['day','week','month'].map(g=>`<button class="${state.granularity===g?'active':''}" data-gran="${g}">${g[0].toUpperCase()+g.slice(1)}</button>`).join('')}</div></div>${chartSvg(profitSeries())}</div>

@@ -2,7 +2,7 @@
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.26
+**Current version:** v0.1.27
 
 ## Install
 
@@ -169,3 +169,11 @@ This repository contains a community userscript intended for personal Torn gamep
 - The dedicated verification uses the selected finite period; for All History it checks the latest 30 days to keep routine API usage bounded.
 - Settings diagnostics show raw 4201 rows, parsed rows/items, the latest raw Abroad Buy timestamp, and the latest parsed acquisition timestamp.
 - Existing transaction IDs remain duplicate-safe, so the dedicated verification can recover missing purchases without double-counting rows already stored.
+
+
+## v0.1.27 period presets and compact launcher
+
+- Dashboard period presets are now **7 days, 14 days, 30 days, All, and Custom**.
+- The former **1 month** preset was removed; saved users on that preset are migrated to **30 days**.
+- The draggable floating launcher is now a compact 40x40 icon-only button so it covers less of the Torn interface.
+- While sync is running, the compact launcher shows only the spinner and remains tappable to reopen sync progress.
