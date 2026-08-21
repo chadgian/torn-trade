@@ -1,0 +1,40 @@
+name: Build v0.1.28 terminal pulse launcher
+
+on:
+  push:
+    branches:
+      - codex/v0128-terminal-pulse-icon
+    paths:
+      - .github/scripts/tta_v0128_icon_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v0128-terminal-pulse-icon
+          fetch-depth: 0
+      - name: Apply launcher icon patch
+        run: python .github/scripts/tta_v0128_icon_patch.py
+      - name: Validate userscript syntax
+        run: node --check torn-trade-analyzer.user.js
+      - name: Validate icon release
+        run: |
+          grep -F '// @version      0.1.28' torn-trade-analyzer.user.js
+          grep -F 'function fabIconSvg()' torn-trade-analyzer.user.js
+          grep -F 'tta-terminal-frame' torn-trade-analyzer.user.js
+          grep -F 'tta-data-pulse' torn-trade-analyzer.user.js
+          grep -F '**Current version:** v0.1.28' README.md
+      - name: Remove one-time branch scaffolding
+        run: rm -f .github/scripts/tta_v0128_icon_patch.py .github/workflows/tta-v0128-icon-branch.yml
+      - name: Commit generated release changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- torn-trade-analyzer.user.js README.md .github/scripts/tta_v0128_icon_patch.py .github/workflows/tta-v0128-icon-branch.yml
+          git commit -m 'Torn Trade Analyzer v0.1.28 terminal pulse launcher'
+          git push
