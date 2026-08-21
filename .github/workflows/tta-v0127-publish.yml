@@ -1,48 +1,11 @@
-name: Torn Trade Analyzer v0.1.27 compact launcher and periods
+name: Torn Trade Analyzer v0.1.27 compact launcher and periods (disabled)
 
 on:
-  issues:
-    types: [opened]
-
-permissions:
-  contents: write
-  issues: write
+  workflow_dispatch:
 
 jobs:
-  publish:
-    if: github.event.issue.title == 'publish-tta-v0127-ui'
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply patch
-        run: python .github/scripts/tta_v0127_patch.py
-      - name: Validate JavaScript syntax
-        run: node --check torn-trade-analyzer.user.js
-      - name: Validate release invariants
-        run: |
-          grep -F '// @version      0.1.27' torn-trade-analyzer.user.js
-          grep -F "['14d','14 days']" torn-trade-analyzer.user.js
-          grep -F "state.dateMode==='14d'" torn-trade-analyzer.user.js
-          grep -F "state.dateMode==='month'" torn-trade-analyzer.user.js | grep "state.dateMode='30d'"
-          grep -F 'width:40px;height:40px;min-width:40px;min-height:40px' torn-trade-analyzer.user.js
-          grep -F 'tta-fabicon' torn-trade-analyzer.user.js
-          grep -F '**Current version:** v0.1.27' README.md
-      - name: Commit production release
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add torn-trade-analyzer.user.js README.md
-          git commit -m 'Torn Trade Analyzer v0.1.27 compact launcher and periods'
-          git push
-      - name: Write verifier marker
-        run: |
-          echo 'PASS: v0.1.27 syntax + 7/14/30/All/Custom presets + compact icon launcher' > .tta-v0127-status.txt
-          git add .tta-v0127-status.txt
-          git commit -m 'Verify Torn Trade Analyzer v0.1.27'
-          git push
-      - name: Close trigger issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment 'Published and verified v0.1.27.'
+      - run: echo 'One-time v0.1.27 publisher is disabled after successful release.'
