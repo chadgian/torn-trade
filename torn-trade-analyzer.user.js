@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.3
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, reliable floating launcher, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.4
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, isolated floating launcher, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.3';
+  const VERSION = '0.2.4';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -284,24 +284,35 @@
     window.addEventListener('resize',()=>applyFabPosition(fab),{passive:true});
   }
   function fabIconSvg() {
-    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect class="tta-terminal-frame" x="2.5" y="3.25" width="19" height="17.5" rx="3"/><path class="tta-terminal-bar" d="M3.25 7h17.5"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path class="tta-terminal-prompt" d="M5.4 10.1l2 1.8-2 1.8"/><path class="tta-terminal-cursor" d="M8.8 13.7h2.2"/><path class="tta-data-pulse" d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19"/></svg></span>`;
+    return `<span class="tta-fabicon" aria-hidden="true" style="display:grid;place-items:center;width:23px;height:23px;pointer-events:none"><svg viewBox="0 0 24 24" focusable="false" style="display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect x="2.5" y="3.25" width="19" height="17.5" rx="3" fill="#0a1219" stroke="#7fc1ff" stroke-width="1.35"/><path d="M3.25 7h17.5" fill="none" stroke="#38566a" stroke-width="1.15"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path d="M5.4 10.1l2 1.8-2 1.8" fill="none" stroke="#63efb1" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.8 13.7h2.2" fill="none" stroke="#b9c8d6" stroke-width="1.35" stroke-linecap="round"/><path d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19" fill="none" stroke="url(#ttaFabPulse)" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
   }
 
+  function forceFabBaseStyle(fab) {
+    if(!fab)return;const st=fab.style,set=(k,v)=>st.setProperty(k,v,'important');
+    set('position','fixed');set('z-index','2147483647');set('width','40px');set('height','40px');set('min-width','40px');set('min-height','40px');set('max-width','40px');set('max-height','40px');set('padding','0');set('margin','0');set('border','1px solid #4f768b');set('border-radius','50%');set('background','linear-gradient(135deg,#244c42,#254d68)');set('color','#fff');set('box-shadow','0 10px 26px #0008,0 0 0 1px #ffffff12 inset');set('visibility','visible');set('opacity','1');set('pointer-events','auto');set('align-items','center');set('justify-content','center');set('text-align','center');set('overflow','visible');set('transform','none');set('filter','none');set('clip','auto');set('clip-path','none');set('contain','none');set('isolation','isolate');set('touch-action','none');
+  }
+  function resetFabToDefault(fab) {
+    state.fabPosition=null;save('fabPosition',null);fab.style.removeProperty('left');fab.style.removeProperty('top');fab.style.setProperty('right','14px','important');fab.style.setProperty('bottom','96px','important');
+  }
+  function verifyFabViewport(fab) {
+    if(!fab||state.open)return;const r=fab.getBoundingClientRect(),bad=!Number.isFinite(r.left)||!Number.isFinite(r.top)||r.width<20||r.height<20||r.right<4||r.bottom<4||r.left>window.innerWidth-4||r.top>window.innerHeight-4;
+    if(bad){resetFabToDefault(fab);requestAnimationFrame(()=>applyFabPosition(fab));}
+  }
   function updateFabState() {
     const fab=document.getElementById('tta-fab');if(!fab)return;
-    const syncing=!!state.syncing;
+    forceFabBaseStyle(fab);const syncing=!!state.syncing;
     fab.classList.toggle('syncing',syncing);
     fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
     fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
     fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
-    fab.classList.toggle('tta-fab-hidden',!!state.open);fab.style.removeProperty('display');
-    requestAnimationFrame(()=>applyFabPosition(fab));
+    fab.classList.toggle('tta-fab-hidden',!!state.open);fab.style.setProperty('display',state.open?'none':'inline-flex','important');
+    requestAnimationFrame(()=>{applyFabPosition(fab);forceFabBaseStyle(fab);verifyFabViewport(fab);});
   }
   function ensureFabMounted() {
-    let fab=document.getElementById('tta-fab');
-    if(!fab){fab=document.createElement('button');fab.id='tta-fab';fab.innerHTML=fabIconSvg();(document.body||document.documentElement).appendChild(fab);bindFabDrag(fab);}
-    else if(!fab.isConnected)(document.body||document.documentElement).appendChild(fab);
-    bindFabDrag(fab);updateFabState();requestAnimationFrame(()=>applyFabPosition(fab));return fab;
+    let fab=document.getElementById('tta-fab');const host=document.documentElement;
+    if(!fab){fab=document.createElement('button');fab.id='tta-fab';fab.type='button';fab.innerHTML=fabIconSvg();host.appendChild(fab);bindFabDrag(fab);}
+    else if(fab.parentElement!==host){host.appendChild(fab);}
+    forceFabBaseStyle(fab);bindFabDrag(fab);updateFabState();requestAnimationFrame(()=>{applyFabPosition(fab);verifyFabViewport(fab);});return fab;
   }
   function mount() {
     injectCss();
@@ -310,7 +321,7 @@
       const root = document.createElement('div'); root.id = 'tta-root'; (document.body||document.documentElement).appendChild(root);
     }
     render();
-    if(!window.__ttaFabWatch){window.__ttaFabWatch=true;const host=document.documentElement;new MutationObserver(()=>{if(!document.getElementById('tta-fab'))ensureFabMounted();}).observe(host,{childList:true,subtree:true});setInterval(()=>{if(!document.getElementById('tta-fab'))ensureFabMounted();else updateFabState();},3000);}
+    if(!window.__ttaFabWatch){window.__ttaFabWatch=true;const host=document.documentElement;new MutationObserver(()=>{const fab=document.getElementById('tta-fab');if(!fab||fab.parentElement!==host)ensureFabMounted();}).observe(host,{childList:true,subtree:true});setInterval(()=>{const fab=document.getElementById('tta-fab');if(!fab||fab.parentElement!==host)ensureFabMounted();else{updateFabState();verifyFabViewport(fab);}},1500);}
   }
 
   let demoTxCache=null;
