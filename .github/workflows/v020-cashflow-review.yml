@@ -1,0 +1,40 @@
+name: Review Torn Cash Flow Analyzer v0.2.0
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  review-fix:
+    if: github.event.issue.title == 'build-v020-review-fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v020-cash-flow-analyzer
+          fetch-depth: 0
+      - name: Apply review fixes
+        run: python .github/scripts/v020_review_fix.py
+      - name: Validate userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "if(state.view!=='trade')return;" torn-trade-analyzer.user.js
+          grep -F "for(const x of state.cashFlows||[])" torn-trade-analyzer.user.js
+          grep -F 'Opening Cash Flow Analyzer' torn-trade-analyzer.user.js
+          grep -F 'stable /user/money' torn-trade-analyzer.user.js
+          grep -F "state.view='trade';state.search=''" torn-trade-analyzer.user.js
+      - name: Commit review fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- torn-trade-analyzer.user.js README.md
+          git commit -m 'Review Torn Cash Flow Analyzer v0.2.0' || true
+          git push origin HEAD:codex/v020-cash-flow-analyzer
+      - name: Close trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment 'Applied and syntax-validated v0.2.0 review fixes.'
