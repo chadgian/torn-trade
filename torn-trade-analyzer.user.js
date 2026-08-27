@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.0
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with FIFO profit tracking. Data stays on-device.
+// @version      0.2.1
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with fast last-sync updates and optional full-history resync. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -196,7 +196,7 @@
       @media(max-width:620px){.tta-ledgerfilters{grid-template-columns:1fr 1fr}.tta-ledgerfilters .tta-ledgersearch{grid-column:1/-1}.tta-ledgersummary{grid-template-columns:1fr 1fr}}
       @media(max-width:390px){.tta-ledgerfilters{grid-template-columns:1fr}.tta-ledgerfilters .tta-ledgersearch{grid-column:auto}.tta-ledgermeta{align-items:flex-start;flex-direction:column}}
       .tta-fin-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.tta-fin-nav .tta-btn{min-height:44px;padding:8px 7px}.tta-fin-nav .tta-btn strong{display:block;font-size:10px}.tta-fin-nav .tta-btn small{display:block;font-size:8px;margin-top:2px;opacity:.72}
-      .tta-cashhero{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 13px}.tta-cashcard{background:linear-gradient(180deg,#151f2a,#10171f);border:1px solid var(--tta-line);border-radius:14px;padding:11px;text-align:center;min-width:0}.tta-cashcard small{display:block;color:var(--tta-muted);font-size:9px;text-transform:uppercase;letter-spacing:.55px}.tta-cashcard b{display:block;margin-top:5px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tta-cashcard.main{grid-column:auto}.tta-transfer{color:var(--tta-blue)!important}
+      .tta-cashhero{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 13px}.tta-syncactions{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}.tta-syncactions .tta-btn{min-height:36px;padding:7px 10px}.tta-cashcard{background:linear-gradient(180deg,#151f2a,#10171f);border:1px solid var(--tta-line);border-radius:14px;padding:11px;text-align:center;min-width:0}.tta-cashcard small{display:block;color:var(--tta-muted);font-size:9px;text-transform:uppercase;letter-spacing:.55px}.tta-cashcard b{display:block;margin-top:5px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tta-cashcard.main{grid-column:auto}.tta-transfer{color:var(--tta-blue)!important}
       .tta-fin-section{background:#111922;border:1px solid var(--tta-line);border-radius:14px;padding:12px;margin:11px 0}.tta-fin-section h3{margin:0 0 9px;font-size:13px}.tta-fin-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.tta-fin-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #263746;font-size:10px}.tta-fin-row:last-child{border-bottom:0}.tta-fin-row span{color:var(--tta-muted)}.tta-fin-row b{text-align:right;color:var(--tta-text)}
       .tta-flowtable{width:100%;border-collapse:collapse;font-size:10px}.tta-flowtable th{text-align:left;color:var(--tta-muted);font-size:9px;padding:8px 6px;border-bottom:1px solid var(--tta-line)}.tta-flowtable td{padding:9px 6px;border-bottom:1px solid #263746;vertical-align:top}.tta-flowtable td.num{text-align:right;white-space:nowrap}.tta-flowtitle{font-weight:800;color:var(--tta-text)}.tta-flowmeta{display:block;color:var(--tta-faint);font-size:8.5px;margin-top:2px}.tta-flowbadge{display:inline-flex;padding:3px 6px;border-radius:999px;border:1px solid var(--tta-line);font-size:8px;font-weight:800}.tta-flowbadge.in{color:var(--tta-green);border-color:#315c4d;background:#11261f}.tta-flowbadge.out{color:var(--tta-red);border-color:#69404a;background:#27181d}.tta-flowbadge.transfer{color:var(--tta-blue);border-color:#36556d;background:#132331}
       .tta-breakdown{display:grid;gap:5px}.tta-breakrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:7px 8px;border:1px solid #293c4c;border-radius:9px;background:#0e161e;font-size:9.5px}.tta-breakrow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tta-breakrow b{font-variant-numeric:tabular-nums}.tta-networth-total{font-size:26px!important}.tta-snapshot-note{font-size:9px;color:var(--tta-faint);line-height:1.45;margin-top:7px}
@@ -719,7 +719,7 @@
       ${!hasApiKey()?`<div class="tta-banner"><strong>Preview mode.</strong> Add your Torn API key in <strong>Settings → API Key</strong> (or use Torn PDA's injected key) to load your real history. The key and analyzed data stay on this device.</div>`:''}
       ${hasApiKey()&&!state.sync?.autoDiscoveryComplete?`<div class="tta-banner"><strong>History discovery:</strong> Run Sync once to discover recognizable acquisitions and sales for your selected period.</div>`:''}
       ${needsBackfill?`<div class="tta-banner"><strong>More history needed:</strong> This period starts ${esc(dateStr(requested.from))}, earlier than the local cache. Press <strong>Sync</strong> to backfill it.</div>`:''}
-      <div class="tta-period"><div><small>Date period</small><strong>${esc(periodLabel)}</strong><span class="tta-periodhint">${esc(lastSync)} · ${qty(state.transactions.length)} cached rows</span></div><button class="tta-btn secondary" data-act="sync" ${state.syncing?'disabled':''}>${state.syncing?'<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>':'↻ Sync history'}</button></div>
+      <div class="tta-period"><div><small>Date period</small><strong>${esc(periodLabel)}</strong><span class="tta-periodhint">${esc(lastSync)} · ${qty(state.transactions.length)} cached rows</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div>
       ${state.syncProgress?`<div class="tta-banner tta-status-banner"><span class="tta-status-dot"></span><span id="tta-sync-progress-text">${esc(state.syncProgress)}</span></div>`:''}
       <div class="tta-chips">${[['7d','7 days'],['14d','14 days'],['30d','30 days'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>
       ${state.dateMode==='custom'?`<div class="tta-customdates"><input type="date" data-custom="from" value="${esc(state.customFrom)}"><input type="date" data-custom="to" value="${esc(state.customTo)}"></div>`:''}
@@ -781,7 +781,7 @@
   function cashFlowRowsHtml(rows,limit=200){return rows.slice(0,limit).map(x=>`<tr><td><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span></td><td><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td>${esc(x.category)}</td><td class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'↔ '}${money(x.amount)}</td></tr>`).join('')||'<tr><td colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';}
   function dashboardHtml() {
     const today=cashFlowBoundsToday(),sum=cashFlowSummary(today.from,today.to),snap=latestFinancialSnapshot(),portfolio=analyzerPortfolio(),nw=Number(snap?.networth?.total)||0,recent=allCashFlows().filter(x=>x.timestamp>=today.from&&x.timestamp<=today.to).slice(0,8);
-    return `${header('Cash Flow Analyzer',`v${VERSION} · money, net worth & trade intelligence`)}<div class="tta-content">${!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':''}<div class="tta-period"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${state.sync?.lastSync?`Checked through ${esc(tctDateTimeStr(state.sync.lastSync))} TCT`:'Run Sync to build current financial history'}</span></div><button class="tta-btn secondary" data-act="sync" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'↻ Sync'}</button></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Earned today</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent today</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div>${financialNavHtml()}<div class="tta-fin-section"><h3>Current financial position</h3><div class="tta-fin-grid"><div class="tta-stat main"><label>Torn-reported net worth</label><b class="tta-networth-total">${snap?.networth?money(nw):'Sync to load'}</b></div><div class="tta-stat"><label>Analyzer inventory market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Realized trade profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>Internal transfers today</label><b class="tta-transfer">${money(sum.transferIn+sum.transferOut)}</b></div></div><div class="tta-snapshot-note">Bank/vault/faction transfers are recorded, but excluded from “earned” and “spent” so moving your own money does not create fake income or expense.</div></div><div class="tta-fin-section"><h3>Today by category</h3>${cashBreakdownHtml(sum)}</div><div class="tta-fin-section"><div class="tta-sectionhead"><h3>Recent cash movements</h3><button class="tta-btn secondary" data-act="cashflow">View ledger</button></div><div style="overflow:auto"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,8)}</tbody></table></div></div></div>`;
+    return `${header('Cash Flow Analyzer',`v${VERSION} · money, net worth & trade intelligence`)}<div class="tta-content">${!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':''}<div class="tta-period"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${state.sync?.lastSync?`Checked through ${esc(tctDateTimeStr(state.sync.lastSync))} TCT`:'Run Sync to build current financial history'}</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Earned today</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent today</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div>${financialNavHtml()}<div class="tta-fin-section"><h3>Current financial position</h3><div class="tta-fin-grid"><div class="tta-stat main"><label>Torn-reported net worth</label><b class="tta-networth-total">${snap?.networth?money(nw):'Sync to load'}</b></div><div class="tta-stat"><label>Analyzer inventory market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Realized trade profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>Internal transfers today</label><b class="tta-transfer">${money(sum.transferIn+sum.transferOut)}</b></div></div><div class="tta-snapshot-note">Bank/vault/faction transfers are recorded, but excluded from “earned” and “spent” so moving your own money does not create fake income or expense.</div></div><div class="tta-fin-section"><h3>Today by category</h3>${cashBreakdownHtml(sum)}</div><div class="tta-fin-section"><div class="tta-sectionhead"><h3>Recent cash movements</h3><button class="tta-btn secondary" data-act="cashflow">View ledger</button></div><div style="overflow:auto"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,8)}</tbody></table></div></div></div>`;
   }
   function cashFlowDateRange() {
     const serverNow=Math.min(Number(state.sync?.lastSync)||nowSec(),nowSec()),bounds=selectedPeriodBoundsTct(serverNow);let from=bounds.from,to=bounds.to;
@@ -935,7 +935,8 @@
       else if(act==='clearItemSearch'){state.itemSearch='';save('itemSearch','');const input=document.getElementById('tta-history-search');if(input){input.value='';input.focus();}renderItemList();}
       else if(act==='confirmAdd'){addTracked(Number(el.dataset.id));}
       else if(act==='removeItem'){removeTracked(Number(el.dataset.id));}
-      else if(act==='sync'){syncAll();}
+      else if(act==='sync'||act==='syncQuick'){syncAll({mode:'quick'});}
+      else if(act==='syncFull'){if(confirm('Full Resync will rebuild the locally discovered cash-flow and trade history from the beginning. This can take a long time. Continue?'))syncAll({mode:'full'});}
       else if(act==='cancelSync'){state.syncCancel=true;setSyncProgress('Stopping after the current API request…');}
       else if(act==='saveApiKey'){
         const input=document.getElementById('tta-api-key');let key=String(input?.value||'').trim();if(input?.dataset.placeholderKey==='1'&&/^•+$/.test(key))key=String(state.apiKey||'').trim();
@@ -1389,7 +1390,7 @@
     const period=selectedPeriodBounds();
     const periodText=period.from>0?`${dateStr(period.from)} – ${dateStr(Math.min(period.to,nowSec()))}`:'all available history';
     state.syncing=true;state.syncCancel=false;updateFabState();setSyncProgress(`Preparing historical scan for ${periodText}…`);setBusy(true,'Syncing trade history',state.syncProgress,true);
-    const syncBtn=document.querySelector('#tta-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
+    document.querySelectorAll('#tta-root [data-act="syncQuick"],#tta-root [data-act="syncFull"],#tta-root [data-act="sync"]').forEach(syncBtn=>{syncBtn.disabled=true;});
     await nextPaint();
     try{
       await ensureCatalog();
@@ -1614,14 +1615,25 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
-  function createResumableSyncJob() {
+  function createResumableSyncJob(syncMode='quick') {
     stripSyncRunMarkers();
-    const period=selectedPeriodBoundsTct(nowSec()),periodText=period.from>0?`${tctDateStr(period.from)} – ${tctDateStr(Math.min(period.to,nowSec()))} TCT`:'all available history';
-    const logScanPeriod=incrementalPeriod(period,'log'),tradeScanPeriod=incrementalPeriod(period,'trade');
-    const job={schema:SYNC_JOB_SCHEMA_VERSION,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,active:true,cancelled:false,createdAt:nowSec(),updatedAt:nowSec(),period,periodText,logScanPeriod,tradeScanPeriod,phase:'setup',progress:`Preparing incremental sync for ${periodText}…`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:logScanPeriod?.to||period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{}};
+    const mode=syncMode==='full'?'full':'quick',now=nowSec(),last=Number(state.sync?.lastSync)||0;
+    const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
+    const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} – ${tctDateTimeStr(now)} TCT`;
+    const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
+    const job={schema:SYNC_JOB_SCHEMA_VERSION,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning…`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT…`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{}};
     checkpointSyncJob(job,job.progress);return job;
+  }
+
+  function resetHistoryForFullResync() {
+    stripSyncRunMarkers();
+    state.transactions=[];state.cashFlows=[];
+    save('transactions',[]);save('cashFlows',[]);
+    localStorage.removeItem(NS+'syncCache');syncCacheMem=null;
+    state.sync={...(state.sync||{}),lastSync:0,coverageFrom:0,coverageTo:0,firstSyncComplete:false,autoDiscoveryComplete:false};save('sync',state.sync);
+    resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   async function syncApiGet(path,params={}) {
     let last;
@@ -1668,7 +1680,7 @@
   }
   async function runAbroadBuyVerification(job) {
     const serverNow=Number(job.tctNow)||nowSec();
-    const verifyFrom=Number(job.period?.from)>0?Number(job.period.from):Math.max(0,serverNow-30*86400);
+    const verifyFrom=job.syncMode==='full'?0:(Number(job.period?.from)>0?Number(job.period.from):tctDayStart(serverNow));
     const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
     if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped · no overlapping selected period.');return true;}
     let cursor=verifyTo,page=0,previousSignature='';
@@ -1752,25 +1764,25 @@
   async function refreshLiveSyncBounds(job) {
     let serverNow=nowSec();
     try{const t=await apiGet('/user/timestamp');serverNow=Number(t?.timestamp)||serverNow;}catch(_){}
-    const wanted=selectedPeriodBoundsTct(serverNow);
+    const mode=job.syncMode==='full'?'full':'quick',last=Number(state.sync?.lastSync)||0;
+    const from=mode==='full'?0:(last>0?Math.min(last,serverNow):tctDayStart(serverNow));
     job.tctNow=serverNow;job.tctNowLabel=tctDateTimeStr(serverNow);
-    job.period={from:wanted.from,to:wanted.to};
-    job.periodText=wanted.from>0?`${tctDateStr(wanted.from)} – ${tctDateStr(Math.min(wanted.to,serverNow))} TCT`:'all available history';
-    job.logScanPeriod=incrementalPeriod(job.period,'log',serverNow);
-    job.tradeScanPeriod=incrementalPeriod(job.period,'trade',serverNow);
-    job.logCursorTo=job.logScanPeriod?.to||job.period.to;
-    job.tradeListParams=null;
+    job.period={from,to:serverNow};
+    job.periodText=mode==='full'?'all available history':`${tctDateTimeStr(from)} – ${tctDateTimeStr(serverNow)} TCT`;
+    const scan={from,to:serverNow,incremental:mode==='quick',recheck:false,missingDays:0};
+    job.logScanPeriod={...scan};job.tradeScanPeriod={...scan};
+    job.logCursorTo=serverNow;job.tradeListParams=null;
   }
   async function prepareResumableSync(job) {
     await refreshLiveSyncBounds(job);
-    await ensureCatalog();setBusyDetail('Verifying API access and incremental coverage…');
+    await ensureCatalog();setBusyDetail(job.syncMode==='full'?'Verifying API access for full-history rebuild…':'Verifying API access for quick last-sync update…');
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User → Log access.');
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
-    if(job.logScanPeriod){const missing=Number(job.logScanPeriod.missingDays)||0,scanLabel=missing?`Filling ${missing} missing TCT day${missing===1?'':'s'}`:(job.logScanPeriod.incremental?(job.logScanPeriod.recheck?'Refreshing current/recent TCT data':'Scanning new TCT data'):'Establishing TCT baseline');job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} · ${tctDateStr(job.logScanPeriod.from)} – ${tctDateStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
+    if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} · ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' – ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
     else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered · skipping log scan.');}
   }
   function finishResumableSync(job) {
@@ -1778,8 +1790,8 @@
     state.sync.lastSync=serverNow;state.sync.firstSyncComplete=true;state.sync.autoDiscoveryComplete=true;
     const oldCoverage=Number(state.sync.coverageFrom);state.sync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;state.sync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));state.sync.diagnostics=d;save('sync',state.sync);
     const repaired=Number(d.missingLogDays)||0;
-    if(!freshCount)setSyncProgress(`Sync checked through ${tctDateTimeStr(serverNow)} TCT · ${repaired?`${qty(repaired)} missing TCT day(s) filled · `:''}current/recent logs refreshed · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
-    else setSyncProgress(`Sync checked through ${tctDateTimeStr(serverNow)} TCT · ${repaired?`${qty(repaired)} missing TCT day(s) filled · `:''}${qty(freshCount)} new item rows · ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
+    if(!freshCount)setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
+    else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT · ${qty(freshCount)} new item rows · ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
   async function runResumableSync(job,resumed=false) {
@@ -1787,7 +1799,7 @@
     state.syncing=true;state.syncCancel=false;updateFabState();
     if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload · /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;checkpointSyncJob(job,`Resumed after page reload · ${prior}`);}
     else setSyncProgress(job.progress||`Preparing historical scan for ${job.periodText}…`);
-    setBusy(true,resumed?'Resuming trade history sync':'Syncing trade history',state.syncProgress,true);
+    setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);
     const syncBtn=document.querySelector('#tta-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
     if(state.open)await nextPaint();
     try{
@@ -1817,12 +1829,15 @@
   async function syncAll(options={}) {
     if(state.syncing)return;
     if(!hasApiKey()){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');return;}
+    const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
     if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
-    // Manual Sync must never stay trapped on an old saved window. Keep recent checkpoints resumable,
-    // but retire stale/mismatched ones while preserving already-downloaded rows and verified trades.
-    if(job&&!options?.job&&!syncJobMatchesCurrentSelection(job)){discardStaleSyncJob(job);job=null;setSyncProgress('Old sync checkpoint retired · rebuilding TCT day coverage through current Torn server time…');}
-    if(!job)job=createResumableSyncJob();
+    if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}
+    if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}
+    if(!job){
+      if(requestedMode==='full')resetHistoryForFullResync();
+      job=createResumableSyncJob(requestedMode);
+    }
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup');
   }
   function resumePendingSync() {
@@ -1831,7 +1846,7 @@
     if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}
     // Do not auto-resume checkpoints whose end time is already stale; the next manual Sync starts fresh.
     if(syncJobIsStale(job)){discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
-    resumeBootStarted=true;syncAll({job,resume:true});
+    resumeBootStarted=true;syncAll({job,resume:true,mode:job.syncMode||'quick'});
   }
   function persistSyncCancellation() {
     const job=loadSyncJob();if(!job)return;job.cancelled=true;job.progress='Stopping after the current API request…';saveSyncJob(job);
