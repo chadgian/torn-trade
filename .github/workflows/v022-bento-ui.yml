@@ -18,7 +18,7 @@ jobs:
           ref: codex/v022-bento-ui
           fetch-depth: 0
       - name: Apply Bento UI patch
-        run: python .github/scripts/v022_bento_ui.py
+        run: python .github/scripts/v022_write_fix.py
       - name: Validate userscript
         run: node --check torn-trade-analyzer.user.js
       - name: Verify UI behavior markers
