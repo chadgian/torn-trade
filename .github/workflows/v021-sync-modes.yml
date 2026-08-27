@@ -1,0 +1,43 @@
+name: Build Cash Flow Analyzer v0.2.1 sync modes
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: github.event.issue.title == 'build-v021-sync-modes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v021-sync-modes
+          fetch-depth: 0
+      - name: Apply patch
+        run: python .github/scripts/v021_sync_modes.py
+      - name: Validate userscript
+        run: node --check torn-trade-analyzer.user.js
+      - name: Verify sync-mode markers
+        run: |
+          grep -q "@version      0.2.1" torn-trade-analyzer.user.js
+          grep -q "Quick Sync" torn-trade-analyzer.user.js
+          grep -q "Full Resync" torn-trade-analyzer.user.js
+          grep -q "resetHistoryForFullResync" torn-trade-analyzer.user.js
+          grep -q "syncMode==='full'" torn-trade-analyzer.user.js
+      - name: Commit branch build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-trade-analyzer.user.js README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Cash Flow Analyzer v0.2.1 add quick and full sync modes"
+            git push origin HEAD:codex/v021-sync-modes
+          fi
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.1 sync-mode build completed and syntax validation passed."
