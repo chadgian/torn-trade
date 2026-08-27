@@ -17,8 +17,8 @@ jobs:
         with:
           ref: codex/v027-runtime-isolation
           fetch-depth: 0
-      - name: Apply runtime-isolation patch
-        run: python .github/scripts/v027_runtime_isolation_final.py
+      - name: Apply post-review launcher corrections
+        run: python .github/scripts/v027_post_review.py
       - name: Validate userscript syntax
         run: node --check torn-trade-analyzer.user.js
       - name: Verify launcher root-cause safeguards
@@ -39,13 +39,16 @@ jobs:
             "oldFab.style.setProperty('display','none','important')",
             "oldCss.disabled=true",
             'try{render();}catch(err)',
+            "const fab=document.getElementById(TCFA_LAUNCHER_ID);if(fab)fab.style.setProperty('display','none','important');",
+            "if(!document.getElementById(TCFA_LAUNCHER_ID)||!document.getElementById('tcfa-root'))mount()",
+            '#tcfa-launcher',
           ]
           missing=[x for x in required if x not in s]
           assert not missing, missing
+          assert '#tta-fab' not in s
           assert "document.getElementById('tcfa-root')" in s
           assert "document.getElementById('tcfa-css-v027')" in s
-          assert s.count("id=TCFA_LAUNCHER_ID") >= 1
-          print('v0.2.7 runtime-isolation markers verified')
+          print('v0.2.7 final launcher isolation verified')
           PY
       - name: Commit feature build
         run: |
@@ -53,10 +56,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add torn-trade-analyzer.user.js README.md
           if ! git diff --cached --quiet; then
-            git commit -m "Cash Flow Analyzer v0.2.7 launcher runtime isolation"
+            git commit -m "Cash Flow Analyzer v0.2.7 finalize launcher isolation"
             git push origin HEAD:codex/v027-runtime-isolation
           fi
       - name: Close trigger issue
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.7 runtime-isolation build completed and validation passed."
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.7 final launcher isolation checks passed."
