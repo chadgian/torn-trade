@@ -21,14 +21,26 @@ jobs:
         run: python .github/scripts/v022_bento_ui.py
       - name: Validate userscript
         run: node --check torn-trade-analyzer.user.js
-      - name: Verify UI markers
+      - name: Verify UI behavior markers
         run: |
-          grep -q "@version      0.2.2" torn-trade-analyzer.user.js
-          grep -q "Consolidated cash flow today" torn-trade-analyzer.user.js
-          grep -q "tta-navcard" torn-trade-analyzer.user.js
-          grep -q "overflow-x:hidden!important" torn-trade-analyzer.user.js
-          grep -q "Today’s cash movements" torn-trade-analyzer.user.js
-          grep -q "const now=nowSec();return {from:tctDayStart(now),to:now}" torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text()
+          required=[
+            '@version      0.2.2',
+            'Consolidated cash flow today',
+            'tta-navcard',
+            'overflow-x:hidden!important',
+            'Today’s cash movements',
+            'function cashFlowBoundsToday() {const now=nowSec();return {from:tctDayStart(now),to:now};}',
+            'scroll-snap-type:x proximity',
+            'flowLegendHtml()',
+          ]
+          missing=[x for x in required if x not in s]
+          assert not missing, f'Missing markers: {missing}'
+          assert s.count('class="tta-navcard"') >= 3
+          print('UI markers verified')
+          PY
       - name: Commit feature build
         run: |
           git config user.name "github-actions[bot]"
