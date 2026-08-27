@@ -17,6 +17,18 @@ jobs:
         with:
           ref: codex/v021-sync-modes
           fetch-depth: 0
+      - name: Normalize patch targets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/v021_sync_modes.py')
+          s=p.read_text().replace('assert count>=2, count','assert count>=1, count')
+          anchor="s=s.replace(oldbtn,newbtn)\n"
+          extra='''tradebtn="""<button class=\\"tta-btn secondary\\" data-act=\\"sync\\" ${state.syncing?'disabled':''}>${state.syncing?'<span class=\\"tta-sync\\"><span class=\\"tta-spinner\\"></span>Syncing</span>':'↻ Sync history'}</button>"""\nassert tradebtn in s\ns=s.replace(tradebtn,newbtn,1)\n'''
+          if 'assert tradebtn in s' not in s:
+              s=s.replace(anchor,anchor+extra,1)
+          p.write_text(s)
+          PY
       - name: Apply patch
         run: python .github/scripts/v021_sync_modes.py
       - name: Validate userscript
@@ -28,6 +40,7 @@ jobs:
           grep -q "Full Resync" torn-trade-analyzer.user.js
           grep -q "resetHistoryForFullResync" torn-trade-analyzer.user.js
           grep -q "syncMode==='full'" torn-trade-analyzer.user.js
+          test "$(grep -o 'data-act=\"syncQuick\"' torn-trade-analyzer.user.js | wc -l)" -ge 2
       - name: Commit branch build
         run: |
           git config user.name "github-actions[bot]"
