@@ -1,0 +1,62 @@
+name: Build Cash Flow Analyzer v0.2.7 Runtime Isolation
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: github.event.issue.title == 'build-v027-runtime-isolation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v027-runtime-isolation
+          fetch-depth: 0
+      - name: Apply runtime-isolation patch
+        run: python .github/scripts/v027_runtime_isolation_final.py
+      - name: Validate userscript syntax
+        run: node --check torn-trade-analyzer.user.js
+      - name: Verify launcher root-cause safeguards
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text()
+          required=[
+            '@version      0.2.7',
+            "const TCFA_LAUNCHER_ID='tcfa-launcher'",
+            "'tcfa-css-v027'",
+            "'tcfa-root'",
+            "__TCFA_RUNTIME_INSTANCE__",
+            'window.visualViewport',
+            'document.elementFromPoint',
+            'launcherPositionResetV027',
+            "transform','translate3d(0,0,0)'",
+            "oldFab.style.setProperty('display','none','important')",
+            "oldCss.disabled=true",
+            'try{render();}catch(err)',
+          ]
+          missing=[x for x in required if x not in s]
+          assert not missing, missing
+          assert "document.getElementById('tcfa-root')" in s
+          assert "document.getElementById('tcfa-css-v027')" in s
+          assert s.count("id=TCFA_LAUNCHER_ID") >= 1
+          print('v0.2.7 runtime-isolation markers verified')
+          PY
+      - name: Commit feature build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-trade-analyzer.user.js README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Cash Flow Analyzer v0.2.7 launcher runtime isolation"
+            git push origin HEAD:codex/v027-runtime-isolation
+          fi
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.7 runtime-isolation build completed and validation passed."
