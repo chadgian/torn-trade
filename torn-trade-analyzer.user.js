@@ -1777,6 +1777,7 @@
     await refreshLiveSyncBounds(job);
     await ensureCatalog();setBusyDetail(job.syncMode==='full'?'Verifying API access for full-history rebuild…':'Verifying API access for quick last-sync update…');
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User → Log access.');
+    if(job.syncMode==='full'&&!job.fullResetDone){resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'API access confirmed · local discovered history cleared · starting full rebuild…');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
@@ -1834,10 +1835,7 @@
     if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
     if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}
-    if(!job){
-      if(requestedMode==='full')resetHistoryForFullResync();
-      job=createResumableSyncJob(requestedMode);
-    }
+    if(!job)job=createResumableSyncJob(requestedMode);
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup');
   }
   function resumePendingSync() {
