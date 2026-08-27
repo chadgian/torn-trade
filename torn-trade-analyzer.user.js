@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.7
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, isolated self-healing launcher, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.8
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, resilient Torn PDA launcher lifecycle, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,12 +14,15 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.7';
+  const VERSION = '0.2.8';
   const TCFA_RUNTIME_KEY = '__TCFA_RUNTIME_INSTANCE__';
-  const existingTcfaRuntime = window[TCFA_RUNTIME_KEY];
-  if(existingTcfaRuntime?.version===VERSION) return;
+  // Torn PDA may destroy an injected userscript execution context while leaving properties
+  // on window behind. Never trust a same-version marker as proof that the launcher/watchdog
+  // is still alive. Every injection supersedes the previous token and remounts safely.
+  const previousTcfaRuntime = window[TCFA_RUNTIME_KEY];
   const TCFA_INSTANCE_TOKEN = `${VERSION}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
   window[TCFA_RUNTIME_KEY] = {version:VERSION,token:TCFA_INSTANCE_TOKEN,startedAt:Date.now()};
+  try{previousTcfaRuntime?.cleanup?.();}catch(_){}
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -161,9 +164,9 @@
   }
 
   function injectCss() {
-    if (document.getElementById('tcfa-css-v027')) return;
+    if (document.getElementById('tcfa-css-v028')) return;
     const s = document.createElement('style');
-    s.id = 'tcfa-css-v027';
+    s.id = 'tcfa-css-v028';
     s.textContent = `
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
       #tcfa-root,#tcfa-root *,#tcfa-launcher,#tcfa-launcher *{box-sizing:border-box}
@@ -250,7 +253,7 @@
   }
 
   const TCFA_LAUNCHER_ID='tcfa-launcher';
-  const TCFA_LAUNCHER_RESET_KEY='launcherPositionResetV027';
+  const TCFA_LAUNCHER_RESET_KEY='launcherPositionResetV028';
 
   function tcfaOwnsRuntime(){return window[TCFA_RUNTIME_KEY]?.token===TCFA_INSTANCE_TOKEN;}
   function tcfaVisualViewport(){
@@ -319,21 +322,25 @@
     fab.addEventListener('pointerup',finish);fab.addEventListener('pointercancel',finish);
     fab.addEventListener('click',e=>{if(fab.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}openAnalyzer();});
   }
+  function analyzerOverlayVisible(){
+    const root=document.getElementById('tcfa-root');if(!root||!root.isConnected||!state.open||!root.classList.contains('show'))return false;
+    const cs=getComputedStyle(root);return cs.display!=='none'&&cs.visibility!=='hidden'&&Number(cs.opacity)!==0;
+  }
   function updateFabState(){
     const fab=document.getElementById(TCFA_LAUNCHER_ID);if(!fab)return;forceFabBaseStyle(fab);
-    const syncing=!!state.syncing;fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Open Cash Flow Analyzer');fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
+    const syncing=!!state.syncing,overlayVisible=analyzerOverlayVisible();fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Open Cash Flow Analyzer');fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
     fab.innerHTML=syncing?fabSpinnerSvg():fabIconSvg();
-    fab.style.setProperty('display',state.open?'none':'inline-flex','important');
-    if(!state.open)fab.style.setProperty('visibility','visible','important');
+    fab.style.setProperty('display',overlayVisible?'none':'inline-flex','important');
+    if(!overlayVisible)fab.style.setProperty('visibility','visible','important');
   }
   function fabIsInteractable(fab){
-    if(!fab||state.open||!fab.isConnected)return false;const cs=getComputedStyle(fab),r=fab.getBoundingClientRect(),v=tcfaVisualViewport();
+    if(!fab||analyzerOverlayVisible()||!fab.isConnected)return false;const cs=getComputedStyle(fab),r=fab.getBoundingClientRect(),v=tcfaVisualViewport();
     if(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity)<=0||r.width<30||r.height<30||r.right<=v.left||r.left>=v.right||r.bottom<=v.top||r.top>=v.bottom)return false;
     const x=Math.max(v.left+1,Math.min(v.right-1,r.left+r.width/2)),y=Math.max(v.top+1,Math.min(v.bottom-1,r.top+r.height/2));
     const top=document.elementFromPoint?.(x,y);return !top||top===fab||fab.contains(top);
   }
   function verifyFabViewport(fab){
-    if(!fab||state.open)return;forceFabBaseStyle(fab);fab.style.setProperty('display','inline-flex','important');
+    if(!fab||analyzerOverlayVisible())return;forceFabBaseStyle(fab);fab.style.setProperty('display','inline-flex','important');
     const v=tcfaVisualViewport(),r=fab.getBoundingClientRect();
     if(!Number.isFinite(r.left)||!Number.isFinite(r.top)||r.width<30||r.height<30||r.right<v.left+2||r.bottom<v.top+2||r.left>v.right-2||r.top>v.bottom-2){setFabPosition(fab,tcfaDefaultFabPosition(fab,0),true);fab.dataset.recoverySlot='0';return;}
     if(fabIsInteractable(fab)){fab.dataset.recoverySlot='0';return;}
@@ -341,26 +348,31 @@
   }
   function preferredFabParent(){return document.body||document.documentElement;}
   function ensureFabMounted(){
-    if(!tcfaOwnsRuntime())return null;suppressLegacyUi();const parent=preferredFabParent();let fab=document.getElementById(TCFA_LAUNCHER_ID);
+    if(!tcfaOwnsRuntime())return null;const parent=preferredFabParent();if(!parent)return null;let fab=document.getElementById(TCFA_LAUNCHER_ID);
     if(!fab){fab=document.createElement('button');fab.id=TCFA_LAUNCHER_ID;fab.type='button';fab.dataset.tcfaVersion=VERSION;fab.innerHTML=fabIconSvg();parent.appendChild(fab);}else if(fab.parentElement!==parent){parent.appendChild(fab);}
-    forceFabBaseStyle(fab);bindFabDrag(fab);updateFabState();applyFabPosition(fab);requestAnimationFrame(()=>verifyFabViewport(fab));return fab;
+    forceFabBaseStyle(fab);bindFabDrag(fab);updateFabState();applyFabPosition(fab);
+    requestAnimationFrame(()=>{verifyFabViewport(fab);if(fabIsInteractable(fab))suppressLegacyUi();});
+    return fab;
   }
   function installFabWatchdog(){
-    const previous=window.__TCFA_LAUNCHER_WATCH_V027__;if(previous?.token===TCFA_INSTANCE_TOKEN)return;
-    try{previous?.observer?.disconnect?.();if(previous?.interval)clearInterval(previous.interval);}catch(_){}
-    const observer=new MutationObserver(()=>{if(!tcfaOwnsRuntime()){observer.disconnect();return;}const fab=document.getElementById(TCFA_LAUNCHER_ID),parent=preferredFabParent();if(!fab||fab.parentElement!==parent||document.getElementById('tta-fab')||document.getElementById('tta-fab-host'))ensureFabMounted();});
+    for(const key of ['__TCFA_LAUNCHER_WATCH_V027__','__TCFA_LAUNCHER_WATCH_V028__']){
+      const previous=window[key];try{previous?.observer?.disconnect?.();if(previous?.interval)clearInterval(previous.interval);if(previous?.onViewport){window.removeEventListener('resize',previous.onViewport);window.visualViewport?.removeEventListener('resize',previous.onViewport);window.visualViewport?.removeEventListener('scroll',previous.onViewport);}}catch(_){}
+    }
+    const observer=new MutationObserver(()=>{if(!tcfaOwnsRuntime()){observer.disconnect();return;}const fab=document.getElementById(TCFA_LAUNCHER_ID),parent=preferredFabParent();if(!fab||fab.parentElement!==parent)ensureFabMounted();});
     observer.observe(document.documentElement,{childList:true,subtree:true});
     const interval=setInterval(()=>{if(!tcfaOwnsRuntime()){clearInterval(interval);observer.disconnect();return;}const fab=ensureFabMounted();if(fab)verifyFabViewport(fab);},900);
     const onViewport=()=>{if(!tcfaOwnsRuntime())return;const fab=document.getElementById(TCFA_LAUNCHER_ID);if(fab){applyFabPosition(fab);requestAnimationFrame(()=>verifyFabViewport(fab));}};
     window.addEventListener('resize',onViewport,{passive:true});window.visualViewport?.addEventListener('resize',onViewport,{passive:true});window.visualViewport?.addEventListener('scroll',onViewport,{passive:true});
-    window.__TCFA_LAUNCHER_WATCH_V027__={token:TCFA_INSTANCE_TOKEN,observer,interval,onViewport};
+    const cleanup=()=>{try{observer.disconnect();clearInterval(interval);window.removeEventListener('resize',onViewport);window.visualViewport?.removeEventListener('resize',onViewport);window.visualViewport?.removeEventListener('scroll',onViewport);}catch(_){}};
+    window.__TCFA_LAUNCHER_WATCH_V028__={token:TCFA_INSTANCE_TOKEN,observer,interval,onViewport,cleanup};
+    const runtime=window[TCFA_RUNTIME_KEY];if(runtime?.token===TCFA_INSTANCE_TOKEN)runtime.cleanup=cleanup;
   }
   function mount(){
-    injectCss();suppressLegacyUi();
+    injectCss();
     // One-time recovery from coordinates saved by earlier launcher implementations. Those
     // coordinates were clamped against the layout viewport, not Android's visual viewport.
     if(!load(TCFA_LAUNCHER_RESET_KEY,false)){state.fabPosition=null;save('fabPosition',null);save(TCFA_LAUNCHER_RESET_KEY,true);}
-    const parent=preferredFabParent();
+    const parent=preferredFabParent();if(!parent)return;
     if(!document.getElementById('tcfa-root')){const root=document.createElement('div');root.id='tcfa-root';parent.appendChild(root);}
     const fab=ensureFabMounted();if(fab&&fab.parentElement===parent&&fab!==parent.lastElementChild)parent.appendChild(fab);
     // The launcher must survive an unrelated UI rendering error. Do not let a dashboard
@@ -1961,5 +1973,9 @@
   document.addEventListener('click',e=>{const el=e.target?.closest?.('#tcfa-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
 
   const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();
-  setInterval(()=>{if(!document.getElementById(TCFA_LAUNCHER_ID)||!document.getElementById('tcfa-root'))mount();},5000);
+  setInterval(()=>{
+    if(!tcfaOwnsRuntime())return;const root=document.getElementById('tcfa-root'),fab=document.getElementById(TCFA_LAUNCHER_ID);
+    if(state.open&&(!root||!root.isConnected||!root.classList.contains('show'))){state.open=false;}
+    if(!fab||!root)mount();else{updateFabState();verifyFabViewport(fab);}
+  },3000);
 })();
