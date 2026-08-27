@@ -1,0 +1,1 @@
+v0.2.8 repair target: stale same-version runtime marker, premature legacy launcher suppression, stale open-state hiding.
