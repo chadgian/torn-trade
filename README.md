@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.2
+**Current version:** v0.2.3
 
 ## Install
 
@@ -218,3 +218,11 @@ Syncing is now split into two explicit modes:
 - Added a top-level consolidated cash-flow figure: money in minus money out for the current TCT day. Internal transfers remain separate.
 - Added consistent flow legend and clearer + / − / ↔ symbols for money in, money out and transfers.
 - Recent cash movements on the dashboard are explicitly limited to the current TCT day.
+
+
+## v0.2.3 — Floating launcher reliability
+
+- Restores the compact floating launcher after the Bento UI refresh.
+- Gives the launcher an isolated top-level stacking context and explicit visible/hidden state.
+- Recreates the launcher automatically if Torn page navigation removes it.
+- Re-clamps saved launcher coordinates to the current viewport.
