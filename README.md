@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.0
+**Current version:** v0.2.1
 
 ## Install
 
@@ -199,3 +199,12 @@ The project is now centered on financial analysis rather than only trading.
 - **Player Trades:** cash-flow uses actual cash exchanged; allocated item values remain confined to trade accounting.
 
 Torn currently marks API v2 `/user/networth` as unstable. The analyzer therefore labels Torn-reported snapshots separately from locally calculated accounting history.
+
+
+## v0.2.1 — Quick Sync and Full Resync
+
+Syncing is now split into two explicit modes:
+
+- **Quick Sync** is the normal everyday action. It ignores the selected analytics period and scans only from the last successful Torn City Time sync through the current TCT. If no successful sync exists yet, it starts at the beginning of the current TCT day.
+- **Full Resync** clears locally discovered transaction/cash-flow history and sync coverage, then rebuilds from the beginning of available history. It preserves analyzer settings such as API configuration, pins, hidden items and display preferences.
+- Saved sync jobs remember which mode they belong to, so a Quick Sync cannot accidentally resume an old Full Resync and vice versa.
