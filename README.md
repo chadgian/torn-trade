@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.3
+**Current version:** v0.2.4
 
 ## Install
 
@@ -226,3 +226,12 @@ Syncing is now split into two explicit modes:
 - Gives the launcher an isolated top-level stacking context and explicit visible/hidden state.
 - Recreates the launcher automatically if Torn page navigation removes it.
 - Re-clamps saved launcher coordinates to the current viewport.
+
+
+## v0.2.4 — isolated Torn PDA launcher
+
+- Mounts the floating launcher directly under the document root rather than inside Torn's body layout.
+- Forces critical launcher visibility, size, position and stacking styles inline with `!important`.
+- Resets an invalid/off-screen saved launcher position back to a safe default.
+- Embeds the terminal/data-pulse SVG styling directly in the icon so Torn CSS cannot make the icon disappear.
+- Rechecks launcher presence and viewport visibility during Torn SPA navigation.
