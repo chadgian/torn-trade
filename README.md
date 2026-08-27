@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.6
+**Current version:** v0.2.7
 
 ## Install
 
@@ -252,3 +252,14 @@ Syncing is now split into two explicit modes:
 - Removed the Shadow DOM lookup mismatch that caused the watchdog to repeatedly think the FAB was missing.
 - Keeps draggable position, terminal/data-pulse icon, sync spinner and automatic remount checks.
 - Bento dashboard and financial UI remain unchanged.
+
+
+## v0.2.7 — Launcher runtime isolation
+
+- Root-cause hardening after comparing the last known-good pre-Bento launcher with the Bento-era releases. The Bento commit did not delete the launcher functions, so the repair now targets indirect/runtime conflicts instead of only CSS.
+- Uses new isolated DOM ids for the current launcher, analyzer root and style tag so older installed/stale copies cannot move, hide or restyle the current UI.
+- Uses a runtime ownership token so duplicate copies of the same current release do not create competing watchdogs.
+- Suppresses legacy `#tta-fab`, `#tta-fab-host`, `#tta-root` and `#tta-css` UI nodes while keeping the existing local accounting data namespace intact.
+- Resets the old saved launcher coordinate once and clamps future positions against Android's visual viewport.
+- Adds element hit-testing and several safe fallback positions when a DOM layer covers the button.
+- Forces the launcher into its own compositor layer and keeps it alive even if dashboard rendering throws.

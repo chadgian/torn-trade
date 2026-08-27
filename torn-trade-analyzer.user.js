@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.6
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, reliable direct floating launcher, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.7
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, isolated self-healing launcher, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,12 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.6';
+  const VERSION = '0.2.7';
+  const TCFA_RUNTIME_KEY = '__TCFA_RUNTIME_INSTANCE__';
+  const existingTcfaRuntime = window[TCFA_RUNTIME_KEY];
+  if(existingTcfaRuntime?.version===VERSION) return;
+  const TCFA_INSTANCE_TOKEN = `${VERSION}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+  window[TCFA_RUNTIME_KEY] = {version:VERSION,token:TCFA_INSTANCE_TOKEN,startedAt:Date.now()};
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -156,21 +161,21 @@
   }
 
   function injectCss() {
-    if (document.getElementById('tta-css')) return;
+    if (document.getElementById('tcfa-css-v027')) return;
     const s = document.createElement('style');
-    s.id = 'tta-css';
+    s.id = 'tcfa-css-v027';
     s.textContent = `
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
-      #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
-      #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+      #tcfa-root,#tcfa-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
+      #tcfa-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
       #tta-fab{position:fixed!important;right:14px;bottom:86px;z-index:2147483646!important;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;align-items:center;justify-content:center;text-align:center;isolation:isolate}#tta-fab.tta-fab-hidden{display:none!important}
       #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
       #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
       #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
       #tta-fab.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
       #tta-fab .tta-fabspinner{width:14px;height:14px;flex:0 0 14px;border:2px solid #ffccd244;border-top-color:#ffb0ba;border-right-color:#ffb0ba;border-radius:50%;animation:tta-spin .78s linear infinite}
-      #tta-root{position:fixed;inset:0;z-index:2147482999;background:#06090dcc;backdrop-filter:blur(5px);display:none;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--tta-text);font-size:14px;line-height:1.4}
-      #tta-root.show{display:block}.tta-shell{position:absolute;inset:0;background:var(--tta-bg);overflow:auto;overscroll-behavior:contain;padding-bottom:max(38px,env(safe-area-inset-bottom))}.tta-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:9px;min-height:62px;padding:10px 12px;background:#0b0f14f2;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(8px)}
+      #tcfa-root{position:fixed;inset:0;z-index:2147482999;background:#06090dcc;backdrop-filter:blur(5px);display:none;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--tta-text);font-size:14px;line-height:1.4}
+      #tcfa-root.show{display:block}.tta-shell{position:absolute;inset:0;background:var(--tta-bg);overflow:auto;overscroll-behavior:contain;padding-bottom:max(38px,env(safe-area-inset-bottom))}.tta-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:9px;min-height:62px;padding:10px 12px;background:#0b0f14f2;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(8px)}
       .tta-brand{display:flex;align-items:center;gap:9px;min-width:0;flex:1}.tta-mark{width:38px;height:38px;flex:0 0 38px;border-radius:11px;background:linear-gradient(145deg,#183d32,#17394f);display:grid;place-items:center;font-size:19px;line-height:1}.tta-brandcopy{min-width:0}.tta-title{color:var(--tta-text);font-size:15px;font-weight:850;letter-spacing:.15px;line-height:1.2}.tta-sub{font-size:11px;color:var(--tta-muted);margin-top:2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .tta-iconbtn,.tta-back{display:grid;place-items:center;flex:0 0 40px;width:40px;height:40px;min-width:40px;min-height:40px;padding:0!important;border:1px solid var(--tta-line);background:var(--tta-card);color:var(--tta-text)!important;border-radius:11px;text-align:center;font-size:19px;font-weight:700;line-height:1}.tta-iconbtn:active,.tta-back:active{transform:scale(.96);background:var(--tta-soft)}.tta-back{font-size:26px}
       .tta-content{width:100%;padding:14px;max-width:760px;margin:0 auto}.tta-period{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:11px}.tta-period>div{min-width:0}.tta-period strong{display:block;color:var(--tta-text);font-size:14px;line-height:1.25}.tta-period small{color:var(--tta-muted);font-size:10px}
@@ -204,12 +209,12 @@
       .tta-loading{position:fixed;inset:0;z-index:2147483001;display:none;place-items:center;background:#05080bd9;padding:20px;pointer-events:auto}.tta-loading.show{display:grid}.tta-loadingcard{width:min(420px,94vw);background:#111a23;border:1px solid #3b5266;border-radius:18px;padding:18px;box-shadow:0 22px 70px #000b;text-align:center}.tta-loadicon{width:52px;height:52px;margin:0 auto 12px;border-radius:16px;background:#172632;border:1px solid #345269;display:grid;place-items:center}.tta-spinner.xl{width:24px;height:24px;border-width:3px}.tta-loadingtitle{font-size:15px;font-weight:900;color:var(--tta-text);line-height:1.3}.tta-loadingdetail{min-height:34px;margin-top:7px;color:var(--tta-muted);font-size:11px;line-height:1.5}.tta-loadingbar{height:4px;margin:13px 0 12px;overflow:hidden;border-radius:999px;background:#091018}.tta-loadingbar span{display:block;width:38%;height:100%;border-radius:inherit;background:var(--tta-green);animation:tta-load-slide 1.25s ease-in-out infinite}@keyframes tta-load-slide{0%{transform:translateX(-120%)}50%{transform:translateX(165%)}100%{transform:translateX(310%)}}.tta-loadingactions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:5px}.tta-loadinghint{margin-top:9px;color:var(--tta-faint);font-size:9px;line-height:1.4}
       .tta-openloader{position:absolute;inset:0;display:grid;place-items:center;background:var(--tta-bg);color:var(--tta-muted);text-align:center;padding:24px}.tta-openloader>div{display:flex;flex-direction:column;align-items:center;gap:11px}.tta-openloader strong{color:var(--tta-text);font-size:14px}.tta-openloader small{font-size:10px;color:var(--tta-faint)}
       .tta-toast{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .16s ease,transform .16s ease,visibility .16s}.tta-toast.show{opacity:1;visibility:visible;transform:translate(-50%,-4px)}
-      #tta-root[aria-busy="true"] .tta-shell{overflow:hidden}
+      #tcfa-root[aria-busy="true"] .tta-shell{overflow:hidden}
       @media(prefers-reduced-motion:reduce){.tta-loadingbar span,.tta-spinner,.tta-fabspinner{animation-duration:2.2s}.tta-item,.tta-btn,.tta-chip,.tta-iconbtn,.tta-back,.tta-pin,.tta-toast{transition:none}}
 
       /* v0.2.2 Bento / glass visual system */
       :root{--tta-bg:#182630;--tta-panel:#20313d;--tta-card:#263946;--tta-soft:#304653;--tta-line:#ffffff20;--tta-text:#f5f9fc;--tta-muted:#c7d4de;--tta-faint:#a8bac8;--tta-green:#77ddb0;--tta-red:#ff979d;--tta-blue:#8bc9f7;--tta-yellow:#f1c875;--tta-glass:#ffffff0d;--tta-glass-strong:#ffffff14;--tta-shadow:0 12px 32px #07131c3d}
-      #tta-root{background:#0d1820b8;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+      #tcfa-root{background:#0d1820b8;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
       .tta-shell{overflow-y:auto!important;overflow-x:hidden!important;background:radial-gradient(circle at 12% 0%,#31536555 0,transparent 34%),radial-gradient(circle at 92% 18%,#28554842 0,transparent 30%),linear-gradient(180deg,#1a2a35 0%,#15232d 100%);scrollbar-gutter:stable}
       .tta-content{width:min(100%,760px)!important;max-width:760px!important;min-width:0!important;overflow-x:hidden;padding:14px 12px 34px}
       .tta-content>*{min-width:0;max-width:100%}
@@ -244,91 +249,124 @@
     document.head.appendChild(s);
   }
 
-  function clampFabPosition(left,top,fab) {
-    const pad=8,w=fab.offsetWidth||132,h=fab.offsetHeight||42;
-    return {left:Math.max(pad,Math.min(left,window.innerWidth-w-pad)),top:Math.max(pad,Math.min(top,window.innerHeight-h-pad))};
+  const TCFA_LAUNCHER_ID='tcfa-launcher';
+  const TCFA_LAUNCHER_RESET_KEY='launcherPositionResetV027';
+
+  function tcfaOwnsRuntime(){return window[TCFA_RUNTIME_KEY]?.token===TCFA_INSTANCE_TOKEN;}
+  function tcfaVisualViewport(){
+    const vv=window.visualViewport;
+    const left=vv&&Number.isFinite(vv.offsetLeft)?vv.offsetLeft:0,top=vv&&Number.isFinite(vv.offsetTop)?vv.offsetTop:0;
+    const width=vv&&Number.isFinite(vv.width)&&vv.width>0?vv.width:Math.max(1,window.innerWidth||document.documentElement.clientWidth||360);
+    const height=vv&&Number.isFinite(vv.height)&&vv.height>0?vv.height:Math.max(1,window.innerHeight||document.documentElement.clientHeight||640);
+    return {left,top,width,height,right:left+width,bottom:top+height};
   }
-  function applyFabPosition(fab) {
+  function tcfaDefaultFabPosition(fab,slot=0){
+    const v=tcfaVisualViewport(),w=fab?.offsetWidth||40,h=fab?.offsetHeight||40,pad=12;
+    const candidates=[
+      {left:v.right-w-pad,top:v.top+Math.max(72,Math.min(v.height-h-pad,v.height*.64))},
+      {left:v.right-w-pad,top:v.top+Math.max(72,Math.min(v.height-h-pad,v.height*.38))},
+      {left:v.left+pad,top:v.top+Math.max(72,Math.min(v.height-h-pad,v.height*.56))},
+      {left:v.right-w-pad,top:v.top+Math.min(v.height-h-pad,96)},
+    ];
+    return candidates[Math.max(0,Math.min(candidates.length-1,slot))];
+  }
+  function clampFabPosition(left,top,fab){
+    const v=tcfaVisualViewport(),pad=8,w=fab?.offsetWidth||40,h=fab?.offsetHeight||40;
+    return {left:Math.max(v.left+pad,Math.min(Number(left)||0,v.right-w-pad)),top:Math.max(v.top+pad,Math.min(Number(top)||0,v.bottom-h-pad))};
+  }
+  function setFabPosition(fab,pos,persist=true){
+    if(!fab||!pos)return;const p=clampFabPosition(pos.left,pos.top,fab);
+    fab.style.setProperty('left',`${Math.round(p.left)}px`,'important');fab.style.setProperty('top',`${Math.round(p.top)}px`,'important');
+    fab.style.setProperty('right','auto','important');fab.style.setProperty('bottom','auto','important');
+    if(persist){state.fabPosition=p;save('fabPosition',p);}return p;
+  }
+  function applyFabPosition(fab){
     if(!fab)return;
-    if(state.fabPosition && Number.isFinite(state.fabPosition.left) && Number.isFinite(state.fabPosition.top)){
-      const p=clampFabPosition(state.fabPosition.left,state.fabPosition.top,fab);
-      fab.style.left=`${p.left}px`;fab.style.top=`${p.top}px`;fab.style.right='auto';fab.style.bottom='auto';
-      state.fabPosition=p;save('fabPosition',p);
-    } else {fab.style.removeProperty('left');fab.style.removeProperty('top');fab.style.right='14px';fab.style.bottom='86px';}
+    const saved=state.fabPosition;
+    if(saved&&Number.isFinite(Number(saved.left))&&Number.isFinite(Number(saved.top)))setFabPosition(fab,{left:Number(saved.left),top:Number(saved.top)},true);
+    else setFabPosition(fab,tcfaDefaultFabPosition(fab,0),true);
   }
-  function bindFabDrag(fab) {
-    if(!fab || fab.dataset.dragBound==='1')return;
-    fab.dataset.dragBound='1';
+  function suppressLegacyUi(){
+    // Keep legacy nodes connected but inert. Removing them can trigger old watchdogs to
+    // recreate them continuously, causing a DOM tug-of-war. Hiding/disabling them leaves
+    // old copies satisfied while the isolated current runtime owns the visible UI.
+    const oldFab=document.getElementById('tta-fab');if(oldFab){oldFab.style.setProperty('display','none','important');oldFab.style.setProperty('visibility','hidden','important');oldFab.style.setProperty('pointer-events','none','important');}
+    const oldHost=document.getElementById('tta-fab-host');if(oldHost){oldHost.style.setProperty('display','none','important');oldHost.style.setProperty('visibility','hidden','important');oldHost.style.setProperty('pointer-events','none','important');}
+    const oldRoot=document.getElementById('tta-root');if(oldRoot){oldRoot.classList.remove('show');oldRoot.style.setProperty('display','none','important');oldRoot.style.setProperty('visibility','hidden','important');oldRoot.style.setProperty('pointer-events','none','important');}
+    const oldCss=document.getElementById('tta-css');if(oldCss){try{oldCss.disabled=true;}catch(_){}oldCss.setAttribute('media','not all');}
+  }
+  function forceFabBaseStyle(fab){
+    if(!fab)return;const st=fab.style,set=(k,v)=>st.setProperty(k,v,'important');
+    set('position','fixed');set('z-index','2147483647');set('width','42px');set('height','42px');set('min-width','42px');set('min-height','42px');set('max-width','42px');set('max-height','42px');
+    set('padding','0');set('margin','0');set('border','1px solid #6b93a8');set('border-radius','50%');set('background','linear-gradient(145deg,#294f45,#28526e)');set('color','#fff');
+    set('box-shadow','0 10px 28px #0009,0 0 0 1px #ffffff1b inset');set('visibility','visible');set('opacity','1');set('pointer-events','auto');set('align-items','center');set('justify-content','center');set('text-align','center');set('overflow','visible');
+    set('clip','auto');set('clip-path','none');set('contain','none');set('isolation','isolate');set('touch-action','none');set('font','700 18px/1 system-ui');set('-webkit-appearance','none');set('appearance','none');
+    // Force a dedicated compositor layer in Android WebView without using a transformed ancestor.
+    set('transform','translate3d(0,0,0)');set('will-change','transform');set('backface-visibility','hidden');set('-webkit-backface-visibility','hidden');
+  }
+  function fabIconSvg(){
+    // No CSS classes, shared SVG ids, gradients or external styling: older scripts/page CSS
+    // cannot make the icon disappear even when multiple userscripts are installed.
+    return `<span aria-hidden="true" style="display:grid;place-items:center;width:24px;height:24px;pointer-events:none"><svg viewBox="0 0 24 24" focusable="false" style="display:block;width:24px;height:24px;overflow:visible"><rect x="2.5" y="3.25" width="19" height="17.5" rx="3" fill="#10202a" stroke="#8bc9f7" stroke-width="1.35"/><path d="M3.25 7h17.5" fill="none" stroke="#547084" stroke-width="1.15"/><circle cx="5.25" cy="5.2" r=".68" fill="#77ddb0"/><circle cx="7.45" cy="5.2" r=".68" fill="#8bc9f7"/><path d="M5.4 10.1l2 1.8-2 1.8" fill="none" stroke="#77ddb0" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.8 13.7h2.2" fill="none" stroke="#d7e4ec" stroke-width="1.35" stroke-linecap="round"/><path d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7" fill="none" stroke="#77ddb0" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.95 17.25h1.85l1.1-1.8 1.05 1.8H19" fill="none" stroke="#8bc9f7" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+  }
+  function fabSpinnerSvg(){return `<svg aria-hidden="true" viewBox="0 0 24 24" width="21" height="21" style="display:block"><circle cx="12" cy="12" r="8" fill="none" stroke="#ffffff35" stroke-width="2.4"/><path d="M12 4a8 8 0 0 1 8 8" fill="none" stroke="#ffd2d8" stroke-width="2.6" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur=".8s" repeatCount="indefinite"/></path></svg>`;}
+  function bindFabDrag(fab){
+    if(!fab||fab.dataset.tcfaDragBound==='1')return;fab.dataset.tcfaDragBound='1';
     let startX=0,startY=0,startLeft=0,startTop=0,moved=false,pointerId=null;
-    fab.addEventListener('pointerdown',e=>{
-      if(e.button!=null && e.button!==0)return;
-      pointerId=e.pointerId;moved=false;startX=e.clientX;startY=e.clientY;
-      const r=fab.getBoundingClientRect();startLeft=r.left;startTop=r.top;
-      try{fab.setPointerCapture(pointerId);}catch(_){ }
-    });
-    fab.addEventListener('pointermove',e=>{
-      if(pointerId==null||e.pointerId!==pointerId)return;
-      const dx=e.clientX-startX,dy=e.clientY-startY;if(!moved&&Math.hypot(dx,dy)<5)return;
-      moved=true;fab.classList.add('dragging');e.preventDefault();
-      const p=clampFabPosition(startLeft+dx,startTop+dy,fab);
-      fab.style.left=`${p.left}px`;fab.style.top=`${p.top}px`;fab.style.right='auto';fab.style.bottom='auto';
-    });
-    const finish=e=>{
-      if(pointerId==null||e.pointerId!==pointerId)return;
-      try{fab.releasePointerCapture(pointerId);}catch(_){ }
-      pointerId=null;fab.classList.remove('dragging');
-      if(moved){const r=fab.getBoundingClientRect();state.fabPosition=clampFabPosition(r.left,r.top,fab);save('fabPosition',state.fabPosition);fab.dataset.suppressClick='1';setTimeout(()=>fab.dataset.suppressClick='0',250);}
-    };
+    fab.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;pointerId=e.pointerId;moved=false;startX=e.clientX;startY=e.clientY;const r=fab.getBoundingClientRect();startLeft=r.left;startTop=r.top;try{fab.setPointerCapture(pointerId);}catch(_){};});
+    fab.addEventListener('pointermove',e=>{if(pointerId==null||e.pointerId!==pointerId)return;const dx=e.clientX-startX,dy=e.clientY-startY;if(!moved&&Math.hypot(dx,dy)<5)return;moved=true;e.preventDefault();setFabPosition(fab,{left:startLeft+dx,top:startTop+dy},false);});
+    const finish=e=>{if(pointerId==null||e.pointerId!==pointerId)return;try{fab.releasePointerCapture(pointerId);}catch(_){}pointerId=null;if(moved){const r=fab.getBoundingClientRect();state.fabPosition=clampFabPosition(r.left,r.top,fab);save('fabPosition',state.fabPosition);fab.dataset.suppressClick='1';setTimeout(()=>fab.dataset.suppressClick='0',220);}};
     fab.addEventListener('pointerup',finish);fab.addEventListener('pointercancel',finish);
     fab.addEventListener('click',e=>{if(fab.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}openAnalyzer();});
-    window.addEventListener('resize',()=>applyFabPosition(fab),{passive:true});
   }
-  function fabIconSvg() {
-    return `<span class="tta-fabicon" aria-hidden="true" style="display:grid;place-items:center;width:23px;height:23px;pointer-events:none"><svg viewBox="0 0 24 24" focusable="false" style="display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect x="2.5" y="3.25" width="19" height="17.5" rx="3" fill="#0a1219" stroke="#7fc1ff" stroke-width="1.35"/><path d="M3.25 7h17.5" fill="none" stroke="#38566a" stroke-width="1.15"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path d="M5.4 10.1l2 1.8-2 1.8" fill="none" stroke="#63efb1" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.8 13.7h2.2" fill="none" stroke="#b9c8d6" stroke-width="1.35" stroke-linecap="round"/><path d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19" fill="none" stroke="url(#ttaFabPulse)" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
-  }
-
-  function forceFabBaseStyle(fab) {
-    if(!fab)return;const st=fab.style,set=(k,v)=>st.setProperty(k,v,'important');
-    set('position','fixed');set('z-index','2147483647');set('width','40px');set('height','40px');set('min-width','40px');set('min-height','40px');set('max-width','40px');set('max-height','40px');set('padding','0');set('margin','0');set('border','1px solid #4f768b');set('border-radius','50%');set('background','linear-gradient(135deg,#244c42,#254d68)');set('color','#fff');set('box-shadow','0 10px 26px #0008,0 0 0 1px #ffffff12 inset');set('visibility','visible');set('opacity','1');set('pointer-events','auto');set('align-items','center');set('justify-content','center');set('text-align','center');set('overflow','visible');set('transform','none');set('filter','none');set('clip','auto');set('clip-path','none');set('contain','none');set('isolation','isolate');set('touch-action','none');set('font','700 18px/1 system-ui');set('-webkit-appearance','none');set('appearance','none');
-  }
-  function resetFabToDefault(fab) {
-    state.fabPosition=null;save('fabPosition',null);fab.style.removeProperty('left');fab.style.removeProperty('top');fab.style.setProperty('right','14px','important');fab.style.setProperty('bottom','96px','important');
-  }
-  function verifyFabViewport(fab) {
-    if(!fab||state.open)return;const r=fab.getBoundingClientRect(),bad=!Number.isFinite(r.left)||!Number.isFinite(r.top)||r.width<20||r.height<20||r.right<4||r.bottom<4||r.left>window.innerWidth-4||r.top>window.innerHeight-4;
-    if(bad){resetFabToDefault(fab);requestAnimationFrame(()=>applyFabPosition(fab));}
-  }
-  function updateFabState() {
-    const fab=document.getElementById('tta-fab');if(!fab)return;
-    forceFabBaseStyle(fab);const syncing=!!state.syncing;
-    fab.classList.toggle('syncing',syncing);
-    fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
-    fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
-    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
+  function updateFabState(){
+    const fab=document.getElementById(TCFA_LAUNCHER_ID);if(!fab)return;forceFabBaseStyle(fab);
+    const syncing=!!state.syncing;fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Open Cash Flow Analyzer');fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
+    fab.innerHTML=syncing?fabSpinnerSvg():fabIconSvg();
     fab.style.setProperty('display',state.open?'none':'inline-flex','important');
-    requestAnimationFrame(()=>{applyFabPosition(fab);forceFabBaseStyle(fab);fab.style.setProperty('display',state.open?'none':'inline-flex','important');verifyFabViewport(fab);});
+    if(!state.open)fab.style.setProperty('visibility','visible','important');
   }
-  function ensureFabMounted() {
-    const parent=document.body||document.documentElement;
-    const staleHost=document.getElementById('tta-fab-host');if(staleHost)staleHost.remove();
-    let fab=document.getElementById('tta-fab');
-    if(!fab){fab=document.createElement('button');fab.id='tta-fab';fab.type='button';fab.innerHTML=fabIconSvg();parent.appendChild(fab);}else if(fab.parentElement!==parent){parent.appendChild(fab);}
-    forceFabBaseStyle(fab);bindFabDrag(fab);updateFabState();requestAnimationFrame(()=>{applyFabPosition(fab);verifyFabViewport(fab);});return fab;
+  function fabIsInteractable(fab){
+    if(!fab||state.open||!fab.isConnected)return false;const cs=getComputedStyle(fab),r=fab.getBoundingClientRect(),v=tcfaVisualViewport();
+    if(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity)<=0||r.width<30||r.height<30||r.right<=v.left||r.left>=v.right||r.bottom<=v.top||r.top>=v.bottom)return false;
+    const x=Math.max(v.left+1,Math.min(v.right-1,r.left+r.width/2)),y=Math.max(v.top+1,Math.min(v.bottom-1,r.top+r.height/2));
+    const top=document.elementFromPoint?.(x,y);return !top||top===fab||fab.contains(top);
   }
-  function mount() {
-    injectCss();
-    const parent=document.body||document.documentElement;
-    if(!document.getElementById('tta-root')){const root=document.createElement('div');root.id='tta-root';parent.appendChild(root);}
-    const fab=ensureFabMounted();
-    // Keep the launcher as the final top-level node. This avoids Torn/Android compositor
-    // stacking quirks introduced by glass/backdrop layers while preserving the Bento UI.
-    if(fab&&fab.parentElement===parent&&fab!==parent.lastElementChild)parent.appendChild(fab);
-    render();
-    if(!window.__ttaFabWatch){
-      window.__ttaFabWatch=true;
-      new MutationObserver(()=>{const p=document.body||document.documentElement,f=document.getElementById('tta-fab');if(!f||f.parentElement!==p)ensureFabMounted();}).observe(document.documentElement,{childList:true,subtree:true});
-      setInterval(()=>{const p=document.body||document.documentElement,f=document.getElementById('tta-fab');if(!f||f.parentElement!==p)ensureFabMounted();else{forceFabBaseStyle(f);updateFabState();verifyFabViewport(f);}},1200);
-    }
+  function verifyFabViewport(fab){
+    if(!fab||state.open)return;forceFabBaseStyle(fab);fab.style.setProperty('display','inline-flex','important');
+    const v=tcfaVisualViewport(),r=fab.getBoundingClientRect();
+    if(!Number.isFinite(r.left)||!Number.isFinite(r.top)||r.width<30||r.height<30||r.right<v.left+2||r.bottom<v.top+2||r.left>v.right-2||r.top>v.bottom-2){setFabPosition(fab,tcfaDefaultFabPosition(fab,0),true);fab.dataset.recoverySlot='0';return;}
+    if(fabIsInteractable(fab)){fab.dataset.recoverySlot='0';return;}
+    const next=Math.min(3,(Number(fab.dataset.recoverySlot)||0)+1);fab.dataset.recoverySlot=String(next);setFabPosition(fab,tcfaDefaultFabPosition(fab,next),true);
+  }
+  function preferredFabParent(){return document.body||document.documentElement;}
+  function ensureFabMounted(){
+    if(!tcfaOwnsRuntime())return null;suppressLegacyUi();const parent=preferredFabParent();let fab=document.getElementById(TCFA_LAUNCHER_ID);
+    if(!fab){fab=document.createElement('button');fab.id=TCFA_LAUNCHER_ID;fab.type='button';fab.dataset.tcfaVersion=VERSION;fab.innerHTML=fabIconSvg();parent.appendChild(fab);}else if(fab.parentElement!==parent){parent.appendChild(fab);}
+    forceFabBaseStyle(fab);bindFabDrag(fab);updateFabState();applyFabPosition(fab);requestAnimationFrame(()=>verifyFabViewport(fab));return fab;
+  }
+  function installFabWatchdog(){
+    const previous=window.__TCFA_LAUNCHER_WATCH_V027__;if(previous?.token===TCFA_INSTANCE_TOKEN)return;
+    try{previous?.observer?.disconnect?.();if(previous?.interval)clearInterval(previous.interval);}catch(_){}
+    const observer=new MutationObserver(()=>{if(!tcfaOwnsRuntime()){observer.disconnect();return;}const fab=document.getElementById(TCFA_LAUNCHER_ID),parent=preferredFabParent();if(!fab||fab.parentElement!==parent||document.getElementById('tta-fab')||document.getElementById('tta-fab-host'))ensureFabMounted();});
+    observer.observe(document.documentElement,{childList:true,subtree:true});
+    const interval=setInterval(()=>{if(!tcfaOwnsRuntime()){clearInterval(interval);observer.disconnect();return;}const fab=ensureFabMounted();if(fab)verifyFabViewport(fab);},900);
+    const onViewport=()=>{if(!tcfaOwnsRuntime())return;const fab=document.getElementById(TCFA_LAUNCHER_ID);if(fab){applyFabPosition(fab);requestAnimationFrame(()=>verifyFabViewport(fab));}};
+    window.addEventListener('resize',onViewport,{passive:true});window.visualViewport?.addEventListener('resize',onViewport,{passive:true});window.visualViewport?.addEventListener('scroll',onViewport,{passive:true});
+    window.__TCFA_LAUNCHER_WATCH_V027__={token:TCFA_INSTANCE_TOKEN,observer,interval,onViewport};
+  }
+  function mount(){
+    injectCss();suppressLegacyUi();
+    // One-time recovery from coordinates saved by earlier launcher implementations. Those
+    // coordinates were clamped against the layout viewport, not Android's visual viewport.
+    if(!load(TCFA_LAUNCHER_RESET_KEY,false)){state.fabPosition=null;save('fabPosition',null);save(TCFA_LAUNCHER_RESET_KEY,true);}
+    const parent=preferredFabParent();
+    if(!document.getElementById('tcfa-root')){const root=document.createElement('div');root.id='tcfa-root';parent.appendChild(root);}
+    const fab=ensureFabMounted();if(fab&&fab.parentElement===parent&&fab!==parent.lastElementChild)parent.appendChild(fab);
+    // The launcher must survive an unrelated UI rendering error. Do not let a dashboard
+    // exception remove the only way to reopen the analyzer.
+    try{render();}catch(err){console.error('[TCFA] Initial render failed',err);state.open=false;updateFabState();}
+    installFabWatchdog();setTimeout(()=>{const f=ensureFabMounted();if(f)verifyFabViewport(f);},250);setTimeout(()=>{const f=ensureFabMounted();if(f)verifyFabViewport(f);},1200);
   }
 
   let demoTxCache=null;
@@ -621,8 +659,8 @@
     const acquired=document.getElementById('tta-ledger-qty');if(acquired)acquired.textContent=qty(sum.qty);
     const sold=document.getElementById('tta-ledger-sold');if(sold)sold.textContent=qty(sum.sold);
     const profit=document.getElementById('tta-ledger-profit');if(profit){profit.textContent=money(sum.profit,true);profit.className=sum.profit>=0?'pos':'neg';}
-    document.querySelectorAll('#tta-root [data-act="ledgerSort"]').forEach(btn=>{const key=btn.dataset.key;btn.classList.toggle('active',state.ledgerSort===key);btn.textContent=`${btn.dataset.label}${ledgerSortArrow(key)}`;});
-    const clear=document.querySelector('#tta-root [data-act="clearLedgerSearch"]');if(clear)clear.hidden=!state.ledgerSearch;
+    document.querySelectorAll('#tcfa-root [data-act="ledgerSort"]').forEach(btn=>{const key=btn.dataset.key;btn.classList.toggle('active',state.ledgerSort===key);btn.textContent=`${btn.dataset.label}${ledgerSortArrow(key)}`;});
+    const clear=document.querySelector('#tcfa-root [data-act="clearLedgerSearch"]');if(clear)clear.hidden=!state.ledgerSearch;
   }
 
   function ledgerHtml() {
@@ -752,7 +790,7 @@
   function renderItemList() {
     if(state.view!=='trade')return;
     const list=document.getElementById('tta-item-list');if(!list)return;
-    const shell=document.querySelector('#tta-root .tta-shell'),scroll=shell?.scrollTop||0;
+    const shell=document.querySelector('#tcfa-root .tta-shell'),scroll=shell?.scrollTop||0;
     const rows=historyItemRows(),allItems=effectiveTracked();
     list.innerHTML=itemListHtml(rows,allItems);
     const meta=document.getElementById('tta-list-meta');if(meta)meta.textContent=itemListMetaText(rows,allItems);
@@ -914,7 +952,7 @@
   }
 
   function updateBusyDom() {
-    const root=document.getElementById('tta-root'),el=document.getElementById('tta-loading'),b=state.busy||{};
+    const root=document.getElementById('tcfa-root'),el=document.getElementById('tta-loading'),b=state.busy||{};
     if(root)root.setAttribute('aria-busy',b.active?'true':'false');if(!el)return;
     el.classList.toggle('show',!!b.active);el.setAttribute('aria-hidden',b.active?'false':'true');
     const title=document.getElementById('tta-loading-title'),detail=document.getElementById('tta-loading-detail'),stop=document.getElementById('tta-loading-stop'),minimize=document.getElementById('tta-loading-minimize');
@@ -937,7 +975,7 @@
   async function openAnalyzer() {
     state.open=true;
     const fab=document.getElementById('tta-fab');if(fab)fab.style.display='none';
-    const root=document.getElementById('tta-root');if(!root)return;
+    const root=document.getElementById('tcfa-root');if(!root)return;
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     if(root.querySelector('.tta-shell')&&root.dataset.view===state.view)return;
     root.innerHTML='<div class="tta-openloader"><div><span class="tta-spinner xl"></span><strong>Opening Cash Flow Analyzer</strong><small>Preparing cached financial history and analytics…</small></div></div>';
@@ -945,7 +983,7 @@
   }
 
   function render(options={}) {
-    const root=document.getElementById('tta-root');if(!root)return;
+    const root=document.getElementById('tcfa-root');if(!root)return;
     const previousView=root.dataset.view||'',previousShell=root.querySelector('.tta-shell');
     const preserveScroll=options.preserveScroll??(previousView===state.view),previousScroll=preserveScroll&&previousShell?previousShell.scrollTop:0;
     updateFabState();
@@ -966,7 +1004,7 @@
   }
 
   function bind() {
-    const root=document.getElementById('tta-root');if(!root||root.dataset.delegated==='1')return;root.dataset.delegated='1';
+    const root=document.getElementById('tcfa-root');if(!root||root.dataset.delegated==='1')return;root.dataset.delegated='1';
     root.addEventListener('click',async e=>{
       const dateEl=e.target.closest('[data-date]');
       if(dateEl&&root.contains(dateEl)){state.dateMode=dateEl.dataset.date;save('dateMode',state.dateMode);state.expanded=null;await withBusy('Updating period','Recalculating cached analytics for the selected dates…',async()=>render());return;}
@@ -1461,7 +1499,7 @@
     const period=selectedPeriodBounds();
     const periodText=period.from>0?`${dateStr(period.from)} – ${dateStr(Math.min(period.to,nowSec()))}`:'all available history';
     state.syncing=true;state.syncCancel=false;updateFabState();setSyncProgress(`Preparing historical scan for ${periodText}…`);setBusy(true,'Syncing trade history',state.syncProgress,true);
-    document.querySelectorAll('#tta-root [data-act="syncQuick"],#tta-root [data-act="syncFull"],#tta-root [data-act="sync"]').forEach(syncBtn=>{syncBtn.disabled=true;});
+    document.querySelectorAll('#tcfa-root [data-act="syncQuick"],#tcfa-root [data-act="syncFull"],#tcfa-root [data-act="sync"]').forEach(syncBtn=>{syncBtn.disabled=true;});
     await nextPaint();
     try{
       await ensureCatalog();
@@ -1872,7 +1910,7 @@
     if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload · /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;checkpointSyncJob(job,`Resumed after page reload · ${prior}`);}
     else setSyncProgress(job.progress||`Preparing historical scan for ${job.periodText}…`);
     setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);
-    const syncBtn=document.querySelector('#tta-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
+    const syncBtn=document.querySelector('#tcfa-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
     if(state.open)await nextPaint();
     try{
       while(!syncJobCancelled(job)&&job.active){
@@ -1920,8 +1958,8 @@
   function persistSyncCancellation() {
     const job=loadSyncJob();if(!job)return;job.cancelled=true;job.progress='Stopping after the current API request…';saveSyncJob(job);
   }
-  document.addEventListener('click',e=>{const el=e.target?.closest?.('#tta-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
+  document.addEventListener('click',e=>{const el=e.target?.closest?.('#tcfa-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
 
   const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();
-  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);
+  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tcfa-root'))mount();},5000);
 })();
