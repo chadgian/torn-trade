@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.2
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a clearer Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.3
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, reliable floating launcher, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.2';
+  const VERSION = '0.2.3';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -163,7 +163,7 @@
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
       #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
       #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+      #tta-fab{position:fixed!important;right:14px;bottom:86px;z-index:2147483646!important;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;align-items:center;justify-content:center;text-align:center;isolation:isolate}#tta-fab.tta-fab-hidden{display:none!important}
       #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
       #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
       #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
@@ -254,7 +254,7 @@
       const p=clampFabPosition(state.fabPosition.left,state.fabPosition.top,fab);
       fab.style.left=`${p.left}px`;fab.style.top=`${p.top}px`;fab.style.right='auto';fab.style.bottom='auto';
       state.fabPosition=p;save('fabPosition',p);
-    }
+    } else {fab.style.removeProperty('left');fab.style.removeProperty('top');fab.style.right='14px';fab.style.bottom='86px';}
   }
   function bindFabDrag(fab) {
     if(!fab || fab.dataset.dragBound==='1')return;
@@ -294,21 +294,23 @@
     fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
     fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
     fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
-    fab.style.display=state.open?'none':'inline-flex';
+    fab.classList.toggle('tta-fab-hidden',!!state.open);fab.style.removeProperty('display');
     requestAnimationFrame(()=>applyFabPosition(fab));
+  }
+  function ensureFabMounted() {
+    let fab=document.getElementById('tta-fab');
+    if(!fab){fab=document.createElement('button');fab.id='tta-fab';fab.innerHTML=fabIconSvg();(document.body||document.documentElement).appendChild(fab);bindFabDrag(fab);}
+    else if(!fab.isConnected)(document.body||document.documentElement).appendChild(fab);
+    bindFabDrag(fab);updateFabState();requestAnimationFrame(()=>applyFabPosition(fab));return fab;
   }
   function mount() {
     injectCss();
-    if (!document.getElementById('tta-fab')) {
-      const fab = document.createElement('button'); fab.id = 'tta-fab';
-      fab.innerHTML = fabIconSvg();
-      document.body.appendChild(fab);bindFabDrag(fab);requestAnimationFrame(()=>applyFabPosition(fab));
-    } else { const fab=document.getElementById('tta-fab');bindFabDrag(fab);applyFabPosition(fab); }
+    ensureFabMounted();
     if (!document.getElementById('tta-root')) {
-      const root = document.createElement('div'); root.id = 'tta-root'; document.body.appendChild(root);
+      const root = document.createElement('div'); root.id = 'tta-root'; (document.body||document.documentElement).appendChild(root);
     }
-    updateFabState();
     render();
+    if(!window.__ttaFabWatch){window.__ttaFabWatch=true;const host=document.documentElement;new MutationObserver(()=>{if(!document.getElementById('tta-fab'))ensureFabMounted();}).observe(host,{childList:true,subtree:true});setInterval(()=>{if(!document.getElementById('tta-fab'))ensureFabMounted();else updateFabState();},3000);}
   }
 
   let demoTxCache=null;
