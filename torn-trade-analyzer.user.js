@@ -428,7 +428,7 @@
     const allTx=effectiveTransactions();
     const bounds=selectedPeriodBounds();
     let from=bounds.from,to=bounds.to;
-    if(state.dateMode==='all'&&allTx.length){from=Infinity;for(const x of allTx){const ts=Number(x?.timestamp);if(Number.isFinite(ts)&&ts<from)from=ts;}if(!Number.isFinite(from))from=0;}
+    if(state.dateMode==='all'){from=Infinity;for(const x of allTx){const ts=Number(x?.timestamp);if(Number.isFinite(ts)&&ts<from)from=ts;}for(const x of state.cashFlows||[]){const ts=Number(x?.timestamp);if(Number.isFinite(ts)&&ts<from)from=ts;}if(!Number.isFinite(from))from=0;}
     return {from,to};
   }
 
@@ -678,7 +678,7 @@
   }
 
   function header(title, sub, back=false) {
-    return `<div class="tta-header">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">‹</button>':''}<div class="tta-brand"><div class="tta-mark" aria-hidden="true">📈</div><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div>${!back?'<button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">⚙</button>':''}<button class="tta-iconbtn" data-act="close" aria-label="Close trade analyzer" title="Close">×</button></div>`;
+    return `<div class="tta-header">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">‹</button>':''}<div class="tta-brand"><div class="tta-mark" aria-hidden="true">📈</div><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div>${!back?'<button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">⚙</button>':''}<button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">×</button></div>`;
   }
 
   function pinnedCountFor(items) {
@@ -696,7 +696,7 @@
   }
 
   function renderItemList() {
-    if(state.view!=='dashboard')return;
+    if(state.view!=='trade')return;
     const list=document.getElementById('tta-item-list');if(!list)return;
     const shell=document.querySelector('#tta-root .tta-shell'),scroll=shell?.scrollTop||0;
     const rows=historyItemRows(),allItems=effectiveTracked();
@@ -791,7 +791,7 @@
   function moneyBreakdownHtml(obj){return Object.entries(obj||{}).map(([k,v])=>{if(typeof v==='object'&&v){const amount=Number(v.amount??v.money??0)||0;return `<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(amount)}</b></div>`;}return typeof v==='number'?`<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(v)}</b></div>`:'';}).join('');}
   function netWorthHtml() {
     const snap=latestFinancialSnapshot(),nw=snap?.networth,portfolio=analyzerPortfolio(),all=cashFlowSummary(0,Number.MAX_SAFE_INTEGER);const itemTotal=nw?sumNumeric(nw.items):0,assetTotal=nw?sumNumeric(nw.assets):0;
-    return `${header('Net Worth','Torn snapshot + analyzer acquisition portfolio',true)}<div class="tta-content"><div class="tta-fin-section"><div class="tta-stat main"><label>Torn-reported total net worth</label><b class="tta-networth-total">${nw?money(nw.total):'No snapshot yet'}</b></div><div class="tta-snapshot-note">${nw?`Snapshot: ${esc(tctDateTimeStr(nw.timestamp||snap.timestamp))} TCT. Torn currently marks API v2 networth as unstable, so this page keeps the snapshot visually separate from analyzer-calculated history.`:'Run Sync to request /user/networth and /user/money.'}</div></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Torn item holdings</small><b>${nw?money(itemTotal):'—'}</b></div><div class="tta-cashcard"><small>Torn assets</small><b>${nw?money(assetTotal):'—'}</b></div><div class="tta-cashcard main"><small>Points value</small><b>${nw?money(nw.points):'—'}</b></div></div><div class="tta-fin-section"><h3>Money locations / liabilities</h3>${nw?moneyBreakdownHtml(nw.money):'<div class="tta-empty">No Torn net-worth snapshot loaded.</div>'}</div><div class="tta-fin-section"><h3>Items by current Torn location</h3>${nw?moneyBreakdownHtml(nw.items):''}</div><div class="tta-fin-section"><h3>Other assets</h3>${nw?moneyBreakdownHtml(nw.assets):''}</div><div class="tta-fin-section"><h3>Analyzer item portfolio</h3><div class="tta-fin-grid"><div class="tta-stat"><label>Historical acquisition cost</label><b>${money(portfolio.acquiredCost)}</b></div><div class="tta-stat"><label>Recorded remaining cost basis</label><b>${money(portfolio.remainingCost)}</b></div><div class="tta-stat"><label>Recorded remaining market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Unrealized gain / loss</label><b class="${portfolio.unrealized>=0?'pos':'neg'}">${money(portfolio.unrealized)}</b></div><div class="tta-stat"><label>Realized FIFO profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>All recognized cash-flow net</label><b class="${all.net>=0?'pos':'neg'}">${money(all.net)}</b></div></div></div><div class="tta-fin-section"><h3>Items acquired by method</h3><div class="tta-breakdown">${portfolio.byMethod.map(r=>`<div class="tta-breakrow"><span>${esc(r.method)} · ${qty(r.qty)} acquired · ${qty(r.remaining)} remaining</span><b>${money(r.market,true)}</b><b class="${r.profit>=0?'pos':'neg'} secondary-value">${money(r.profit,true)}</b></div>`).join('')||'<div class="tta-empty">No acquisition history yet.</div>'}</div><div class="tta-snapshot-note">Market values here use the analyzer's current Torn item catalog price × analyzer-recorded remaining quantity. They are an accounting view, not a replacement for Torn's official net-worth total.</div></div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshFinancial">Refresh financial snapshot</button><button class="tta-btn secondary" data-act="trade">Open Trade Analysis</button></div></div>`;
+    return `${header('Net Worth','Torn snapshot + analyzer acquisition portfolio',true)}<div class="tta-content"><div class="tta-fin-section"><div class="tta-stat main"><label>Torn-reported total net worth</label><b class="tta-networth-total">${nw?money(nw.total):'No snapshot yet'}</b></div><div class="tta-snapshot-note">${nw?`Snapshot: ${esc(tctDateTimeStr(nw.timestamp||snap.timestamp))} TCT. Torn currently marks API v2 networth as unstable, so this page keeps the snapshot visually separate from analyzer-calculated history.`:'Run Sync to request /user/networth and /user/money.'}</div></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Torn item holdings</small><b>${nw?money(itemTotal):'—'}</b></div><div class="tta-cashcard"><small>Torn assets</small><b>${nw?money(assetTotal):'—'}</b></div><div class="tta-cashcard main"><small>Points value</small><b>${nw?money(nw.points):'—'}</b></div></div><div class="tta-fin-section"><h3>Current wealth locations · stable /user/money</h3>${snap?.money?moneyBreakdownHtml(snap.money):'<div class="tta-empty">No current wealth snapshot loaded.</div>'}<div class="tta-snapshot-note">This section uses Torn's stable current-wealth endpoint and is kept separate from income/spending history.</div></div><div class="tta-fin-section"><h3>Net-worth money locations / liabilities</h3>${nw?moneyBreakdownHtml(nw.money):'<div class="tta-empty">No Torn net-worth snapshot loaded.</div>'}</div><div class="tta-fin-section"><h3>Items by current Torn location</h3>${nw?moneyBreakdownHtml(nw.items):''}</div><div class="tta-fin-section"><h3>Other assets</h3>${nw?moneyBreakdownHtml(nw.assets):''}</div><div class="tta-fin-section"><h3>Analyzer item portfolio</h3><div class="tta-fin-grid"><div class="tta-stat"><label>Historical acquisition cost</label><b>${money(portfolio.acquiredCost)}</b></div><div class="tta-stat"><label>Recorded remaining cost basis</label><b>${money(portfolio.remainingCost)}</b></div><div class="tta-stat"><label>Recorded remaining market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Unrealized gain / loss</label><b class="${portfolio.unrealized>=0?'pos':'neg'}">${money(portfolio.unrealized)}</b></div><div class="tta-stat"><label>Realized FIFO profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>All recognized cash-flow net</label><b class="${all.net>=0?'pos':'neg'}">${money(all.net)}</b></div></div></div><div class="tta-fin-section"><h3>Items acquired by method</h3><div class="tta-breakdown">${portfolio.byMethod.map(r=>`<div class="tta-breakrow"><span>${esc(r.method)} · ${qty(r.qty)} acquired · ${qty(r.remaining)} remaining</span><b>${money(r.market,true)}</b><b class="${r.profit>=0?'pos':'neg'} secondary-value">${money(r.profit,true)}</b></div>`).join('')||'<div class="tta-empty">No acquisition history yet.</div>'}</div><div class="tta-snapshot-note">Market values here use the analyzer's current Torn item catalog price × analyzer-recorded remaining quantity. They are an accounting view, not a replacement for Torn's official net-worth total.</div></div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshFinancial">Refresh financial snapshot</button><button class="tta-btn secondary" data-act="trade">Open Trade Analysis</button></div></div>`;
   }
 
   function itemCard(item,precomputed=null) {
@@ -864,7 +864,7 @@
     const root=document.getElementById('tta-root');if(!root)return;
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     if(root.querySelector('.tta-shell')&&root.dataset.view===state.view)return;
-    root.innerHTML='<div class="tta-openloader"><div><span class="tta-spinner xl"></span><strong>Opening Trade Analyzer</strong><small>Preparing cached history and analytics…</small></div></div>';
+    root.innerHTML='<div class="tta-openloader"><div><span class="tta-spinner xl"></span><strong>Opening Cash Flow Analyzer</strong><small>Preparing cached financial history and analytics…</small></div></div>';
     await nextPaint();render({preserveScroll:false});
   }
 
@@ -944,7 +944,7 @@
       else if(act==='refreshCatalog'){
         await withBusy('Refreshing catalog','Downloading the latest Torn item catalog and market values…',async()=>{state.catalog=[];state.catalogVersion=0;state.catalogUpdatedAt=0;save('catalog',[]);save('catalogVersion',0);save('catalogUpdatedAt',0);await ensureCatalog(true);});render();toast(`Item catalog and market values refreshed · ${qty(state.catalog.length)} items.`);
       }
-      else if(act==='resetData'&&confirm('Reset all Torn Trade Analyzer discovered item history and local transaction data?')){
+      else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
         ['tracked','transactions','cashFlows','financialSnapshots','sync','syncJob','syncCache','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
       }
     });
@@ -1002,7 +1002,7 @@
   function addTracked(id) {
     const x=state.catalog.find(i=>Number(i.id)===Number(id)); if(!x)return;
     if(!state.tracked.some(i=>Number(i.id)===Number(id))){state.tracked.push(x);save('tracked',state.tracked);}
-    state.view='dashboard';state.search='';state.demo=false;render();toast(`${x.name} added. Sync to analyze its history.`);
+    state.view='trade';state.search='';state.demo=false;render();toast(`${x.name} added. Sync to analyze its history.`);
   }
   function removeTracked(id) {
     const x=state.tracked.find(i=>Number(i.id)===Number(id));
@@ -1137,8 +1137,8 @@
   }
   function cashFlowDirection(title,path='') {
     const s=`${title} ${path}`.toLowerCase();
-    if(/deposit/.test(s)&&/(bank|vault|faction|company|cayman)/.test(s))return 'transfer-out';
-    if(/withdraw/.test(s)&&/(bank|vault|faction|company|cayman)/.test(s))return 'transfer-in';
+    if(/deposit/.test(s)&&/(bank|vault|faction|company|cayman|piggy|property)/.test(s))return 'transfer-out';
+    if(/withdraw/.test(s)&&/(bank|vault|faction|company|cayman|piggy|property)/.test(s))return 'transfer-in';
     if(/money_lost|cash_spent|spent|cost|fee|tax|expense|loss|lost|paid|payment|purchase|bought|buy|rehab|rent|donat|bounty placed|loan repayment/.test(s))return 'out';
     if(/money_gained|money_received|cash_received|received|gained|earned|income|wage|salary|interest|dividend|winnings|payout|reward|profit|sold|sale|win|won/.test(s))return 'in';
     if(/mugged/.test(s))return 'out';
@@ -1147,7 +1147,7 @@
   }
   function cashFlowCategory(title,direction) {
     const s=String(title||'').toLowerCase();
-    if(direction?.startsWith('transfer'))return /faction/.test(s)?'Faction Transfer':/company/.test(s)?'Company Transfer':/cayman|bank/.test(s)?'Bank Transfer':'Internal Transfer';
+    if(direction?.startsWith('transfer'))return /faction/.test(s)?'Faction Transfer':/company/.test(s)?'Company Transfer':/property|vault/.test(s)?'Property / Vault Transfer':/piggy/.test(s)?'Piggy Bank Transfer':/cayman|bank/.test(s)?'Bank Transfer':'Internal Transfer';
     if(/casino|bookie|lottery|roulette|poker|blackjack|slots/.test(s))return 'Gambling';
     if(/stock|share|dividend/.test(s))return 'Stocks / Investing';
     if(/property|rent|upkeep/.test(s))return 'Property';
