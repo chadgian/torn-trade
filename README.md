@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.1
+**Current version:** v0.2.2
 
 ## Install
 
@@ -208,3 +208,13 @@ Syncing is now split into two explicit modes:
 - **Quick Sync** is the normal everyday action. It ignores the selected analytics period and scans only from the last successful Torn City Time sync through the current TCT. If no successful sync exists yet, it starts at the beginning of the current TCT day.
 - **Full Resync** clears locally discovered transaction/cash-flow history and sync coverage, then rebuilds from the beginning of available history. It preserves analyzer settings such as API configuration, pins, hidden items and display preferences.
 - Saved sync jobs remember which mode they belong to, so a Quick Sync cannot accidentally resume an old Full Resync and vice versa.
+
+
+## v0.2.2 — Bento UI refresh
+
+- Dashboard redesigned into a lighter Bento-style glass layout with clearer visual hierarchy and more readable text.
+- Financial navigation cards now scroll horizontally inside their own strip; the analyzer page itself is constrained from horizontal scrolling.
+- Today is always based on the current Torn City Time day, not the previous sync date.
+- Added a top-level consolidated cash-flow figure: money in minus money out for the current TCT day. Internal transfers remain separate.
+- Added consistent flow legend and clearer + / − / ↔ symbols for money in, money out and transfers.
+- Recent cash movements on the dashboard are explicitly limited to the current TCT day.
