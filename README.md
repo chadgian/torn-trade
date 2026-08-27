@@ -1,8 +1,8 @@
-# Torn Trade Analyzer
+# Torn Cash Flow Analyzer
 
 A Torn userscript focused on automatic item acquisition/sale history, FIFO profit analysis, player trades, and mobile-friendly analytics for Torn PDA.
 
-**Current version:** v0.1.28
+**Current version:** v0.2.0
 
 ## Install
 
@@ -22,7 +22,7 @@ The userscript contains `@updateURL` and `@downloadURL` metadata pointing to the
 
 ## What it does
 
-Torn Trade Analyzer builds a local trading/item ledger from Torn API data and turns it into profit analytics without requiring you to manually record every item.
+Torn Cash Flow Analyzer builds a local financial ledger from Torn API data. Cash flow, spending, earnings and net worth are the primary system; the original FIFO Trade Analyzer remains available as a dedicated feature.
 
 ### Main features
 
@@ -184,3 +184,18 @@ This repository contains a community userscript intended for personal Torn gamep
 - Replaced the floating launcher emoji with a custom inline SVG terminal/data-pulse icon.
 - The icon uses the analyzer's green/blue cyber palette and remains a compact 40×40 draggable button.
 - During sync, the launcher still switches to the compact spinner-only state.
+
+
+## v0.2.0 — Cash Flow Analyzer
+
+The project is now centered on financial analysis rather than only trading.
+
+- **Today overview (TCT):** earned, spent, net cash flow, and internal transfers.
+- **Cash Flow ledger:** recognized incoming/outgoing money movements with categories and searchable history.
+- **Transfers:** bank/vault/faction/company transfers are recorded but excluded from earnings/spending totals.
+- **Trade Analysis:** the original FIFO acquisition/sale/profit system remains as a separate feature.
+- **Net Worth:** current Torn-reported money, item holdings, assets and points from `/user/networth`, plus `/user/money` snapshots.
+- **Analyzer portfolio:** acquisition cost, remaining FIFO basis, current analyzer-recorded market value, unrealized gain/loss, realized profit, and acquisition-source breakdown.
+- **Player Trades:** cash-flow uses actual cash exchanged; allocated item values remain confined to trade accounting.
+
+Torn currently marks API v2 `/user/networth` as unstable. The analyzer therefore labels Torn-reported snapshots separately from locally calculated accounting history.

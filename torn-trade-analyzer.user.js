@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Torn Trade Analyzer
+// @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.1.28
-// @description  Fast Torn trade analytics with a cyber terminal/data-pulse launcher, 7/14/30-day presets, dedicated abroad-buy verification, continuous TCT timelines, FIFO ledger, Player Trades, and incremental sync. Data stays on-device.
+// @version      0.2.0
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with FIFO profit tracking. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.1.28';
+  const VERSION = '0.2.0';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -40,6 +40,10 @@
     view: 'dashboard',
     tracked: load('tracked', []),
     transactions: load('transactions', []),
+    cashFlows: load('cashFlows', []),
+    financialSnapshots: load('financialSnapshots', []),
+    cashSearch: load('cashSearch', ''),
+    cashCategory: load('cashCategory', 'all'),
     catalog: load('catalog', []),
     catalogVersion: load('catalogVersion', 0),
     catalogUpdatedAt: load('catalogUpdatedAt', 0),
@@ -191,6 +195,12 @@
       .tta-ledgerintro{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:11px}.tta-ledgerintro strong{display:block;color:var(--tta-text);font-size:13px}.tta-ledgerintro small{display:block;margin-top:3px;color:var(--tta-muted);font-size:10px;line-height:1.45}.tta-ledgerfilters{display:grid;grid-template-columns:minmax(180px,1.6fr) repeat(3,minmax(118px,.8fr));gap:8px;margin:10px 0}.tta-ledgerfilters input,.tta-ledgerfilters select{width:100%;min-height:40px;border:1px solid var(--tta-line);border-radius:10px;background:var(--tta-card);color:var(--tta-text)!important;padding:8px 10px;font-size:11px;outline:none}.tta-ledgerfilters input:focus,.tta-ledgerfilters select:focus{border-color:var(--tta-blue);box-shadow:0 0 0 2px #7fc1ff22}.tta-ledgersummary{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:10px 0}.tta-ledgersummary .tta-ministat{margin:0}.tta-ledgerwrap{width:100%;overflow:auto;border:1px solid var(--tta-line);border-radius:13px;background:#0d141c;overscroll-behavior-x:contain}.tta-ledgertable{width:100%;min-width:940px;border-collapse:separate;border-spacing:0;font-size:10px}.tta-ledgertable th{position:sticky;top:0;z-index:2;background:#17212b;border-bottom:1px solid var(--tta-line);text-align:left;padding:0}.tta-ledgertable th button{width:100%;border:0;background:transparent;color:#dce8f2!important;padding:10px 9px;text-align:left;font-size:9px;font-weight:850;letter-spacing:.25px;white-space:nowrap}.tta-ledgertable th button.active{color:var(--tta-green)!important}.tta-ledgertable td{padding:9px;border-bottom:1px solid #273746;color:#d6e1eb;vertical-align:top;font-variant-numeric:tabular-nums}.tta-ledgertable tbody tr:last-child td{border-bottom:0}.tta-ledgertable tbody tr:active td{background:#17222d}.tta-ledgertable .num{text-align:right;white-space:nowrap}.tta-ledgeritem{min-width:135px}.tta-ledgeritem strong{display:block;color:var(--tta-text);font-size:10.5px;line-height:1.3}.tta-ledgeritem small,.tta-ledgermethod small,.tta-ledgerstatus small{display:block;margin-top:2px;color:var(--tta-faint);font-size:8.5px;line-height:1.35}.tta-ledgermethod{min-width:125px}.tta-ledgerstatus{min-width:105px}.tta-statuspill{display:inline-flex;align-items:center;min-height:22px;padding:3px 7px;border:1px solid var(--tta-line);border-radius:999px;background:#151f28;color:var(--tta-muted);font-size:8.5px;font-weight:800;white-space:nowrap}.tta-statuspill.sold{background:#123026;border-color:#2f6853;color:var(--tta-green)}.tta-statuspill.partial{background:#322b13;border-color:#6e6030;color:var(--tta-yellow)}.tta-statuspill.unsold{background:#251a20;border-color:#5f3e49;color:#ffc1ca}.tta-ledgermeta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 1px;color:var(--tta-muted);font-size:9.5px}.tta-ledgermore{display:flex;justify-content:center;margin:12px 0 4px}
       @media(max-width:620px){.tta-ledgerfilters{grid-template-columns:1fr 1fr}.tta-ledgerfilters .tta-ledgersearch{grid-column:1/-1}.tta-ledgersummary{grid-template-columns:1fr 1fr}}
       @media(max-width:390px){.tta-ledgerfilters{grid-template-columns:1fr}.tta-ledgerfilters .tta-ledgersearch{grid-column:auto}.tta-ledgermeta{align-items:flex-start;flex-direction:column}}
+      .tta-fin-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.tta-fin-nav .tta-btn{min-height:44px;padding:8px 7px}.tta-fin-nav .tta-btn strong{display:block;font-size:10px}.tta-fin-nav .tta-btn small{display:block;font-size:8px;margin-top:2px;opacity:.72}
+      .tta-cashhero{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 13px}.tta-cashcard{background:linear-gradient(180deg,#151f2a,#10171f);border:1px solid var(--tta-line);border-radius:14px;padding:11px;text-align:center;min-width:0}.tta-cashcard small{display:block;color:var(--tta-muted);font-size:9px;text-transform:uppercase;letter-spacing:.55px}.tta-cashcard b{display:block;margin-top:5px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tta-cashcard.main{grid-column:auto}.tta-transfer{color:var(--tta-blue)!important}
+      .tta-fin-section{background:#111922;border:1px solid var(--tta-line);border-radius:14px;padding:12px;margin:11px 0}.tta-fin-section h3{margin:0 0 9px;font-size:13px}.tta-fin-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.tta-fin-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #263746;font-size:10px}.tta-fin-row:last-child{border-bottom:0}.tta-fin-row span{color:var(--tta-muted)}.tta-fin-row b{text-align:right;color:var(--tta-text)}
+      .tta-flowtable{width:100%;border-collapse:collapse;font-size:10px}.tta-flowtable th{text-align:left;color:var(--tta-muted);font-size:9px;padding:8px 6px;border-bottom:1px solid var(--tta-line)}.tta-flowtable td{padding:9px 6px;border-bottom:1px solid #263746;vertical-align:top}.tta-flowtable td.num{text-align:right;white-space:nowrap}.tta-flowtitle{font-weight:800;color:var(--tta-text)}.tta-flowmeta{display:block;color:var(--tta-faint);font-size:8.5px;margin-top:2px}.tta-flowbadge{display:inline-flex;padding:3px 6px;border-radius:999px;border:1px solid var(--tta-line);font-size:8px;font-weight:800}.tta-flowbadge.in{color:var(--tta-green);border-color:#315c4d;background:#11261f}.tta-flowbadge.out{color:var(--tta-red);border-color:#69404a;background:#27181d}.tta-flowbadge.transfer{color:var(--tta-blue);border-color:#36556d;background:#132331}
+      .tta-breakdown{display:grid;gap:5px}.tta-breakrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:7px 8px;border:1px solid #293c4c;border-radius:9px;background:#0e161e;font-size:9.5px}.tta-breakrow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tta-breakrow b{font-variant-numeric:tabular-nums}.tta-networth-total{font-size:26px!important}.tta-snapshot-note{font-size:9px;color:var(--tta-faint);line-height:1.45;margin-top:7px}
+      @media(max-width:420px){.tta-fin-nav{grid-template-columns:1fr}.tta-cashhero{grid-template-columns:1fr 1fr}.tta-cashcard.main{grid-column:1/-1}.tta-fin-grid{grid-template-columns:1fr}.tta-breakrow{grid-template-columns:minmax(0,1fr) auto}.tta-breakrow .secondary-value{display:none}}
       .tta-loading{position:fixed;inset:0;z-index:2147483001;display:none;place-items:center;background:#05080bd9;padding:20px;pointer-events:auto}.tta-loading.show{display:grid}.tta-loadingcard{width:min(420px,94vw);background:#111a23;border:1px solid #3b5266;border-radius:18px;padding:18px;box-shadow:0 22px 70px #000b;text-align:center}.tta-loadicon{width:52px;height:52px;margin:0 auto 12px;border-radius:16px;background:#172632;border:1px solid #345269;display:grid;place-items:center}.tta-spinner.xl{width:24px;height:24px;border-width:3px}.tta-loadingtitle{font-size:15px;font-weight:900;color:var(--tta-text);line-height:1.3}.tta-loadingdetail{min-height:34px;margin-top:7px;color:var(--tta-muted);font-size:11px;line-height:1.5}.tta-loadingbar{height:4px;margin:13px 0 12px;overflow:hidden;border-radius:999px;background:#091018}.tta-loadingbar span{display:block;width:38%;height:100%;border-radius:inherit;background:var(--tta-green);animation:tta-load-slide 1.25s ease-in-out infinite}@keyframes tta-load-slide{0%{transform:translateX(-120%)}50%{transform:translateX(165%)}100%{transform:translateX(310%)}}.tta-loadingactions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:5px}.tta-loadinghint{margin-top:9px;color:var(--tta-faint);font-size:9px;line-height:1.4}
       .tta-openloader{position:absolute;inset:0;display:grid;place-items:center;background:var(--tta-bg);color:var(--tta-muted);text-align:center;padding:24px}.tta-openloader>div{display:flex;flex-direction:column;align-items:center;gap:11px}.tta-openloader strong{color:var(--tta-text);font-size:14px}.tta-openloader small{font-size:10px;color:var(--tta-faint)}
       .tta-toast{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .16s ease,transform .16s ease,visibility .16s}.tta-toast.show{opacity:1;visibility:visible;transform:translate(-50%,-4px)}
@@ -247,8 +257,8 @@
     const fab=document.getElementById('tta-fab');if(!fab)return;
     const syncing=!!state.syncing;
     fab.classList.toggle('syncing',syncing);
-    fab.setAttribute('aria-label',syncing?'Trade Analytics syncing':'Trade Analytics');
-    fab.title=syncing?'Trade history sync is running · tap to reopen':'Open Trade Analytics';
+    fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
+    fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
     fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
     fab.style.display=state.open?'none':'inline-flex';
     requestAnimationFrame(()=>applyFabPosition(fab));
@@ -504,8 +514,8 @@
   function ledgerRangeBounds() {
     const now=Date.now();
     if(state.ledgerRange==='7d')return {from:Math.floor((now-7*86400e3)/1000),to:Math.floor(now/1000)+60};
+    if(state.ledgerRange==='14d')return {from:Math.floor((now-14*86400e3)/1000),to:Math.floor(now/1000)+60};
     if(state.ledgerRange==='30d')return {from:Math.floor((now-30*86400e3)/1000),to:Math.floor(now/1000)+60};
-    if(state.ledgerRange==='month')return {from:Math.floor(subtractCalendarMonth(new Date(now)).getTime()/1000),to:Math.floor(now/1000)+60};
     if(state.ledgerRange==='dashboard')return dateRange();
     return {from:0,to:Number.MAX_SAFE_INTEGER};
   }
@@ -566,7 +576,7 @@
     const sortTh=(key,label)=>`<th><button data-act="ledgerSort" data-key="${key}" data-label="${esc(label)}" class="${state.ledgerSort===key?'active':''}">${esc(label)}${ledgerSortArrow(key)}</button></th>`;
     return `${header('Acquisition History','FIFO lot ledger · cached acquisition and sale history',true)}<div class="tta-content">
       <div class="tta-ledgerintro"><div><strong>Acquisition ledger</strong><small>Each row is one recorded acquisition lot. Later sales are matched back to it using the same FIFO method as the dashboard. Realized profit is attributed to this acquisition date, not the later sale date.</small></div></div>
-      <div class="tta-ledgerfilters"><div class="tta-searchwrap tta-ledgersearch"><span class="tta-searchglyph">⌕</span><input id="tta-ledger-search" class="tta-history-search" placeholder="Search item, ID, source or sale method…" value="${esc(state.ledgerSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearLedgerSearch" aria-label="Clear ledger search" ${state.ledgerSearch?'':'hidden'}>×</button></div><select data-ledger-filter="source"><option value="all">All acquisition types</option>${methods.map(x=>`<option value="${esc(x)}" ${state.ledgerSource===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select data-ledger-filter="status"><option value="all" ${state.ledgerStatus==='all'?'selected':''}>All sale statuses</option><option value="sold" ${state.ledgerStatus==='sold'?'selected':''}>Sold</option><option value="partial" ${state.ledgerStatus==='partial'?'selected':''}>Partial</option><option value="unsold" ${state.ledgerStatus==='unsold'?'selected':''}>Unsold</option></select><select data-ledger-filter="range"><option value="all" ${state.ledgerRange==='all'?'selected':''}>All cached history</option><option value="7d" ${state.ledgerRange==='7d'?'selected':''}>Last 7 days</option><option value="30d" ${state.ledgerRange==='30d'?'selected':''}>Last 30 days</option><option value="month" ${state.ledgerRange==='month'?'selected':''}>Last 1 month</option><option value="dashboard" ${state.ledgerRange==='dashboard'?'selected':''}>Dashboard period</option></select></div>
+      <div class="tta-ledgerfilters"><div class="tta-searchwrap tta-ledgersearch"><span class="tta-searchglyph">⌕</span><input id="tta-ledger-search" class="tta-history-search" placeholder="Search item, ID, source or sale method…" value="${esc(state.ledgerSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearLedgerSearch" aria-label="Clear ledger search" ${state.ledgerSearch?'':'hidden'}>×</button></div><select data-ledger-filter="source"><option value="all">All acquisition types</option>${methods.map(x=>`<option value="${esc(x)}" ${state.ledgerSource===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select data-ledger-filter="status"><option value="all" ${state.ledgerStatus==='all'?'selected':''}>All sale statuses</option><option value="sold" ${state.ledgerStatus==='sold'?'selected':''}>Sold</option><option value="partial" ${state.ledgerStatus==='partial'?'selected':''}>Partial</option><option value="unsold" ${state.ledgerStatus==='unsold'?'selected':''}>Unsold</option></select><select data-ledger-filter="range"><option value="all" ${state.ledgerRange==='all'?'selected':''}>All cached history</option><option value="7d" ${state.ledgerRange==='7d'?'selected':''}>Last 7 days</option><option value="14d" ${state.ledgerRange==='14d'?'selected':''}>Last 14 days</option><option value="30d" ${state.ledgerRange==='30d'?'selected':''}>Last 30 days</option><option value="dashboard" ${state.ledgerRange==='dashboard'?'selected':''}>Dashboard period</option></select></div>
       <div class="tta-ledgersummary"><div class="tta-ministat"><small>Acquisition lots</small><b id="tta-ledger-lots">${qty(sum.lots)}</b></div><div class="tta-ministat"><small>Items acquired</small><b id="tta-ledger-qty">${qty(sum.qty)}</b></div><div class="tta-ministat"><small>FIFO units sold</small><b id="tta-ledger-sold">${qty(sum.sold)}</b></div><div class="tta-ministat"><small>Realized profit</small><b id="tta-ledger-profit" class="${sum.profit>=0?'pos':'neg'}">${money(sum.profit,true)}</b></div></div>
       <div class="tta-ledgermeta"><span id="tta-ledger-meta">Showing ${qty(shown)} of ${qty(rows.length)} acquisition lots</span><span>Tap a column heading to sort</span></div>
       <div class="tta-ledgerwrap"><table class="tta-ledgertable"><thead><tr>${sortTh('acquiredAt','Date / time')}${sortTh('item','Item')}${sortTh('qty','Qty')}${sortTh('method','Acquired via')}${sortTh('costTotal','Bought for')}${sortTh('soldQty','Sold qty')}${sortTh('soldProceeds','Sold for')}${sortTh('realizedProfit','Profit')}${sortTh('status','Status')}</tr></thead><tbody id="tta-ledger-body">${ledgerTableBodyHtml(rows)}</tbody></table></div>
@@ -698,14 +708,14 @@
     if(shell)shell.scrollTop=scroll;positionDailyChartsToLatest(list);
   }
 
-  function dashboardHtml() {
+  function tradeHtml() {
     const s=overall(),rows=historyItemRows(),allItems=effectiveTracked(),range=dateRange();
     const requested=selectedPeriodBounds();
     const coverageFrom=Number(state.sync?.coverageFrom);
     const needsBackfill=hasApiKey()&&state.sync?.firstSyncComplete&&requested.from>0&&(!Number.isFinite(coverageFrom)||coverageFrom>requested.from);
     const periodLabel=state.dateMode==='all'?'All available history':`${dateStr(range.from)} – ${dateStr(Math.min(range.to,nowSec()))}`;
     const lastSync=state.sync?.lastSync?`Last sync ${new Date(state.sync.lastSync*1000).toLocaleString()}`:'Not synced yet';
-    return `${header('Trade Analyzer', `v${VERSION} · optimized FIFO analytics`)}<div class="tta-content">
+    return `${header('Trade Analysis', `v${VERSION} · FIFO item analytics`,true)}<div class="tta-content">
       ${!hasApiKey()?`<div class="tta-banner"><strong>Preview mode.</strong> Add your Torn API key in <strong>Settings → API Key</strong> (or use Torn PDA's injected key) to load your real history. The key and analyzed data stay on this device.</div>`:''}
       ${hasApiKey()&&!state.sync?.autoDiscoveryComplete?`<div class="tta-banner"><strong>History discovery:</strong> Run Sync once to discover recognizable acquisitions and sales for your selected period.</div>`:''}
       ${needsBackfill?`<div class="tta-banner"><strong>More history needed:</strong> This period starts ${esc(dateStr(requested.from))}, earlier than the local cache. Press <strong>Sync</strong> to backfill it.</div>`:''}
@@ -720,6 +730,68 @@
       <div id="tta-list-meta" class="tta-listmeta">${esc(itemListMetaText(rows,allItems))}</div>
       <div id="tta-item-list" class="tta-liststage">${itemListHtml(rows,allItems)}</div>
     </div>`;
+  }
+
+  function transactionCashFlows() {
+    const out=[],seenTrades=new Set();
+    for(const t of state.transactions||[]){
+      const ts=Number(t?.timestamp)||0;if(!(ts>0))continue;
+      if(t.source==='Player Trade'){
+        const tradeId=Number(t.tradeId)||0;if(!(tradeId>0)||seenTrades.has(tradeId))continue;seenTrades.add(tradeId);
+        const cashIn=Math.max(0,Number(t.tradeCashIn)||0),cashOut=Math.max(0,Number(t.tradeCashOut)||0);
+        if(cashIn>0)out.push({id:`tradecash:${tradeId}:in`,timestamp:ts,direction:'in',amount:cashIn,category:'Player Trades',source:'Player Trade',title:t.title||`Player Trade #${tradeId}`,transfer:false});
+        if(cashOut>0)out.push({id:`tradecash:${tradeId}:out`,timestamp:ts,direction:'out',amount:cashOut,category:'Player Trades',source:'Player Trade',title:t.title||`Player Trade #${tradeId}`,transfer:false});
+        continue;
+      }
+      const total=Math.max(0,Number(t.total)||0),fee=Math.max(0,Number(t.fee)||0);
+      if(t.side==='buy'&&total>0)out.push({id:`txcash:${t.id}:buy`,timestamp:ts,direction:'out',amount:total,category:t.source==='Foreign Market'?'Travel Trading':'Item Purchases',source:t.source||'Item purchase',title:t.title||`${t.source||'Item'} purchase`,transfer:false,itemId:Number(t.itemId)||0});
+      if(t.side==='sell'&&total>0)out.push({id:`txcash:${t.id}:sell`,timestamp:ts,direction:'in',amount:total,category:'Item Sales',source:t.source||'Item sale',title:t.title||`${t.source||'Item'} sale`,transfer:false,itemId:Number(t.itemId)||0});
+      if(t.side==='sell'&&fee>0)out.push({id:`txcash:${t.id}:fee`,timestamp:ts,direction:'out',amount:fee,category:'Fees / Taxes',source:t.source||'Sale fee',title:`${t.title||'Item sale'} fee`,transfer:false,itemId:Number(t.itemId)||0});
+    }
+    return out;
+  }
+  function allCashFlows() {
+    const map=new Map();for(const x of state.cashFlows||[])if(x?.id)map.set(String(x.id),x);for(const x of transactionCashFlows())map.set(String(x.id),x);
+    return [...map.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));
+  }
+  function cashFlowBoundsToday() {const now=Math.min(Number(state.sync?.lastSync)||nowSec(),nowSec());return {from:tctDayStart(now),to:now};}
+  function cashFlowSummary(from,to) {
+    let earned=0,spent=0,transferIn=0,transferOut=0,count=0;const categories=new Map();
+    for(const x of allCashFlows()){const ts=Number(x.timestamp)||0;if(ts<from||ts>to)continue;count++;const amount=Math.max(0,Number(x.amount)||0);let row=categories.get(x.category)||{category:x.category,earned:0,spent:0,transfers:0};
+      if(x.direction==='in'){earned+=amount;row.earned+=amount;}else if(x.direction==='out'){spent+=amount;row.spent+=amount;}else if(x.direction==='transfer-in'){transferIn+=amount;row.transfers+=amount;}else if(x.direction==='transfer-out'){transferOut+=amount;row.transfers+=amount;}categories.set(x.category,row);}
+    return {earned,spent,net:earned-spent,transferIn,transferOut,count,categories:[...categories.values()].sort((a,b)=>(b.earned+b.spent+b.transfers)-(a.earned+a.spent+a.transfers))};
+  }
+  function latestFinancialSnapshot(){return (state.financialSnapshots||[]).slice().sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0))[0]||null;}
+  async function refreshFinancialSnapshot() {
+    if(!hasApiKey())return null;const snap={timestamp:nowSec(),networth:null,money:null};
+    try{const n=await apiGet('/user/networth');if(n?.networth){snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;}}catch(_){}
+    try{const m=await apiGet('/user/money');if(m?.money)snap.money=m.money;}catch(_){}
+    if(!snap.networth&&!snap.money)return null;
+    const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);state.financialSnapshots=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);save('financialSnapshots',state.financialSnapshots);return snap;
+  }
+  function sumNumeric(obj){return Object.values(obj||{}).reduce((n,v)=>n+(typeof v==='number'&&Number.isFinite(v)?v:0),0);}
+  function analyzerPortfolio() {
+    const rows=acquisitionLedgerRows();let acquiredCost=0,remainingCost=0,marketValue=0,realizedProfit=0,acquiredQty=0,remainingQty=0;const byMethod=new Map();
+    for(const r of rows){const item=catalogItem(r.itemId),rem=Math.max(0,Number(r.unsoldQty)||0),mv=rem*Math.max(0,Number(item.marketPrice)||0);acquiredCost+=Number(r.costTotal)||0;remainingCost+=rem*(Number(r.unitCost)||0);marketValue+=mv;realizedProfit+=Number(r.realizedProfit)||0;acquiredQty+=Number(r.qty)||0;remainingQty+=rem;const m=byMethod.get(r.method)||{method:r.method,qty:0,cost:0,remaining:0,market:0,profit:0};m.qty+=Number(r.qty)||0;m.cost+=Number(r.costTotal)||0;m.remaining+=rem;m.market+=mv;m.profit+=Number(r.realizedProfit)||0;byMethod.set(r.method,m);}
+    return {acquiredCost,remainingCost,marketValue,unrealized:marketValue-remainingCost,realizedProfit,acquiredQty,remainingQty,byMethod:[...byMethod.values()].sort((a,b)=>b.market-a.market||b.cost-a.cost)};
+  }
+  function periodChipsHtml(){return `<div class="tta-chips">${[['7d','7 days'],['14d','14 days'],['30d','30 days'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>${state.dateMode==='custom'?`<div class="tta-customdates"><input type="date" data-custom="from" value="${esc(state.customFrom)}"><input type="date" data-custom="to" value="${esc(state.customTo)}"></div>`:''}`;}
+  function financialNavHtml(){return `<div class="tta-fin-nav"><button class="tta-btn secondary" data-act="cashflow"><strong>⇅ Cash Flow</strong><small>income · spending · transfers</small></button><button class="tta-btn secondary" data-act="trade"><strong>▦ Trade Analysis</strong><small>FIFO · acquisitions · profit</small></button><button class="tta-btn secondary" data-act="networth"><strong>◇ Net Worth</strong><small>assets · holdings · portfolio</small></button></div>`;}
+  function cashBreakdownHtml(summary,limit=8){const rows=summary.categories.slice(0,limit);return rows.length?`<div class="tta-breakdown">${rows.map(r=>`<div class="tta-breakrow"><span>${esc(r.category)}</span><b class="pos">${r.earned?money(r.earned,true):'—'}</b><b class="neg secondary-value">${r.spent?money(r.spent,true):'—'}</b></div>`).join('')}</div>`:'<div class="tta-empty">No recognized cash movements in this period yet.</div>';}
+  function cashFlowRowsHtml(rows,limit=200){return rows.slice(0,limit).map(x=>`<tr><td><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span></td><td><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td>${esc(x.category)}</td><td class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'↔ '}${money(x.amount)}</td></tr>`).join('')||'<tr><td colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';}
+  function dashboardHtml() {
+    const today=cashFlowBoundsToday(),sum=cashFlowSummary(today.from,today.to),snap=latestFinancialSnapshot(),portfolio=analyzerPortfolio(),nw=Number(snap?.networth?.total)||0,recent=allCashFlows().filter(x=>x.timestamp>=today.from&&x.timestamp<=today.to).slice(0,8);
+    return `${header('Cash Flow Analyzer',`v${VERSION} · money, net worth & trade intelligence`)}<div class="tta-content">${!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':''}<div class="tta-period"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${state.sync?.lastSync?`Checked through ${esc(tctDateTimeStr(state.sync.lastSync))} TCT`:'Run Sync to build current financial history'}</span></div><button class="tta-btn secondary" data-act="sync" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'↻ Sync'}</button></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Earned today</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent today</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div>${financialNavHtml()}<div class="tta-fin-section"><h3>Current financial position</h3><div class="tta-fin-grid"><div class="tta-stat main"><label>Torn-reported net worth</label><b class="tta-networth-total">${snap?.networth?money(nw):'Sync to load'}</b></div><div class="tta-stat"><label>Analyzer inventory market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Realized trade profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>Internal transfers today</label><b class="tta-transfer">${money(sum.transferIn+sum.transferOut)}</b></div></div><div class="tta-snapshot-note">Bank/vault/faction transfers are recorded, but excluded from “earned” and “spent” so moving your own money does not create fake income or expense.</div></div><div class="tta-fin-section"><h3>Today by category</h3>${cashBreakdownHtml(sum)}</div><div class="tta-fin-section"><div class="tta-sectionhead"><h3>Recent cash movements</h3><button class="tta-btn secondary" data-act="cashflow">View ledger</button></div><div style="overflow:auto"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,8)}</tbody></table></div></div></div>`;
+  }
+  function cashFlowHtml() {
+    const {from,to}=dateRange(),sum=cashFlowSummary(from,to),q=String(state.cashSearch||'').trim().toLowerCase(),cat=String(state.cashCategory||'all');let rows=allCashFlows().filter(x=>x.timestamp>=from&&x.timestamp<=to);if(cat!=='all')rows=rows.filter(x=>x.category===cat);if(q)rows=rows.filter(x=>`${x.title} ${x.category} ${x.source}`.toLowerCase().includes(q));const cats=[...new Set(allCashFlows().map(x=>x.category))].sort();
+    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div><div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow…" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable"><thead><tr><th>Event</th><th>Flow</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${cashFlowRowsHtml(rows)}</tbody></table></div><div class="tta-note">Internal transfers remain visible but are excluded from earned/spent totals. Item buys/sales come from the normalized trade ledger; Player Trade cash uses the actual cash exchanged, not the analyzer's allocated item valuation.</div></div>`;
+  }
+  function labeledKey(k){return String(k).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
+  function moneyBreakdownHtml(obj){return Object.entries(obj||{}).map(([k,v])=>{if(typeof v==='object'&&v){const amount=Number(v.amount??v.money??0)||0;return `<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(amount)}</b></div>`;}return typeof v==='number'?`<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(v)}</b></div>`:'';}).join('');}
+  function netWorthHtml() {
+    const snap=latestFinancialSnapshot(),nw=snap?.networth,portfolio=analyzerPortfolio(),all=cashFlowSummary(0,Number.MAX_SAFE_INTEGER);const itemTotal=nw?sumNumeric(nw.items):0,assetTotal=nw?sumNumeric(nw.assets):0;
+    return `${header('Net Worth','Torn snapshot + analyzer acquisition portfolio',true)}<div class="tta-content"><div class="tta-fin-section"><div class="tta-stat main"><label>Torn-reported total net worth</label><b class="tta-networth-total">${nw?money(nw.total):'No snapshot yet'}</b></div><div class="tta-snapshot-note">${nw?`Snapshot: ${esc(tctDateTimeStr(nw.timestamp||snap.timestamp))} TCT. Torn currently marks API v2 networth as unstable, so this page keeps the snapshot visually separate from analyzer-calculated history.`:'Run Sync to request /user/networth and /user/money.'}</div></div><div class="tta-cashhero"><div class="tta-cashcard"><small>Torn item holdings</small><b>${nw?money(itemTotal):'—'}</b></div><div class="tta-cashcard"><small>Torn assets</small><b>${nw?money(assetTotal):'—'}</b></div><div class="tta-cashcard main"><small>Points value</small><b>${nw?money(nw.points):'—'}</b></div></div><div class="tta-fin-section"><h3>Money locations / liabilities</h3>${nw?moneyBreakdownHtml(nw.money):'<div class="tta-empty">No Torn net-worth snapshot loaded.</div>'}</div><div class="tta-fin-section"><h3>Items by current Torn location</h3>${nw?moneyBreakdownHtml(nw.items):''}</div><div class="tta-fin-section"><h3>Other assets</h3>${nw?moneyBreakdownHtml(nw.assets):''}</div><div class="tta-fin-section"><h3>Analyzer item portfolio</h3><div class="tta-fin-grid"><div class="tta-stat"><label>Historical acquisition cost</label><b>${money(portfolio.acquiredCost)}</b></div><div class="tta-stat"><label>Recorded remaining cost basis</label><b>${money(portfolio.remainingCost)}</b></div><div class="tta-stat"><label>Recorded remaining market value</label><b>${money(portfolio.marketValue)}</b></div><div class="tta-stat"><label>Unrealized gain / loss</label><b class="${portfolio.unrealized>=0?'pos':'neg'}">${money(portfolio.unrealized)}</b></div><div class="tta-stat"><label>Realized FIFO profit</label><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></div><div class="tta-stat"><label>All recognized cash-flow net</label><b class="${all.net>=0?'pos':'neg'}">${money(all.net)}</b></div></div></div><div class="tta-fin-section"><h3>Items acquired by method</h3><div class="tta-breakdown">${portfolio.byMethod.map(r=>`<div class="tta-breakrow"><span>${esc(r.method)} · ${qty(r.qty)} acquired · ${qty(r.remaining)} remaining</span><b>${money(r.market,true)}</b><b class="${r.profit>=0?'pos':'neg'} secondary-value">${money(r.profit,true)}</b></div>`).join('')||'<div class="tta-empty">No acquisition history yet.</div>'}</div><div class="tta-snapshot-note">Market values here use the analyzer's current Torn item catalog price × analyzer-recorded remaining quantity. They are an accounting view, not a replacement for Torn's official net-worth total.</div></div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshFinancial">Refresh financial snapshot</button><button class="tta-btn secondary" data-act="trade">Open Trade Analysis</button></div></div>`;
   }
 
   function itemCard(item,precomputed=null) {
@@ -757,7 +829,7 @@
     const hiddenHtml=hiddenItems.length?`<div class="tta-hiddenlist">${hiddenItems.map(x=>`<div class="tta-hiddenrow"><span>${esc(x.name)} <small>#${x.id}</small></span><button class="tta-btn secondary" data-act="restoreItem" data-id="${x.id}">Restore</button></div>`).join('')}</div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="restoreAllItems">Restore all hidden items</button></div>`:'<div class="tta-banner">No hidden items.</div>';
     return `${header('Settings','Storage, API access & reset',true)}<div class="tta-content tta-settings">
       <div class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(status)}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${esc(masked)}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn" data-act="saveApiKey">Save & test</button></div><div class="tta-keynote">Stored only in this device's local storage and sent only to Torn's official API. It is never uploaded to GitHub or sent to us. Use a custom key with <strong>User → Log</strong>; for free-item history, do not restrict away categories such as Crime success, City finds, Mission rewards, Seasonal gift, and similar reward logs.</div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved API key</button></div>':''}</div>
-      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized transaction entries · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in mixed scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) · ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Dedicated Abroad Buy (4201) verification: ${qty(state.sync.diagnostics.abroadVerifyRawRows||0)} raw log(s) · ${qty(state.sync.diagnostics.abroadVerifyParsedRows||0)} parsed row(s) · ${qty(state.sync.diagnostics.abroadVerifyQty||0)} item(s).${state.sync.diagnostics.abroadVerifyLatestRawTimestamp?`<br>Latest raw Abroad Buy log: ${esc(tctDateTimeStr(state.sync.diagnostics.abroadVerifyLatestRawTimestamp))} TCT.`:''}${state.sync.diagnostics.latestParsedAcquisitionTimestamp?`<br>Latest parsed acquisition: ${esc(tctDateTimeStr(state.sync.diagnostics.latestParsedAcquisitionTimestamp))} TCT.`:''}<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
+      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal statistical analysis of automatically discovered item acquisitions and sales.<br>Key storage: locally only / not shared.<br>Required access: public Torn item/log-type endpoints plus <strong>User → Log</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' · Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized item transactions · ${qty(state.cashFlows.length)} direct cash-flow logs · ${qty(state.financialSnapshots.length)} financial snapshots · ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs · ${qty(state.sync.diagnostics.pages||0)} log pages · ${qty(state.sync.diagnostics.logTypes||0)} candidate log types.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items · ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched · ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped · ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows · ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in mixed scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) · ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Dedicated Abroad Buy (4201) verification: ${qty(state.sync.diagnostics.abroadVerifyRawRows||0)} raw log(s) · ${qty(state.sync.diagnostics.abroadVerifyParsedRows||0)} parsed row(s) · ${qty(state.sync.diagnostics.abroadVerifyQty||0)} item(s).${state.sync.diagnostics.abroadVerifyLatestRawTimestamp?`<br>Latest raw Abroad Buy log: ${esc(tctDateTimeStr(state.sync.diagnostics.abroadVerifyLatestRawTimestamp))} TCT.`:''}${state.sync.diagnostics.latestParsedAcquisitionTimestamp?`<br>Latest parsed acquisition: ${esc(tctDateTimeStr(state.sync.diagnostics.latestParsedAcquisitionTimestamp))} TCT.`:''}<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} – ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Hidden items · ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
   }
 
   function loadingHtml() {
@@ -805,7 +877,7 @@
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     const wasDemo=state.demo;state.demo=!hasApiKey()&&!state.transactions.length;if(wasDemo!==state.demo)resetAnalyticsCache();
     if(state.demo&&!state.catalog.length)state.catalog=demoCatalog();
-    root.innerHTML=`<div class="tta-shell">${state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='ledger'?ledgerHtml():dashboardHtml()}</div>${loadingHtml()}<div id="tta-toast" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
+    root.innerHTML=`<div class="tta-shell">${state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml()}</div>${loadingHtml()}<div id="tta-toast" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     root.dataset.view=state.view;root.setAttribute('aria-busy',state.busy?.active?'true':'false');bind();
     if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);
   }
@@ -827,8 +899,12 @@
       const el=e.target.closest('[data-act]');if(!el||!root.contains(el))return;e.stopPropagation();const act=el.dataset.act;
       if(act==='close'){state.open=false;if(!state.syncing)setBusy(false);render();}
       else if(act==='minimizeSync'){state.open=false;render();}
-      else if(act==='back'){state.view='dashboard';state.search='';render();}
+      else if(act==='back'){state.view=state.view==='ledger'?'trade':'dashboard';state.search='';render();}
       else if(act==='settings'){state.view='settings';render();}
+      else if(act==='cashflow'){state.view='cash';render({preserveScroll:false});}
+      else if(act==='trade'){state.view='trade';render({preserveScroll:false});}
+      else if(act==='networth'){state.view='networth';render({preserveScroll:false});}
+      else if(act==='refreshFinancial'){await withBusy('Refreshing finances','Loading current Torn money and net-worth snapshots…',async()=>refreshFinancialSnapshot());render();toast('Financial snapshot refreshed.');}
       else if(act==='ledger'){state.view='ledger';state.ledgerLimit=200;render({preserveScroll:false});}
       else if(act==='ledgerSort'){
         const key=String(el.dataset.key||'acquiredAt');if(state.ledgerSort===key)state.ledgerSortDir=state.ledgerSortDir==='asc'?'desc':'asc';else{state.ledgerSort=key;state.ledgerSortDir=(key==='item'||key==='method'||key==='status')?'asc':'desc';}
@@ -869,7 +945,7 @@
         await withBusy('Refreshing catalog','Downloading the latest Torn item catalog and market values…',async()=>{state.catalog=[];state.catalogVersion=0;state.catalogUpdatedAt=0;save('catalog',[]);save('catalogVersion',0);save('catalogUpdatedAt',0);await ensureCatalog(true);});render();toast(`Item catalog and market values refreshed · ${qty(state.catalog.length)} items.`);
       }
       else if(act==='resetData'&&confirm('Reset all Torn Trade Analyzer discovered item history and local transaction data?')){
-        ['tracked','transactions','sync','syncJob','syncCache','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
+        ['tracked','transactions','cashFlows','financialSnapshots','sync','syncJob','syncCache','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
       }
     });
 
@@ -887,6 +963,8 @@
       const target=e.target;
       if(target.id==='tta-history-search'){
         state.itemSearch=target.value;save('itemSearch',state.itemSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>renderItemList(),120);
+      }else if(target.id==='tta-cash-search'){
+        state.cashSearch=target.value;save('cashSearch',state.cashSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>render({preserveScroll:true}),140);
       }else if(target.id==='tta-ledger-search'){
         state.ledgerSearch=target.value;save('ledgerSearch',state.ledgerSearch);state.ledgerLimit=200;clearTimeout(perfCache.ledgerSearchTimer);perfCache.ledgerSearchTimer=setTimeout(()=>renderLedgerRows(),120);
       }else if(target.id==='tta-search'){
@@ -896,6 +974,7 @@
 
     root.addEventListener('change',async e=>{
       const target=e.target;
+      if(target.id==='tta-cash-category'){state.cashCategory=target.value;save('cashCategory',state.cashCategory);render({preserveScroll:true});return;}
       if(target.dataset.ledgerFilter){
         const kind=target.dataset.ledgerFilter,val=target.value;if(kind==='source')state.ledgerSource=val;else if(kind==='status')state.ledgerStatus=val;else if(kind==='range')state.ledgerRange=val;
         save(kind==='source'?'ledgerSource':kind==='status'?'ledgerStatus':'ledgerRange',val);state.ledgerLimit=200;renderLedgerRows();return;
@@ -944,11 +1023,12 @@
     const paidAction=/\b(buy|bought|purchase|purchased|sell|sold|sale|listed|listing|win|won)\b/i;
     const itemMovement=/(item|plushie|flower|drug|weapon|armor|armour|temporary).*(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win)|(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win).*(item|plushie|flower|drug|weapon|armor|armour|temporary)/i;
     const freeContext=/(crime success|organized crime success|city find|mission reward|seasonal gift|christmas town|easter egg hunt|halloween basket|job special|company special|event reward|competition reward|reward|loot|items? incoming|item.*received|item.*gained|item.*found)/i;
+    const moneyContext=/(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|points|award|income|expense|cost|profit|loss)/i;
     const byId=new Map();
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || freeContext.test(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || freeContext.test(title) || moneyContext.test(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     return [...byId.values()].sort((a,b)=>a.id-b.id);
@@ -1028,6 +1108,74 @@
       const ratio=it.qty/totalQty; const total=totalAll*ratio; const feeShare=fee*ratio;
       return {id:`${entry.id}:${it.id}`,logId:logTypeId,timestamp:entry.timestamp,itemId:it.id,side,qty:it.qty,total,fee:feeShare,netTotal:side==='sell'?Math.max(0,total-feeShare):total,source:known?.source||sourceFrom(title),title,free};
     });
+  }
+
+  function financialTitleContext(title) {
+    return /(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|points|award|reward|income|expense|cost|profit|loss)/i.test(String(title||''));
+  }
+  function flattenNumericFields(value,path='',out=[],depth=0) {
+    if(value==null||depth>7)return out;
+    if(typeof value==='number'&&Number.isFinite(value)){out.push({path:path.toLowerCase(),value});return out;}
+    if(typeof value==='string'&&/^-?\d+(?:\.\d+)?$/.test(value)){out.push({path:path.toLowerCase(),value:Number(value)});return out;}
+    if(Array.isArray(value)){value.forEach((v,i)=>flattenNumericFields(v,`${path}.${i}`,out,depth+1));return out;}
+    if(typeof value==='object')Object.entries(value).forEach(([k,v])=>flattenNumericFields(v,path?`${path}.${k}`:k,out,depth+1));
+    return out;
+  }
+  function bestMoneyField(payload,title) {
+    const rows=flattenNumericFields(payload),financial=financialTitleContext(title),bad=/(^|\.)(id|item_id|itemid|qty|quantity|count|timestamp|time|duration|rate|percent|percentage|balance|maximum|current|points)(\.|$)/i;
+    let best=null;
+    for(const row of rows){
+      if(bad.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
+      let score=0;
+      if(/money|cash/.test(row.path))score+=12;
+      if(/received|gained|earned|winnings|payout|salary|wage|interest|dividend|reward|profit/.test(row.path))score+=10;
+      if(/spent|paid|payment|cost|price|fee|tax|loss|lost|expense|bounty|loan/.test(row.path))score+=9;
+      if(/amount|total|value/.test(row.path)&&financial)score+=4;
+      if(score>0&&(!best||score>best.score||(score===best.score&&Math.abs(row.value)>Math.abs(best.value))))best={...row,score};
+    }
+    return best;
+  }
+  function cashFlowDirection(title,path='') {
+    const s=`${title} ${path}`.toLowerCase();
+    if(/deposit/.test(s)&&/(bank|vault|faction|company|cayman)/.test(s))return 'transfer-out';
+    if(/withdraw/.test(s)&&/(bank|vault|faction|company|cayman)/.test(s))return 'transfer-in';
+    if(/money_lost|cash_spent|spent|cost|fee|tax|expense|loss|lost|paid|payment|purchase|bought|buy|rehab|rent|donat|bounty placed|loan repayment/.test(s))return 'out';
+    if(/money_gained|money_received|cash_received|received|gained|earned|income|wage|salary|interest|dividend|winnings|payout|reward|profit|sold|sale|win|won/.test(s))return 'in';
+    if(/mugged/.test(s))return 'out';
+    if(/mug/.test(s))return 'in';
+    return null;
+  }
+  function cashFlowCategory(title,direction) {
+    const s=String(title||'').toLowerCase();
+    if(direction?.startsWith('transfer'))return /faction/.test(s)?'Faction Transfer':/company/.test(s)?'Company Transfer':/cayman|bank/.test(s)?'Bank Transfer':'Internal Transfer';
+    if(/casino|bookie|lottery|roulette|poker|blackjack|slots/.test(s))return 'Gambling';
+    if(/stock|share|dividend/.test(s))return 'Stocks / Investing';
+    if(/property|rent|upkeep/.test(s))return 'Property';
+    if(/travel|flight/.test(s))return 'Travel';
+    if(/rehab/.test(s))return 'Rehab';
+    if(/education|course/.test(s))return 'Education';
+    if(/bounty/.test(s))return 'Bounties';
+    if(/crime|mug/.test(s))return 'Crime / Mugging';
+    if(/wage|salary|job pay|company pay/.test(s))return 'Wages / Job';
+    if(/fee|tax/.test(s))return 'Fees / Taxes';
+    if(/point/.test(s))return 'Points';
+    if(/award|reward|mission/.test(s))return 'Rewards';
+    return direction==='in'?'Other Income':'Other Spending';
+  }
+  function parseCashFlowEntry(entry,parsedItemRows=[]) {
+    if(parsedItemRows?.length)return[];
+    const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||'');
+    if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title)||!financialTitleContext(title))return[];
+    const payload={...(entry?.params||{}),...(entry?.data||{})},field=bestMoneyField(payload,title);if(!field)return[];
+    const direction=cashFlowDirection(title,field.path);if(!direction)return[];
+    const amount=Math.abs(Number(field.value)||0);if(!(amount>0))return[];
+    return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction,amount,category:cashFlowCategory(title,direction),source:'Torn Log',title,logId:logTypeId,field:field.path,transfer:direction.startsWith('transfer')}];
+  }
+  function checkpointCashFlowRows(rows) {
+    if(!rows?.length)return 0;const map=new Map((state.cashFlows||[]).map(x=>[String(x.id),x]));let added=0;
+    for(const row of rows){if(!row?.id||!(Number(row.amount)>0)||map.has(String(row.id)))continue;map.set(String(row.id),row);added++;}
+    if(added){state.cashFlows=[...map.values()].sort((a,b)=>(Number(a.timestamp)||0)-(Number(b.timestamp)||0));save('cashFlows',state.cashFlows);}
+    return added;
   }
 
   function tradeItemGroups(entries,userId,outgoing=true) {
@@ -1459,7 +1607,7 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
   function createResumableSyncJob() {
     stripSyncRunMarkers();
@@ -1495,6 +1643,7 @@
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
         if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
         const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
+        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;checkpointCashFlowRows(cashRows);
       }
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
@@ -1646,7 +1795,7 @@
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
-        else if(job.phase==='finalize'){finishResumableSync(job);break;}
+        else if(job.phase==='finalize'){await refreshFinancialSnapshot();finishResumableSync(job);break;}
         else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint…');}
       }
       if(syncJobCancelled(job)){
