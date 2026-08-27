@@ -166,14 +166,14 @@
     s.id = 'tcfa-css-v027';
     s.textContent = `
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
-      #tcfa-root,#tcfa-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
-      #tcfa-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-      #tta-fab{position:fixed!important;right:14px;bottom:86px;z-index:2147483646!important;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;align-items:center;justify-content:center;text-align:center;isolation:isolate}#tta-fab.tta-fab-hidden{display:none!important}
-      #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
-      #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
-      #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
-      #tta-fab.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
-      #tta-fab .tta-fabspinner{width:14px;height:14px;flex:0 0 14px;border:2px solid #ffccd244;border-top-color:#ffb0ba;border-right-color:#ffb0ba;border-radius:50%;animation:tta-spin .78s linear infinite}
+      #tcfa-root,#tcfa-root *,#tcfa-launcher,#tcfa-launcher *{box-sizing:border-box}
+      #tcfa-root button,#tcfa-launcher{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+      #tcfa-launcher{position:fixed!important;right:14px;bottom:86px;z-index:2147483646!important;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;align-items:center;justify-content:center;text-align:center;isolation:isolate}#tcfa-launcher.tta-fab-hidden{display:none!important}
+      #tcfa-launcher .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tcfa-launcher .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tcfa-launcher .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tcfa-launcher .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tcfa-launcher .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tcfa-launcher .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tcfa-launcher .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
+      #tcfa-launcher.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
+      #tcfa-launcher .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
+      #tcfa-launcher.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
+      #tcfa-launcher .tta-fabspinner{width:14px;height:14px;flex:0 0 14px;border:2px solid #ffccd244;border-top-color:#ffb0ba;border-right-color:#ffb0ba;border-radius:50%;animation:tta-spin .78s linear infinite}
       #tcfa-root{position:fixed;inset:0;z-index:2147482999;background:#06090dcc;backdrop-filter:blur(5px);display:none;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--tta-text);font-size:14px;line-height:1.4}
       #tcfa-root.show{display:block}.tta-shell{position:absolute;inset:0;background:var(--tta-bg);overflow:auto;overscroll-behavior:contain;padding-bottom:max(38px,env(safe-area-inset-bottom))}.tta-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:9px;min-height:62px;padding:10px 12px;background:#0b0f14f2;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(8px)}
       .tta-brand{display:flex;align-items:center;gap:9px;min-width:0;flex:1}.tta-mark{width:38px;height:38px;flex:0 0 38px;border-radius:11px;background:linear-gradient(145deg,#183d32,#17394f);display:grid;place-items:center;font-size:19px;line-height:1}.tta-brandcopy{min-width:0}.tta-title{color:var(--tta-text);font-size:15px;font-weight:850;letter-spacing:.15px;line-height:1.2}.tta-sub{font-size:11px;color:var(--tta-muted);margin-top:2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -974,7 +974,7 @@
 
   async function openAnalyzer() {
     state.open=true;
-    const fab=document.getElementById('tta-fab');if(fab)fab.style.display='none';
+    const fab=document.getElementById(TCFA_LAUNCHER_ID);if(fab)fab.style.setProperty('display','none','important');
     const root=document.getElementById('tcfa-root');if(!root)return;
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     if(root.querySelector('.tta-shell')&&root.dataset.view===state.view)return;
@@ -1961,5 +1961,5 @@
   document.addEventListener('click',e=>{const el=e.target?.closest?.('#tcfa-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
 
   const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();
-  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tcfa-root'))mount();},5000);
+  setInterval(()=>{if(!document.getElementById(TCFA_LAUNCHER_ID)||!document.getElementById('tcfa-root'))mount();},5000);
 })();
