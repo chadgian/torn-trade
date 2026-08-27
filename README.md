@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.7
+**Current version:** v0.2.8
 
 ## Install
 
@@ -263,3 +263,12 @@ Syncing is now split into two explicit modes:
 - Resets the old saved launcher coordinate once and clamps future positions against Android's visual viewport.
 - Adds element hit-testing and several safe fallback positions when a DOM layer covers the button.
 - Forces the launcher into its own compositor layer and keeps it alive even if dashboard rendering throws.
+
+
+## v0.2.8 — Torn PDA launcher lifecycle repair
+
+- Root cause: Torn PDA can tear down a userscript execution context while leaving the same-version runtime marker on `window`. The old guard then returned before remounting the launcher.
+- Every new injection now supersedes the prior runtime token and mounts a fresh launcher/watchdog instead of trusting a stale marker.
+- Legacy launcher nodes are hidden only after the current launcher is confirmed interactable, preserving a fallback during recovery.
+- Launcher visibility now depends on the actual visible analyzer overlay, not only the `state.open` boolean.
+- Stale open-state recovery and old watchdog cleanup are included; Bento card scrolling remains isolated and unchanged.
