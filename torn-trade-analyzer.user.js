@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.11
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.12
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a clean Bento dashboard, Torn PDA parser-safe rendering, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.11';
+  const VERSION = '0.2.12';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -813,14 +813,20 @@
     const nw=Number(snap?.networth?.total)||0;
     const todayRows=allCashFlows().filter(x=>x.timestamp>=today.from&&x.timestamp<=today.to);
     const recent=todayRows.slice(0,12);
-    const apiBanner=!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':'';
-    const lastSync=state.sync?.lastSync?`Last sync ${esc(tctDateTimeStr(state.sync.lastSync))} TCT`:'Run Quick Sync to load today’s movements';
-    const movementLabel=`${qty(todayRows.length)} movement${todayRows.length===1?'':'s'} recorded today`;
-    const moreLabel=todayRows.length>12?`<div class="tta-morehint">Showing the latest 12 of ${qty(todayRows.length)} movements from the current TCT day.</div>`:'';
+    let apiBanner='';
+    if(!hasApiKey())apiBanner='<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>';
+    let lastSync='Run Quick Sync to load today&#39;s movements';
+    if(state.sync?.lastSync)lastSync='Last sync '+esc(tctDateTimeStr(state.sync.lastSync))+' TCT';
+    let movementLabel=qty(todayRows.length)+' movement';
+    if(todayRows.length!==1)movementLabel+='s';
+    movementLabel+=' recorded today';
+    let moreLabel='';
+    if(todayRows.length>12)moreLabel='<div class="tta-morehint">Showing the latest 12 of '+qty(todayRows.length)+' movements from the current TCT day.</div>';
     const networthLabel=snap?.networth?money(nw):'Sync to load';
     const netClass=sum.net>=0?'pos':'neg';
     const profitClass=portfolio.realizedProfit>=0?'pos':'neg';
-    return `${header('Cash Flow Analyzer',`v${VERSION} · clear financial overview`)}<div class="tta-content tta-dashboard">${apiBanner}<div class="tta-period tta-dashboard-top"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${lastSync}</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div><div class="tta-bento-grid"><section class="tta-bento tta-bento-hero"><small>Consolidated cash flow today</small><b class="tta-consolidated ${netClass}">${money(sum.net)}</b><div class="tta-equation"><span class="pos">+ ${money(sum.earned)}</span><span>−</span><span class="neg">${money(sum.spent)}</span></div><p>Money in minus money out for the current TCT day. Transfers are tracked separately.</p></section><section class="tta-bento"><small>Money in today</small><b class="pos">+ ${money(sum.earned)}</b></section><section class="tta-bento"><small>Money out today</small><b class="neg">− ${money(sum.spent)}</b></section><section class="tta-bento tta-transfer-card"><small>Internal transfers</small><b class="tta-transfer">↔ ${money(sum.transferIn+sum.transferOut)}</b><p>Moving your own money does not count as income or spending.</p></section></div>${flowLegendHtml()}<div class="tta-sectionintro"><div><small>Explore</small><h3>Financial tools</h3></div><span>Swipe the cards</span></div>${financialNavHtml()}<div class="tta-sectionintro"><div><small>Snapshot</small><h3>Financial position</h3></div></div><div class="tta-position-grid"><section class="tta-bento"><small>Torn net worth</small><b>${networthLabel}</b></section><section class="tta-bento"><small>Recorded inventory value</small><b>${money(portfolio.marketValue)}</b></section><section class="tta-bento"><small>Realized trade profit</small><b class="${profitClass}">${money(portfolio.realizedProfit)}</b></section></div><section class="tta-glass-section"><div class="tta-sectionhead"><div><small>Current TCT day</small><h3>Today’s cash movements</h3><span class="tta-sectionhint">${movementLabel}</span></div><button class="tta-btn secondary" data-act="cashflow">Open ledger</button></div><div class="tta-table-scroll"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,12)}</tbody></table></div>${moreLabel}</section></div>`;
+    const dashboardHeader=header('Cash Flow Analyzer','v'+VERSION+' · clear financial overview');
+    return `${dashboardHeader}<div class="tta-content tta-dashboard">${apiBanner}<div class="tta-period tta-dashboard-top"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${lastSync}</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div><div class="tta-bento-grid"><section class="tta-bento tta-bento-hero"><small>Consolidated cash flow today</small><b class="tta-consolidated ${netClass}">${money(sum.net)}</b><div class="tta-equation"><span class="pos">+ ${money(sum.earned)}</span><span>−</span><span class="neg">${money(sum.spent)}</span></div><p>Money in minus money out for the current TCT day. Transfers are tracked separately.</p></section><section class="tta-bento"><small>Money in today</small><b class="pos">+ ${money(sum.earned)}</b></section><section class="tta-bento"><small>Money out today</small><b class="neg">− ${money(sum.spent)}</b></section><section class="tta-bento tta-transfer-card"><small>Internal transfers</small><b class="tta-transfer">↔ ${money(sum.transferIn+sum.transferOut)}</b><p>Moving your own money does not count as income or spending.</p></section></div>${flowLegendHtml()}<div class="tta-sectionintro"><div><small>Explore</small><h3>Financial tools</h3></div><span>Swipe the cards</span></div>${financialNavHtml()}<div class="tta-sectionintro"><div><small>Snapshot</small><h3>Financial position</h3></div></div><div class="tta-position-grid"><section class="tta-bento"><small>Torn net worth</small><b>${networthLabel}</b></section><section class="tta-bento"><small>Recorded inventory value</small><b>${money(portfolio.marketValue)}</b></section><section class="tta-bento"><small>Realized trade profit</small><b class="${profitClass}">${money(portfolio.realizedProfit)}</b></section></div><section class="tta-glass-section"><div class="tta-sectionhead"><div><small>Current TCT day</small><h3>Today&#39;s cash movements</h3><span class="tta-sectionhint">${movementLabel}</span></div><button class="tta-btn secondary" data-act="cashflow">Open ledger</button></div><div class="tta-table-scroll"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,12)}</tbody></table></div>${moreLabel}</section></div>`;
   }
   function cashFlowDateRange() {
     const serverNow=Math.min(Number(state.sync?.lastSync)||nowSec(),nowSec()),bounds=selectedPeriodBoundsTct(serverNow);let from=bounds.from,to=bounds.to;
