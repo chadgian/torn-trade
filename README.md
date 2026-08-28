@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.9
+**Current version:** v0.2.10
 
 ## Install
 
@@ -281,3 +281,12 @@ Syncing is now split into two explicit modes:
 - The launcher uses inline visibility safeguards and is recreated if Torn SPA navigation removes it.
 - Same-version userscript reinjection replaces the launcher node so click/drag listeners always belong to the live execution context.
 - Automated DOM validation checks initial visibility, click-to-open, removal recovery, body replacement recovery, and reinjection.
+
+
+## v0.2.10 — Launcher diagnostics
+
+- Adds structured console diagnostics prefixed with `[TTA]` around userscript boot, CSS injection, root/FAB mounting, state application, rendering and Torn-SPA watchdog recovery.
+- FAB snapshots report its DOM attachment, bounding rectangle, computed display/visibility/opacity/z-index/pointer-events, saved coordinates, viewport metrics, and the topmost element at the launcher center.
+- Browser/runtime errors and unhandled promise rejections are surfaced with `[TTA]` diagnostics.
+- Run `window.__TTA_DEBUG_DUMP__()` in the console for an on-demand launcher snapshot.
+- This release is diagnostic only; cash-flow, sync, trade/FIFO, net-worth and Bento accounting behavior are unchanged.
