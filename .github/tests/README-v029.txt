@@ -1,1 +1,0 @@
-v0.2.9 launcher validation must prove the floating #tta-fab exists and is visible, opens #tta-root, reappears after removal, recovers after body replacement, and still works after same-version reinjection. This file is temporary validation documentation and is not part of the production merge.
