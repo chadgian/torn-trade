@@ -28,8 +28,8 @@ jobs:
           s=Path('torn-trade-analyzer.user.js').read_text()
           required=[
             '@version      0.2.13',
-            "if(logTypeId===8155)return 'in';",
-            "if(logTypeId===8156)return 'out';",
+            "if(Number(logTypeId)===8155)return 'in';",
+            "if(Number(logTypeId)===8156)return 'out';",
             'Company Profit / Loss',
             'refreshCompanyDailyAdjustment',
             'repairCashFlowAccountingRows();',
@@ -42,7 +42,7 @@ jobs:
       - name: Commit feature build
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+chadgian@users.noreply.github.com"
           git add torn-trade-analyzer.user.js README.md
           if ! git diff --cached --quiet; then
             git commit -m "Cash Flow Analyzer v0.2.13 mug and company profit accounting"
