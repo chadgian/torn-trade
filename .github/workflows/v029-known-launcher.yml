@@ -17,10 +17,8 @@ jobs:
         with:
           ref: codex/v029-known-good-launcher
           fetch-depth: 0
-      - name: Restore proven launcher contract
-        run: |
-          sed -i "s/assert \"fab.id='tta-fab'\" in s/assert \"fresh.id='tta-fab'\" in s/" .github/scripts/v029_restore_known_launcher.py
-          python .github/scripts/v029_restore_known_launcher.py
+      - name: Apply in-place upgrade fixes
+        run: python .github/scripts/v029_upgrade_fix.py
       - name: JavaScript syntax check
         run: node --check torn-trade-analyzer.user.js
       - name: Structural regression assertions
@@ -31,31 +29,32 @@ jobs:
           assert '@version      0.2.9' in s
           assert "fresh.id='tta-fab'" in s
           assert "root.id='tta-root'" in s
-          assert "document.getElementById('tta-fab')" in s
-          assert "document.getElementById('tta-root')" in s
-          assert '#tta-fab' in s
-          assert '#tta-root' in s
+          assert "s.id = 'tta-css-v029'" in s
+          assert "document.getElementById('tcfa-css-v028')?.remove()" in s
+          assert '#tta-fab{position:fixed' in s
+          assert '#tta-fab .tta-terminal-frame' in s
+          assert '#tta-root{position:fixed' in s
+          assert "document.getElementById('tcfa-root')?.remove()" in s
           assert 'function suppressLegacyUi' not in s
           assert 'function tcfaOwnsRuntime' not in s
-          assert "const TCFA_LAUNCHER_ID='tcfa-launcher'" not in s
-          print('PASS: source uses the original tta-fab / tta-root DOM contract end-to-end')
+          print('PASS: v0.2.9 DOM and stylesheet contracts are internally consistent')
           PY
       - name: Install DOM test dependency
         run: |
           npm init -y >/dev/null 2>&1
           npm install --no-save jsdom@24.1.3
-      - name: Execute launcher DOM lifecycle test
-        run: node .github/tests/v029_launcher_dom_test.js
+      - name: Execute clean-boot and v0.2.8 in-place upgrade DOM tests
+        run: node .github/tests/v029_upgrade_dom_test.js
       - name: Commit validated production files to feature branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add torn-trade-analyzer.user.js README.md
           if ! git diff --cached --quiet; then
-            git commit -m "Cash Flow Analyzer v0.2.9 restore proven floating launcher"
+            git commit -m "Cash Flow Analyzer v0.2.9 fix in-place launcher upgrade"
             git push origin HEAD:codex/v029-known-good-launcher
           fi
       - name: Close validation issue
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.9 passed syntax, DOM visibility, click-to-open, DOM-removal recovery, body-replacement recovery, and same-version reinjection tests."
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.9 passed clean-boot and realistic v0.2.8 in-place upgrade tests, including stylesheet replacement, themed launcher visibility, click-to-open, DOM recovery and reinjection."
