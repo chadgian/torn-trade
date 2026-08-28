@@ -1,0 +1,63 @@
+name: Build Cash Flow Analyzer v0.2.12 PDA parser fix
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: github.event.issue.title == 'build-v0212-pda-parser-fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v0212-pda-parser-fix
+          fetch-depth: 0
+      - name: Apply parser-safe Bento patch
+        run: python .github/scripts/v0212_pda_parser_fix.py
+      - name: Validate JavaScript source
+        run: |
+          node --check torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text().replace('_###PDA-APIKEY###_','0123456789abcdef0123456789abcdef')
+          Path('/tmp/tta-pda.js').write_text(s)
+          PY
+          node --check /tmp/tta-pda.js
+      - name: Verify Bento parser fix and launcher preservation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          new=Path('torn-trade-analyzer.user.js').read_text()
+          old=subprocess.check_output(['git','show','4db5d3f3cc18fe1f0265944fe48cf2895bc58706:torn-trade-analyzer.user.js'],text=True)
+          assert '@version      0.2.12' in new
+          assert "const VERSION = '0.2.12';" in new
+          dash=new[new.index('  function dashboardHtml()'):new.index('  function cashFlowDateRange')]
+          assert "movement${todayRows.length===1?'':'s'}" not in dash
+          assert "const movementLabel=`" not in dash
+          assert "movementLabel+='s';" in dash
+          assert "const dashboardHeader=header('Cash Flow Analyzer','v'+VERSION" in dash
+          assert 'Today&#39;s cash movements' in dash
+          def launcher(src):
+              a=src.index('  function clampFabPosition')
+              b=src.index('  let demoTxCache',a)
+              return src[a:b]
+          assert launcher(new)==launcher(old), 'Launcher runtime changed; parser hotfix must not touch it'
+          print('v0.2.12 parser-safe Bento dashboard and proven launcher verified')
+          PY
+      - name: Commit release candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-trade-analyzer.user.js README.md
+          git commit -m "Cash Flow Analyzer v0.2.12 Torn PDA parser compatibility"
+          git push origin HEAD:codex/v0212-pda-parser-fix
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.12 parser-safe Bento build completed; standard, PDA-key-substituted, and launcher-preservation checks passed."
