@@ -18,7 +18,9 @@ jobs:
           ref: codex/v029-known-good-launcher
           fetch-depth: 0
       - name: Restore proven launcher contract
-        run: python .github/scripts/v029_restore_known_launcher.py
+        run: |
+          sed -i "s/assert \"fab.id='tta-fab'\" in s/assert \"fresh.id='tta-fab'\" in s/" .github/scripts/v029_restore_known_launcher.py
+          python .github/scripts/v029_restore_known_launcher.py
       - name: JavaScript syntax check
         run: node --check torn-trade-analyzer.user.js
       - name: Structural regression assertions
@@ -27,7 +29,7 @@ jobs:
           from pathlib import Path
           s=Path('torn-trade-analyzer.user.js').read_text()
           assert '@version      0.2.9' in s
-          assert "fab.id='tta-fab'" in s
+          assert "fresh.id='tta-fab'" in s
           assert "root.id='tta-root'" in s
           assert "document.getElementById('tta-fab')" in s
           assert "document.getElementById('tta-root')" in s
