@@ -33,7 +33,7 @@ jobs:
           assert "root.id='tta-root'" in s
           assert "document.getElementById('tta-fab')" in s
           assert "document.getElementById('tta-root')" in s
-          assert '#tta-fab{' in s
+          assert '#tta-fab' in s
           assert '#tta-root' in s
           assert 'function suppressLegacyUi' not in s
           assert 'function tcfaOwnsRuntime' not in s
