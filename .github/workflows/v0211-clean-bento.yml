@@ -1,0 +1,82 @@
+name: Build Cash Flow Analyzer v0.2.11 Clean Bento Runtime
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: github.event.issue.title == 'build-v0211-clean-bento'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v0211-clean-bento-runtime
+          fetch-depth: 0
+      - name: Validate known-good v0.2.1 baseline
+        run: |
+          git show 4db5d3f3cc18fe1f0265944fe48cf2895bc58706:torn-trade-analyzer.user.js > /tmp/v021.js
+          node --check /tmp/v021.js
+      - name: Validate current production source separately
+        run: |
+          git fetch origin main
+          git show origin/main:torn-trade-analyzer.user.js > /tmp/current-main.js
+          node --check /tmp/current-main.js
+      - name: Apply clean Bento rebuild
+        run: python .github/scripts/v0211_clean_bento.py
+      - name: Validate rebuilt userscript
+        run: node --check torn-trade-analyzer.user.js
+      - name: Validate Torn PDA API-key substituted source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text()
+          s=s.replace('_###PDA-APIKEY###_','0123456789abcdef0123456789abcdef')
+          Path('/tmp/pda-injected.js').write_text(s)
+          PY
+          node --check /tmp/pda-injected.js
+      - name: Verify launcher matches v0.2.1 runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          new=Path('torn-trade-analyzer.user.js').read_text()
+          old=subprocess.check_output(['git','show','4db5d3f3cc18fe1f0265944fe48cf2895bc58706:torn-trade-analyzer.user.js'],text=True)
+          def launcher(src):
+              a=src.index('  function clampFabPosition')
+              b=src.index('  let demoTxCache',a)
+              return src[a:b]
+          assert launcher(new)==launcher(old), 'Launcher runtime differs from proven v0.2.1 implementation'
+          required=['@version      0.2.11','Consolidated cash flow today','function cashFlowBoundsToday() {const now=nowSec();return {from:tctDayStart(now),to:now};}','overflow-x:hidden!important','tta-toolcard','Today’s cash movements']
+          missing=[x for x in required if x not in new]
+          assert not missing, missing
+          forbidden=['TTA_DEBUG_PREFIX','__TTA_DEBUG_DUMP__','__TCFA_RUNTIME_INSTANCE__','ttaFabSnapshot']
+          present=[x for x in forbidden if x in new]
+          assert not present, present
+          print('v0.2.11 clean runtime verification passed')
+          PY
+      - name: Update README
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('README.md');s=p.read_text()
+          import re
+          s=re.sub(r'\*\*Current version:\*\* v[^\n]+','**Current version:** v0.2.11',s,count=1)
+          s+='''\n\n## v0.2.11 — Clean Bento runtime rebuild\n\n- Rebuilt from the proven v0.2.1 launcher/runtime instead of layering additional launcher watchdogs.\n- Reapplies the Bento/glass dashboard and current-TCT daily cash-flow view as presentation-only changes.\n- Restores the original floating launcher mount, drag, click and visibility code verbatim from v0.2.1.\n- Prevents page-wide horizontal scrolling while keeping financial navigation and wide ledgers independently scrollable.\n- Consolidated cash flow today is money in minus money out for the current TCT day; internal transfers remain separate.\n- Source validation includes the original baseline, current production source, rebuilt source and a Torn-PDA-style API-key substituted source.\n'''
+          p.write_text(s)
+          PY
+      - name: Commit clean release candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-trade-analyzer.user.js README.md
+          git commit -m "Cash Flow Analyzer v0.2.11 clean Bento runtime rebuild"
+          git push origin HEAD:codex/v0211-clean-bento-runtime
+      - name: Close trigger issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.11 clean Bento runtime build completed; baseline, current source, rebuilt source and PDA-substituted syntax checks passed."
