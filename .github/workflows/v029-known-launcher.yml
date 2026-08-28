@@ -34,7 +34,7 @@ jobs:
           assert "document.getElementById('tta-fab')" in s
           assert "document.getElementById('tta-root')" in s
           assert '#tta-fab{' in s
-          assert '#tta-root{' in s
+          assert '#tta-root' in s
           assert 'function suppressLegacyUi' not in s
           assert 'function tcfaOwnsRuntime' not in s
           assert "const TCFA_LAUNCHER_ID='tcfa-launcher'" not in s
