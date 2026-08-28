@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.12
+**Current version:** v0.2.13
 
 ## Install
 
@@ -227,3 +227,12 @@ Syncing is now split into two explicit modes:
 - Simplifies newly introduced dashboard strings while preserving the v0.2.11 Bento layout and current-TCT calculations.
 - Keeps the proven v0.2.1 floating-launcher runtime unchanged byte-for-byte.
 - No accounting, sync, FIFO, acquisition-history or net-worth calculation changes.
+
+
+## v0.2.13 — Mugging direction and director company profit
+
+- Corrects mugging accounting: Torn log 8155 (Attack Mug) is money in for the mugger; 8156 (Attack Mug Receive) is money out for the victim.
+- Repairs already cached mugging cash-flow rows automatically after updating.
+- Company deposits and withdrawals are excluded from cash-flow rows.
+- If the API-key owner is the company director, each sync adds/updates one current-TCT-day Company Profit / Loss row calculated as daily company income minus employee wages minus advertisement budget.
+- The daily company row is updated rather than duplicated when syncing again on the same TCT day.
