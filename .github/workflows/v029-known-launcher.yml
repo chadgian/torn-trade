@@ -1,0 +1,59 @@
+name: Validate Cash Flow Analyzer v0.2.9 launcher
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  validate:
+    if: github.event.issue.title == 'validate-v029-known-launcher'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v029-known-good-launcher
+          fetch-depth: 0
+      - name: Restore proven launcher contract
+        run: python .github/scripts/v029_restore_known_launcher.py
+      - name: JavaScript syntax check
+        run: node --check torn-trade-analyzer.user.js
+      - name: Structural regression assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text()
+          assert '@version      0.2.9' in s
+          assert "fab.id='tta-fab'" in s
+          assert "root.id='tta-root'" in s
+          assert "document.getElementById('tta-fab')" in s
+          assert "document.getElementById('tta-root')" in s
+          assert '#tta-fab{' in s
+          assert '#tta-root{' in s
+          assert 'function suppressLegacyUi' not in s
+          assert 'function tcfaOwnsRuntime' not in s
+          assert "const TCFA_LAUNCHER_ID='tcfa-launcher'" not in s
+          print('PASS: source uses the original tta-fab / tta-root DOM contract end-to-end')
+          PY
+      - name: Install DOM test dependency
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-save jsdom@24.1.3
+      - name: Execute launcher DOM lifecycle test
+        run: node .github/tests/v029_launcher_dom_test.js
+      - name: Commit validated production files to feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-trade-analyzer.user.js README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Cash Flow Analyzer v0.2.9 restore proven floating launcher"
+            git push origin HEAD:codex/v029-known-good-launcher
+          fi
+      - name: Close validation issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --reason completed --comment "v0.2.9 passed syntax, DOM visibility, click-to-open, DOM-removal recovery, body-replacement recovery, and same-version reinjection tests."
