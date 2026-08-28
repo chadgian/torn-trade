@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.11
+**Current version:** v0.2.12
 
 ## Install
 
@@ -218,3 +218,12 @@ Syncing is now split into two explicit modes:
 - Prevents page-wide horizontal scrolling while keeping financial navigation and wide ledgers independently scrollable.
 - Consolidated cash flow today is money in minus money out for the current TCT day; internal transfers remain separate.
 - Source validation includes the original baseline, current production source, rebuilt source and a Torn-PDA-style API-key substituted source.
+
+
+## v0.2.12 — Torn PDA parser compatibility
+
+- Fixes a startup failure reported by Torn PDA as `Uncaught SyntaxError: Unexpected identifier 's'`.
+- Removes the Bento dashboard's nested pluralization template expression and precomputes the movement labels with plain statements.
+- Simplifies newly introduced dashboard strings while preserving the v0.2.11 Bento layout and current-TCT calculations.
+- Keeps the proven v0.2.1 floating-launcher runtime unchanged byte-for-byte.
+- No accounting, sync, FIFO, acquisition-history or net-worth calculation changes.
