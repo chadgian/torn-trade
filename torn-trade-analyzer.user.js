@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.10
-// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a Bento dashboard, launcher diagnostics, TCT daily flow and fast sync modes. Data stays on-device.
+// @version      0.2.11
+// @description  Torn cash-flow, spending, earnings, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
@@ -14,57 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.10';
-  const TTA_INSTANCE_ID = `v${VERSION}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
-  const TTA_DEBUG_PREFIX='[TTA]';
-  const TTA_DEBUG_STARTED_AT=Date.now();
-  function ttaDebug(stage,data){
-    try{if(arguments.length>1)console.log(`${TTA_DEBUG_PREFIX} ${stage}`,data);else console.log(`${TTA_DEBUG_PREFIX} ${stage}`);}catch(_){}
-  }
-  function ttaDebugError(stage,err,extra){
-    try{console.error(`${TTA_DEBUG_PREFIX} ${stage}`,{message:String(err?.message||err||'Unknown error'),stack:String(err?.stack||''),extra:extra||null});}catch(_){}
-  }
-  function ttaElementSummary(el){
-    if(!el)return null;
-    return {tag:String(el.tagName||'').toLowerCase(),id:String(el.id||''),className:typeof el.className==='string'?el.className:String(el.className?.baseVal||''),connected:!!el.isConnected,parent:el.parentElement?`${String(el.parentElement.tagName||'').toLowerCase()}#${el.parentElement.id||''}`:null};
-  }
-  function ttaFabSnapshot(label,fab=document.getElementById('tta-fab')){
-    try{
-      const vv=window.visualViewport;
-      const rect=fab?.getBoundingClientRect?.();
-      const cs=fab?getComputedStyle(fab):null;
-      let topElement=null;
-      if(fab&&rect&&rect.width>0&&rect.height>0&&document.elementFromPoint){
-        const x=Math.max(0,Math.min((window.innerWidth||0)-1,rect.left+rect.width/2)),y=Math.max(0,Math.min((window.innerHeight||0)-1,rect.top+rect.height/2));
-        topElement=ttaElementSummary(document.elementFromPoint(x,y));
-      }
-      const data={
-        label,version:VERSION,instance:TTA_INSTANCE_ID,uptimeMs:Date.now()-TTA_DEBUG_STARTED_AT,
-        href:String(location.href),readyState:document.readyState,bodyPresent:!!document.body,
-        stateOpen:typeof state!=='undefined'?!!state.open:null,stateSyncing:typeof state!=='undefined'?!!state.syncing:null,
-        savedFabPosition:typeof state!=='undefined'?state.fabPosition:null,
-        fab:ttaElementSummary(fab),
-        rect:rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height}:null,
-        computed:cs?{display:cs.display,visibility:cs.visibility,opacity:cs.opacity,position:cs.position,zIndex:cs.zIndex,pointerEvents:cs.pointerEvents,transform:cs.transform}:null,
-        inlineStyle:fab?.getAttribute?.('style')||'',
-        viewport:{innerWidth:window.innerWidth,innerHeight:window.innerHeight,scrollX:window.scrollX,scrollY:window.scrollY,visualViewport:vv?{width:vv.width,height:vv.height,offsetLeft:vv.offsetLeft,offsetTop:vv.offsetTop,scale:vv.scale}:null},
-        topElementAtFabCenter:topElement,
-        root:ttaElementSummary(document.getElementById('tta-root')),
-        css:{current:!!document.getElementById('tta-css-v029'),old028:!!document.getElementById('tcfa-css-v028'),legacy:!!document.getElementById('tta-css')}
-      };
-      ttaDebug(`FAB SNAPSHOT: ${label}`,data);return data;
-    }catch(err){ttaDebugError(`FAB SNAPSHOT FAILED: ${label}`,err);return null;}
-  }
-  window.__TTA_DEBUG_DUMP__=()=>ttaFabSnapshot('manual __TTA_DEBUG_DUMP__');
-  window.addEventListener('error',e=>ttaDebugError('WINDOW ERROR EVENT',e?.error||e?.message,{filename:e?.filename||'',lineno:e?.lineno||0,colno:e?.colno||0}),true);
-  window.addEventListener('unhandledrejection',e=>ttaDebugError('UNHANDLED REJECTION',e?.reason||'Unknown rejection'),true);
-  ttaDebug('BOOT: script evaluated',{version:VERSION,instance:TTA_INSTANCE_ID,href:String(location.href),readyState:document.readyState,bodyPresent:!!document.body,userAgent:navigator.userAgent});
-  // Retire experimental v0.2.7/v0.2.8 launcher runtimes if this userscript is updated
-  // without a full WebView restart. Their watchdogs stop when their runtime token changes.
-  try{window.__TCFA_RUNTIME_INSTANCE__?.cleanup?.();}catch(_){}
-  try{window.__TCFA_LAUNCHER_WATCH_V027__?.cleanup?.();}catch(_){}
-  try{window.__TCFA_LAUNCHER_WATCH_V028__?.cleanup?.();}catch(_){}
-  window.__TCFA_RUNTIME_INSTANCE__={version:VERSION,token:`superseded:${TTA_INSTANCE_ID}`};
+  const VERSION = '0.2.11';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -126,8 +76,6 @@
     busy: {active:false,title:'',detail:'',cancellable:false},
     demo: false,
   };
-
-  ttaDebug('STATE: initialized',{open:state.open,view:state.view,syncing:state.syncing,fabPosition:state.fabPosition,lastSync:state.sync?.lastSync||0});
 
   // v0.1.27 removes the old calendar-month preset. Migrate saved users to 30 days.
   if(state.dateMode==='month'){state.dateMode='30d';save('dateMode','30d');}
@@ -208,19 +156,14 @@
   }
 
   function injectCss() {
-    ttaDebug('CSS: injectCss start',{headPresent:!!document.head,current:!!document.getElementById('tta-css-v029'),old028:!!document.getElementById('tcfa-css-v028')});
-    // v0.2.8 used a different launcher/root namespace under this stylesheet id.
-    // Remove it during an in-place Torn PDA update so the restored #tta-fab/#tta-root
-    // contract cannot accidentally inherit stale selectors.
-    const old028=document.getElementById('tcfa-css-v028');if(old028){ttaDebug('CSS: removing stale v0.2.8 stylesheet',ttaElementSummary(old028));old028.remove();}
-    if (document.getElementById('tta-css-v029')) {ttaDebug('CSS: current stylesheet already present');return;}
+    if (document.getElementById('tta-css')) return;
     const s = document.createElement('style');
-    s.id = 'tta-css-v029';
+    s.id = 'tta-css';
     s.textContent = `
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
       #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
       #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-      #tta-fab{position:fixed!important;right:14px;bottom:86px;z-index:2147483646!important;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;align-items:center;justify-content:center;text-align:center;isolation:isolate}#tta-fab.tta-fab-hidden{display:none!important}
+      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center}
       #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
       #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
       #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
@@ -264,117 +207,99 @@
       #tta-root[aria-busy="true"] .tta-shell{overflow:hidden}
       @media(prefers-reduced-motion:reduce){.tta-loadingbar span,.tta-spinner,.tta-fabspinner{animation-duration:2.2s}.tta-item,.tta-btn,.tta-chip,.tta-iconbtn,.tta-back,.tta-pin,.tta-toast{transition:none}}
 
-      /* v0.2.2 Bento / glass visual system */
-      :root{--tta-bg:#182630;--tta-panel:#20313d;--tta-card:#263946;--tta-soft:#304653;--tta-line:#ffffff20;--tta-text:#f5f9fc;--tta-muted:#c7d4de;--tta-faint:#a8bac8;--tta-green:#77ddb0;--tta-red:#ff979d;--tta-blue:#8bc9f7;--tta-yellow:#f1c875;--tta-glass:#ffffff0d;--tta-glass-strong:#ffffff14;--tta-shadow:0 12px 32px #07131c3d}
-      #tta-root{background:#0d1820b8;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-      .tta-shell{overflow-y:auto!important;overflow-x:hidden!important;background:radial-gradient(circle at 12% 0%,#31536555 0,transparent 34%),radial-gradient(circle at 92% 18%,#28554842 0,transparent 30%),linear-gradient(180deg,#1a2a35 0%,#15232d 100%);scrollbar-gutter:stable}
-      .tta-content{width:min(100%,760px)!important;max-width:760px!important;min-width:0!important;overflow-x:hidden;padding:14px 12px 34px}
+      /* v0.2.11 clean Bento UI — layered over the proven v0.2.1 runtime */
+      :root{--tta-bg:#1b2a34;--tta-panel:#233641;--tta-card:#2a3e4a;--tta-soft:#344b58;--tta-line:#ffffff22;--tta-text:#f7fafc;--tta-muted:#cfdae2;--tta-faint:#aebfca;--tta-green:#79dfb3;--tta-red:#ff9da3;--tta-blue:#91cdf7;--tta-yellow:#f0cc78;--tta-shadow:0 12px 30px #08141c35}
+      #tta-root{background:#0e1921b8;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+      .tta-shell{overflow-y:auto!important;overflow-x:hidden!important;background:radial-gradient(circle at 12% 0%,#3d657650 0,transparent 34%),radial-gradient(circle at 92% 18%,#376a5a3d 0,transparent 30%),linear-gradient(180deg,#1e303b,#172630)}
+      .tta-content{width:min(100%,760px)!important;max-width:760px!important;min-width:0!important;overflow-x:hidden!important;padding:14px 12px 34px}
       .tta-content>*{min-width:0;max-width:100%}
-      .tta-header{background:#1c2b35d9;border-bottom:1px solid #ffffff1d;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 8px 24px #07131c24}
-      .tta-mark{background:linear-gradient(145deg,#326052,#31566d);box-shadow:inset 0 1px #ffffff24,0 8px 20px #07131c33}
-      .tta-title{font-size:16px}.tta-sub{color:#cbd8e2}
-      .tta-iconbtn,.tta-back,.tta-btn.secondary,.tta-chip,.tta-history-search{background:#ffffff0d;border-color:#ffffff20;box-shadow:inset 0 1px #ffffff0d}
-      .tta-btn{border-radius:12px;background:linear-gradient(135deg,#7be0b4,#89c9f7);color:#10232b!important;box-shadow:0 7px 18px #0d1b2430;font-weight:850}.tta-btn.secondary{color:var(--tta-text)!important}.tta-btn.danger{background:#66353c80;border-color:#ff9aa944;color:#ffd9dc!important}
-      .tta-chip{color:#d8e3ea!important}.tta-chip.active{background:linear-gradient(135deg,#7be0b4,#91d7c2);border-color:transparent;color:#123027!important}
-      .tta-period{background:#ffffff08;border:1px solid #ffffff15;border-radius:16px;padding:11px 12px;box-shadow:inset 0 1px #ffffff0b}.tta-periodhint{display:block;margin-top:3px;color:var(--tta-faint);font-size:9px}
-      .tta-dashboard-top{align-items:flex-start}.tta-syncactions{max-width:100%;flex:0 0 auto}.tta-syncactions .tta-btn{min-height:34px;padding:7px 9px;font-size:10px}
-      .tta-bento-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0}.tta-bento{min-width:0;border:1px solid #ffffff1f;border-radius:18px;background:linear-gradient(145deg,#ffffff12,#ffffff08);box-shadow:var(--tta-shadow),inset 0 1px #ffffff16;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:13px;color:var(--tta-text)}
-      .tta-bento>small,.tta-bento-kicker{display:block;color:var(--tta-muted);font-size:9px;font-weight:750;text-transform:uppercase;letter-spacing:.55px}.tta-bento>b{display:block;margin-top:5px;font-size:16px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .tta-bento-hero{grid-column:1/-1;padding:17px;background:linear-gradient(135deg,#ffffff18,#70bfa40d 58%,#6eb7e817);position:relative;overflow:hidden}.tta-bento-hero:after{content:"";position:absolute;width:150px;height:150px;border-radius:50%;right:-60px;top:-70px;background:#8bc9f718;filter:blur(2px);pointer-events:none}.tta-consolidated{display:block;position:relative;z-index:1;font-size:31px!important;line-height:1.08;margin:7px 0 8px!important;letter-spacing:-.7px}.tta-flow-equation{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--tta-muted);font-size:10px;font-weight:750}.tta-flow-equation .in{color:var(--tta-green)}.tta-flow-equation .out{color:var(--tta-red)}.tta-bento-hero>small:last-child{display:block;position:relative;z-index:1;margin-top:8px;color:var(--tta-faint);font-size:9px;line-height:1.45;text-transform:none;letter-spacing:0;font-weight:500}
-      .tta-bento-mini{display:flex;align-items:center;gap:10px}.tta-bento-mini .tta-mini-symbol,.tta-bento-transfer .tta-mini-symbol{width:31px;height:31px;flex:0 0 31px;display:grid;place-items:center;border-radius:11px;font-size:18px;font-weight:900}.tta-bento-mini.in .tta-mini-symbol{background:#77ddb01f;color:var(--tta-green)}.tta-bento-mini.out .tta-mini-symbol{background:#ff979d1f;color:var(--tta-red)}.tta-bento-mini small,.tta-bento-transfer small{display:block;color:var(--tta-muted);font-size:9px}.tta-bento-mini b,.tta-bento-transfer b{display:block;margin-top:2px;font-size:14px}.tta-bento-mini.in b{color:var(--tta-green)}.tta-bento-mini.out b{color:var(--tta-red)}
-      .tta-bento-transfer{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:10px 13px}.tta-bento-transfer .tta-mini-symbol{background:#8bc9f71f;color:var(--tta-blue)}.tta-bento-transfer em{display:block;margin-top:2px;color:var(--tta-faint);font-size:8.5px;font-style:normal;line-height:1.35}
-      .tta-flowlegend{display:flex;gap:7px;align-items:center;overflow-x:auto;max-width:100%;padding:2px 1px 8px;scrollbar-width:none}.tta-flowlegend::-webkit-scrollbar{display:none}.tta-flowlegend span{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;color:var(--tta-muted);font-size:9px}.tta-flowlegend i{width:20px;height:20px;display:grid;place-items:center;border-radius:7px;font-style:normal;font-weight:900}.tta-flowlegend i.in{background:#77ddb01c;color:var(--tta-green)}.tta-flowlegend i.out{background:#ff979d1c;color:var(--tta-red)}.tta-flowlegend i.transfer{background:#8bc9f71c;color:var(--tta-blue)}
-      .tta-sectionintro{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:15px 2px 8px}.tta-sectionintro small,.tta-sectionhead small{display:block;color:var(--tta-faint);font-size:8px;text-transform:uppercase;letter-spacing:.6px}.tta-sectionintro h3,.tta-sectionhead h3{margin:1px 0 0;color:var(--tta-text);font-size:14px}.tta-sectionintro>span,.tta-sectionhint,.tta-morehint{color:var(--tta-faint);font-size:8.5px}
-      .tta-fin-nav{display:flex!important;grid-template-columns:none!important;gap:9px;margin:0 0 13px;padding:1px 2px 8px;overflow-x:auto!important;overflow-y:hidden!important;max-width:100%;width:100%;scroll-snap-type:x proximity;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none}.tta-fin-nav::-webkit-scrollbar{display:none}.tta-navcard{flex:0 0 clamp(174px,58vw,220px);scroll-snap-align:start;display:grid;grid-template-columns:36px minmax(0,1fr) 18px;align-items:center;gap:9px;min-height:70px;padding:11px;border:1px solid #ffffff1e;border-radius:17px;background:linear-gradient(145deg,#ffffff13,#ffffff08);color:var(--tta-text)!important;box-shadow:var(--tta-shadow),inset 0 1px #ffffff14;text-align:left}.tta-navsymbol{width:36px;height:36px;display:grid;place-items:center;border-radius:12px;font-size:18px;font-weight:900}.tta-navsymbol.cash{background:#77ddb01d;color:var(--tta-green)}.tta-navsymbol.trade{background:#8bc9f71d;color:var(--tta-blue)}.tta-navsymbol.worth{background:#f1c8751c;color:var(--tta-yellow)}.tta-navcopy{min-width:0}.tta-navcopy strong{display:block;color:var(--tta-text);font-size:11px}.tta-navcopy small{display:block;margin-top:3px;color:var(--tta-faint);font-size:8.5px;line-height:1.3;white-space:normal}.tta-navarrow{color:var(--tta-faint);font-size:22px;text-align:right}
-      .tta-position-bento{grid-template-columns:repeat(3,minmax(0,1fr))}.tta-position-bento .tta-bento{padding:11px}.tta-position-bento .tta-bento b{font-size:13px}
-      .tta-glass-section,.tta-fin-section,.tta-chartcard,.tta-item,.tta-keycard,.tta-tos,.tta-banner,.tta-ledgerwrap{background:linear-gradient(145deg,#ffffff10,#ffffff07)!important;border:1px solid #ffffff1b!important;box-shadow:var(--tta-shadow),inset 0 1px #ffffff10;border-radius:18px!important;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-      .tta-glass-section{padding:12px;margin:11px 0}.tta-fin-section{padding:12px}.tta-chartcard{padding:13px 11px}.tta-item{margin-bottom:10px}.tta-accordion,.tta-metric{background:#ffffff07!important}.tta-ministat,.tta-stat,.tta-cashcard{background:#ffffff0b!important;border-color:#ffffff18!important;box-shadow:inset 0 1px #ffffff0d}.tta-summary{gap:9px}.tta-stat{border-radius:15px}.tta-stat label,.tta-metric small,.tta-ministat small,.tta-cashcard small{color:var(--tta-muted)!important}.tta-stat b,.tta-metric b,.tta-ministat b,.tta-cashcard b{color:var(--tta-text)}
-      .tta-cashhero{gap:9px}.tta-cashcard{border-radius:16px;padding:12px}.tta-cashcard b{font-size:15px}.tta-fin-row{border-bottom-color:#ffffff14}.tta-note{color:#bfd0dc;background:#ffffff07;border:1px solid #ffffff12;border-radius:12px;padding:9px 10px}.tta-friendly-note{margin-top:10px}.tta-source,.tta-snapshot-note,.tta-listmeta{color:#b4c5d1!important}
-      .tta-breakdown{gap:6px}.tta-breakhead,.tta-breakrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}.tta-breakhead{padding:0 8px 3px;color:var(--tta-faint);font-size:8px;text-transform:uppercase;letter-spacing:.45px}.tta-breakhead b{text-align:right}.tta-breakrow{background:#ffffff08;border-color:#ffffff16;border-radius:11px;padding:8px}.tta-breakrow span{color:#e9f1f6}.tta-breakrow b{font-size:9px}
-      .tta-flowtable{min-width:560px}.tta-table-scroll,.tta-ledgerwrap{width:100%;max-width:100%;overflow-x:auto!important;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}.tta-ledgerwrap{border-radius:14px!important}.tta-flowtable th{color:#afc1ce;border-bottom-color:#ffffff19}.tta-flowtable td{border-bottom-color:#ffffff12;color:#e8f0f5}.tta-flowmeta{color:#9fb2c0}.tta-flowbadge{display:inline-flex;align-items:center;gap:4px;border-radius:8px;padding:4px 7px}.tta-flowbadge strong{font-size:11px}.tta-flowbadge.in{background:#77ddb019;border-color:#77ddb033}.tta-flowbadge.out{background:#ff979d19;border-color:#ff979d33}.tta-flowbadge.transfer{background:#8bc9f719;border-color:#8bc9f733}
-      .tta-history-search{color:#f5f9fc!important}.tta-history-search::placeholder{color:#9eb0bd}.tta-history-search:focus{background:#ffffff12}.tta-seg{background:#ffffff08;border-color:#ffffff18}.tta-seg button.active{background:#ffffff14}.tta-chartviewport{max-width:100%}.tta-axis{fill:#dce7ee!important;color:#dce7ee!important;stroke:#1a2a35}.tta-grid{stroke:#ffffff18}.tta-zero{stroke:#a8bac8}.tta-charttooltip{background:#20313df2;border-color:#ffffff24;box-shadow:0 12px 30px #07131c66}
-      .tta-itemfacts{gap:5px}.tta-factpill{background:#ffffff08;border-color:#ffffff16;color:#b8c8d4}.tta-factpill.market{background:#77ddb015;border-color:#77ddb02c;color:var(--tta-green)}.tta-thumbwrap{background:#ffffff08;border-color:#ffffff18}.tta-profitbox{min-width:70px}.tta-metrics{background:#ffffff18;border-top-color:#ffffff18}.tta-chevron{color:#aebfcb}
-      .tta-empty{min-height:110px;color:#bdccd6}.tta-banner{color:#dbe6ed}.tta-status-banner{background:#8bc9f70f!important}.tta-toast{background:#20313df5!important;border-color:#ffffff22!important;color:#f5f9fc!important}
-      @media(max-width:520px){.tta-content{padding-left:10px;padding-right:10px}.tta-period{align-items:stretch;flex-direction:column}.tta-syncactions{width:100%;display:grid;grid-template-columns:1fr 1fr}.tta-syncactions .tta-btn{width:100%}.tta-position-bento{grid-template-columns:repeat(2,minmax(0,1fr))}.tta-position-bento .tta-bento:last-child{grid-column:1/-1}.tta-navcard{flex-basis:72vw}.tta-listtools{grid-template-columns:1fr}.tta-consolidated{font-size:28px!important}}
-      @media(min-width:700px){.tta-bento-grid.tta-cash-bento{grid-template-columns:1.35fr .8fr .8fr}.tta-bento-grid.tta-cash-bento .tta-bento-hero{grid-column:auto;grid-row:span 2}.tta-bento-grid.tta-cash-bento .tta-bento-transfer{grid-column:2/-1}.tta-navcard{flex-basis:220px}}
+      .tta-header{background:#21333edc;border-bottom-color:#ffffff20;backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px)}
+      .tta-title{font-size:16px}.tta-sub{color:#d1dce4}.tta-mark{background:linear-gradient(145deg,#3c685a,#386176)}
+      .tta-btn{border-radius:12px;background:linear-gradient(135deg,#7fe2b8,#93cff7);color:#10242d!important;box-shadow:0 7px 18px #0917202f}.tta-btn.secondary,.tta-iconbtn,.tta-back,.tta-chip,.tta-history-search{background:#ffffff0e;border-color:#ffffff22;color:var(--tta-text)!important}
+      .tta-chip.active{background:linear-gradient(135deg,#7fe2b8,#91dcc4);color:#123128!important;border-color:transparent}
+      .tta-period{padding:11px 12px;background:#ffffff09;border:1px solid #ffffff18;border-radius:16px}.tta-periodhint{display:block;margin-top:3px;color:var(--tta-faint);font-size:9px}
+      .tta-dashboard-top{align-items:flex-start}.tta-syncactions{max-width:100%}.tta-syncactions .tta-btn{min-height:34px;padding:7px 9px;font-size:10px}
+      .tta-bento-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0}.tta-bento{min-width:0;padding:13px;border:1px solid #ffffff20;border-radius:18px;background:linear-gradient(145deg,#ffffff13,#ffffff08);box-shadow:var(--tta-shadow),inset 0 1px #ffffff16;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+      .tta-bento small{display:block;color:var(--tta-muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px;font-weight:750}.tta-bento b{display:block;margin-top:5px;color:var(--tta-text);font-size:15px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}.tta-bento p{margin:7px 0 0;color:var(--tta-faint);font-size:9px;line-height:1.45}
+      .tta-bento-hero{grid-column:1/-1;padding:17px;background:linear-gradient(135deg,#ffffff19,#6ac19f10 58%,#73bce819)}.tta-consolidated{font-size:30px!important;line-height:1.05;margin-top:7px!important}.tta-equation{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:7px;font-size:10px;font-weight:800;color:var(--tta-muted)}.tta-transfer-card{grid-column:1/-1}.tta-transfer{color:var(--tta-blue)!important}
+      .tta-flowlegend{display:flex;gap:7px;overflow-x:auto;padding:1px 1px 8px;scrollbar-width:none}.tta-flowlegend::-webkit-scrollbar{display:none}.tta-flowlegend span{flex:0 0 auto;padding:5px 8px;border-radius:999px;background:#ffffff09;border:1px solid #ffffff16;font-size:9px;font-weight:750}.tta-flowlegend .in{color:var(--tta-green)}.tta-flowlegend .out{color:var(--tta-red)}.tta-flowlegend .transfer{color:var(--tta-blue)}
+      .tta-sectionintro{display:flex;align-items:flex-end;justify-content:space-between;gap:9px;margin:15px 2px 8px}.tta-sectionintro small,.tta-sectionhead small{display:block;color:var(--tta-faint);font-size:8px;text-transform:uppercase;letter-spacing:.6px}.tta-sectionintro h3,.tta-sectionhead h3{margin:1px 0 0;color:var(--tta-text);font-size:14px}.tta-sectionintro>span,.tta-sectionhint,.tta-morehint{color:var(--tta-faint);font-size:8.5px}
+      .tta-fin-nav{display:flex!important;gap:9px!important;grid-template-columns:none!important;width:100%;max-width:100%;overflow-x:auto!important;overflow-y:hidden!important;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;padding:1px 1px 8px;scrollbar-width:none}.tta-fin-nav::-webkit-scrollbar{display:none}.tta-fin-nav .tta-toolcard{flex:0 0 clamp(180px,62vw,220px);min-height:72px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;scroll-snap-align:start;text-align:left;background:linear-gradient(145deg,#ffffff14,#ffffff08)!important;border:1px solid #ffffff20!important}.tta-toolcard strong{font-size:11px;color:var(--tta-text)}.tta-toolcard small{margin-top:4px;color:var(--tta-faint);font-size:8.5px;white-space:normal;line-height:1.35}
+      .tta-position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:11px}.tta-position-grid .tta-bento{padding:11px}.tta-position-grid .tta-bento b{font-size:13px}
+      .tta-glass-section,.tta-fin-section,.tta-chartcard,.tta-item,.tta-keycard,.tta-tos,.tta-banner,.tta-ledgerwrap{background:linear-gradient(145deg,#ffffff10,#ffffff07)!important;border:1px solid #ffffff1d!important;box-shadow:var(--tta-shadow),inset 0 1px #ffffff10;border-radius:18px!important;backdrop-filter:blur(11px);-webkit-backdrop-filter:blur(11px)}.tta-glass-section{padding:12px;margin:11px 0}.tta-fin-section{padding:12px}
+      .tta-stat,.tta-cashcard,.tta-ministat{background:#ffffff0b!important;border-color:#ffffff1a!important}.tta-stat label,.tta-cashcard small,.tta-ministat small,.tta-source,.tta-snapshot-note,.tta-listmeta{color:var(--tta-muted)!important}.tta-stat b,.tta-cashcard b,.tta-ministat b{color:var(--tta-text)}
+      .tta-note{color:#c7d5de;background:#ffffff08;border:1px solid #ffffff15;border-radius:12px;padding:9px 10px}.tta-history-search{color:var(--tta-text)!important}.tta-history-search::placeholder{color:#a8bac6}.tta-flowtable th{color:#b8c8d3;border-bottom-color:#ffffff1a}.tta-flowtable td{color:#eef4f7;border-bottom-color:#ffffff13}.tta-flowmeta{color:#a8bac6}.tta-flowbadge.in{background:#79dfb318}.tta-flowbadge.out{background:#ff9da318}.tta-flowbadge.transfer{background:#91cdf718}
+      .tta-table-scroll,.tta-ledgerwrap{width:100%;max-width:100%;overflow-x:auto!important;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}.tta-flowtable{min-width:560px}.tta-chartviewport{max-width:100%}.tta-axis{fill:#e0e8ed!important;color:#e0e8ed!important}.tta-grid{stroke:#ffffff18}.tta-zero{stroke:#aebfca}.tta-empty{color:#c8d4dc}
+      @media(max-width:520px){.tta-content{padding-left:10px;padding-right:10px}.tta-period{align-items:stretch;flex-direction:column}.tta-syncactions{width:100%;display:grid;grid-template-columns:1fr 1fr}.tta-syncactions .tta-btn{width:100%}.tta-position-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tta-position-grid .tta-bento:last-child{grid-column:1/-1}.tta-listtools{grid-template-columns:1fr}.tta-consolidated{font-size:27px!important}}
     `;
     document.head.appendChild(s);
-    ttaDebug('CSS: stylesheet appended',{id:s.id,length:s.textContent.length,connected:s.isConnected});
   }
 
   function clampFabPosition(left,top,fab) {
-    const pad=8,w=fab?.offsetWidth||40,h=fab?.offsetHeight||40,vw=Math.max(1,window.innerWidth||document.documentElement.clientWidth||360),vh=Math.max(1,window.innerHeight||document.documentElement.clientHeight||640);
-    return {left:Math.max(pad,Math.min(Number(left)||0,vw-w-pad)),top:Math.max(pad,Math.min(Number(top)||0,vh-h-pad))};
-  }
-  function defaultFabPosition(fab) {
-    const w=fab?.offsetWidth||40,h=fab?.offsetHeight||40,vw=Math.max(1,window.innerWidth||document.documentElement.clientWidth||360),vh=Math.max(1,window.innerHeight||document.documentElement.clientHeight||640);
-    return clampFabPosition(vw-w-14,Math.max(72,vh-h-86),fab);
-  }
-  function forceFabVisibleStyle(fab) {
-    if(!fab)return;const st=fab.style,set=(k,v)=>st.setProperty(k,v,'important');
-    set('position','fixed');set('z-index','2147483647');set('width','40px');set('height','40px');set('min-width','40px');set('min-height','40px');set('max-width','40px');set('max-height','40px');
-    set('padding','0');set('margin','0');set('border-radius','50%');set('visibility','visible');set('opacity','1');set('pointer-events','auto');set('align-items','center');set('justify-content','center');set('overflow','visible');
-    set('clip','auto');set('clip-path','none');set('contain','none');set('isolation','isolate');set('-webkit-appearance','none');set('appearance','none');set('touch-action','none');
+    const pad=8,w=fab.offsetWidth||132,h=fab.offsetHeight||42;
+    return {left:Math.max(pad,Math.min(left,window.innerWidth-w-pad)),top:Math.max(pad,Math.min(top,window.innerHeight-h-pad))};
   }
   function applyFabPosition(fab) {
-    if(!fab){ttaDebug('FAB: apply position skipped · no element');return;}const saved=state.fabPosition;
-    const p=saved&&Number.isFinite(Number(saved.left))&&Number.isFinite(Number(saved.top))?clampFabPosition(Number(saved.left),Number(saved.top),fab):defaultFabPosition(fab);
-    fab.style.setProperty('left',`${Math.round(p.left)}px`,'important');fab.style.setProperty('top',`${Math.round(p.top)}px`,'important');fab.style.setProperty('right','auto','important');fab.style.setProperty('bottom','auto','important');
-    state.fabPosition=p;save('fabPosition',p);
-    const sig=`${Math.round(p.left)},${Math.round(p.top)}|${window.innerWidth}x${window.innerHeight}`;if(fab.dataset.ttaDebugPosition!==sig){fab.dataset.ttaDebugPosition=sig;ttaDebug('FAB: position applied',{saved:!!saved,position:p,viewport:{width:window.innerWidth,height:window.innerHeight}});}
+    if(!fab)return;
+    if(state.fabPosition && Number.isFinite(state.fabPosition.left) && Number.isFinite(state.fabPosition.top)){
+      const p=clampFabPosition(state.fabPosition.left,state.fabPosition.top,fab);
+      fab.style.left=`${p.left}px`;fab.style.top=`${p.top}px`;fab.style.right='auto';fab.style.bottom='auto';
+      state.fabPosition=p;save('fabPosition',p);
+    }
   }
   function bindFabDrag(fab) {
-    if(!fab||fab.dataset.dragBound==='1')return;fab.dataset.dragBound='1';ttaDebug('FAB: binding drag/click handlers',ttaElementSummary(fab));
+    if(!fab || fab.dataset.dragBound==='1')return;
+    fab.dataset.dragBound='1';
     let startX=0,startY=0,startLeft=0,startTop=0,moved=false,pointerId=null;
-    fab.addEventListener('pointerdown',e=>{if(e.button!=null&&e.button!==0)return;pointerId=e.pointerId;moved=false;startX=e.clientX;startY=e.clientY;const r=fab.getBoundingClientRect();startLeft=r.left;startTop=r.top;try{fab.setPointerCapture(pointerId);}catch(_){}});
-    fab.addEventListener('pointermove',e=>{if(pointerId==null||e.pointerId!==pointerId)return;const dx=e.clientX-startX,dy=e.clientY-startY;if(!moved&&Math.hypot(dx,dy)<5)return;moved=true;fab.classList.add('dragging');e.preventDefault();const p=clampFabPosition(startLeft+dx,startTop+dy,fab);fab.style.setProperty('left',`${p.left}px`,'important');fab.style.setProperty('top',`${p.top}px`,'important');fab.style.setProperty('right','auto','important');fab.style.setProperty('bottom','auto','important');});
-    const finish=e=>{if(pointerId==null||e.pointerId!==pointerId)return;try{fab.releasePointerCapture(pointerId);}catch(_){}pointerId=null;fab.classList.remove('dragging');if(moved){const r=fab.getBoundingClientRect();state.fabPosition=clampFabPosition(r.left,r.top,fab);save('fabPosition',state.fabPosition);fab.dataset.suppressClick='1';setTimeout(()=>fab.dataset.suppressClick='0',250);}};
+    fab.addEventListener('pointerdown',e=>{
+      if(e.button!=null && e.button!==0)return;
+      pointerId=e.pointerId;moved=false;startX=e.clientX;startY=e.clientY;
+      const r=fab.getBoundingClientRect();startLeft=r.left;startTop=r.top;
+      try{fab.setPointerCapture(pointerId);}catch(_){ }
+    });
+    fab.addEventListener('pointermove',e=>{
+      if(pointerId==null||e.pointerId!==pointerId)return;
+      const dx=e.clientX-startX,dy=e.clientY-startY;if(!moved&&Math.hypot(dx,dy)<5)return;
+      moved=true;fab.classList.add('dragging');e.preventDefault();
+      const p=clampFabPosition(startLeft+dx,startTop+dy,fab);
+      fab.style.left=`${p.left}px`;fab.style.top=`${p.top}px`;fab.style.right='auto';fab.style.bottom='auto';
+    });
+    const finish=e=>{
+      if(pointerId==null||e.pointerId!==pointerId)return;
+      try{fab.releasePointerCapture(pointerId);}catch(_){ }
+      pointerId=null;fab.classList.remove('dragging');
+      if(moved){const r=fab.getBoundingClientRect();state.fabPosition=clampFabPosition(r.left,r.top,fab);save('fabPosition',state.fabPosition);fab.dataset.suppressClick='1';setTimeout(()=>fab.dataset.suppressClick='0',250);}
+    };
     fab.addEventListener('pointerup',finish);fab.addEventListener('pointercancel',finish);
-    fab.addEventListener('click',e=>{ttaDebug('FAB: click received',{suppressed:fab.dataset.suppressClick==='1',stateOpen:state.open});if(fab.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}openAnalyzer();});
+    fab.addEventListener('click',e=>{if(fab.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}openAnalyzer();});
+    window.addEventListener('resize',()=>applyFabPosition(fab),{passive:true});
   }
   function fabIconSvg() {
-    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#77ddb0"/><stop offset="1" stop-color="#8bc9f7"/></linearGradient></defs><rect class="tta-terminal-frame" x="2.5" y="3.25" width="19" height="17.5" rx="3"/><path class="tta-terminal-bar" d="M3.25 7h17.5"/><circle cx="5.25" cy="5.2" r=".65" fill="#77ddb0"/><circle cx="7.45" cy="5.2" r=".65" fill="#8bc9f7"/><path class="tta-terminal-prompt" d="M5.4 10.1l2 1.8-2 1.8"/><path class="tta-terminal-cursor" d="M8.8 13.7h2.2"/><path class="tta-data-pulse" d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19"/></svg></span>`;
+    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect class="tta-terminal-frame" x="2.5" y="3.25" width="19" height="17.5" rx="3"/><path class="tta-terminal-bar" d="M3.25 7h17.5"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path class="tta-terminal-prompt" d="M5.4 10.1l2 1.8-2 1.8"/><path class="tta-terminal-cursor" d="M8.8 13.7h2.2"/><path class="tta-data-pulse" d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19"/></svg></span>`;
   }
+
   function updateFabState() {
-    const fab=document.getElementById('tta-fab');if(!fab){ttaDebug('FAB: updateFabState · element missing',{stateOpen:state.open,stateSyncing:state.syncing});return;}forceFabVisibleStyle(fab);const syncing=!!state.syncing;
-    fab.classList.toggle('syncing',syncing);fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Open Cash Flow Analyzer');fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
-    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();fab.style.setProperty('display',state.open?'none':'inline-flex','important');if(!state.open)fab.style.setProperty('visibility','visible','important');
-    const sig=`${state.open?'open':'closed'}|${syncing?'syncing':'idle'}|${fab.style.display}`;if(fab.dataset.ttaDebugState!==sig){fab.dataset.ttaDebugState=sig;ttaDebug('FAB: state applied',{stateOpen:state.open,syncing,display:fab.style.display,visibility:fab.style.visibility});requestAnimationFrame(()=>ttaFabSnapshot('after updateFabState',fab));}
-    if(!state.open)requestAnimationFrame(()=>applyFabPosition(fab));
-  }
-  function ensureAnalyzerRoot() {
-    const parent=document.body||document.documentElement;if(!parent){ttaDebug('ROOT: no mount parent available');return null;}let root=document.getElementById('tta-root');
-    if(!root){root=document.createElement('div');root.id='tta-root';parent.appendChild(root);ttaDebug('ROOT: created',ttaElementSummary(root));}else if(root.parentElement!==parent){ttaDebug('ROOT: reparenting',{before:ttaElementSummary(root),target:ttaElementSummary(parent)});parent.appendChild(root);}return root;
-  }
-  function ensureFabMounted() {
-    const parent=document.body||document.documentElement;if(!parent){ttaDebug('FAB: ensure mounted failed · no parent');return null;}let fab=document.getElementById('tta-fab');
-    const prior=fab,wrongInstance=!!fab&&fab.dataset.ttaInstance!==TTA_INSTANCE_ID,wrongParent=!!fab&&fab.parentElement!==parent;
-    // Always replace a launcher from a previous execution context. This guarantees that the
-    // click/drag listeners belong to the currently-running userscript even after Torn PDA reinjects it.
-    if(!fab||wrongInstance){const fresh=document.createElement('button');fresh.id='tta-fab';fresh.type='button';fresh.dataset.ttaInstance=TTA_INSTANCE_ID;fresh.innerHTML=fabIconSvg();if(fab){ttaDebug('FAB: replacing stale launcher',{prior:ttaElementSummary(fab),priorInstance:fab.dataset.ttaInstance||'',currentInstance:TTA_INSTANCE_ID});fab.replaceWith(fresh);}else{ttaDebug('FAB: creating launcher',{parent:ttaElementSummary(parent)});parent.appendChild(fresh);}fab=fresh;}
-    else if(wrongParent){ttaDebug('FAB: reparenting launcher',{fab:ttaElementSummary(fab),target:ttaElementSummary(parent)});parent.appendChild(fab);}
-    forceFabVisibleStyle(fab);bindFabDrag(fab);applyFabPosition(fab);updateFabState();
-    if(!prior||wrongInstance||wrongParent)requestAnimationFrame(()=>ttaFabSnapshot('after ensureFabMounted',fab));return fab;
+    const fab=document.getElementById('tta-fab');if(!fab)return;
+    const syncing=!!state.syncing;
+    fab.classList.toggle('syncing',syncing);
+    fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
+    fab.title=syncing?'Financial history sync is running · tap to reopen':'Open Cash Flow Analyzer';
+    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
+    fab.style.display=state.open?'none':'inline-flex';
+    requestAnimationFrame(()=>applyFabPosition(fab));
   }
   function mount() {
-    ttaDebug('MOUNT: start',{body:ttaElementSummary(document.body),existingFab:ttaElementSummary(document.getElementById('tta-fab')),existingRoot:ttaElementSummary(document.getElementById('tta-root')),stateOpen:state.open});
     injectCss();
-    // Remove only the experimental alternate nodes. The production UI contract is again
-    // the original #tta-root + #tta-fab pair used by the stylesheet and known-working launcher.
-    const stale={tcfaLauncher:ttaElementSummary(document.getElementById('tcfa-launcher')),tcfaRoot:ttaElementSummary(document.getElementById('tcfa-root')),fabHost:ttaElementSummary(document.getElementById('tta-fab-host'))};ttaDebug('MOUNT: stale-node scan',stale);
-    document.getElementById('tcfa-launcher')?.remove();document.getElementById('tcfa-root')?.remove();document.getElementById('tta-fab-host')?.remove();
-    const root=ensureAnalyzerRoot(),fab=ensureFabMounted();ttaDebug('MOUNT: root/fab ensured',{root:ttaElementSummary(root),fab:ttaElementSummary(fab)});
-    try{ttaDebug('RENDER: initial render start',{stateOpen:state.open,view:state.view});render();ttaDebug('RENDER: initial render complete',{stateOpen:state.open,view:state.view});}catch(err){ttaDebugError('RENDER: initial render failed',err);state.open=false;updateFabState();}
-    requestAnimationFrame(()=>ttaFabSnapshot('mount requestAnimationFrame',fab));setTimeout(()=>ttaFabSnapshot('mount +500ms'),500);setTimeout(()=>ttaFabSnapshot('mount +2000ms'),2000);
-  }
-  function installFabWatchdog() {
-    ttaDebug('WATCHDOG: install start');try{window.__TTA_FAB_WATCHDOG_V029__?.cleanup?.();ttaDebug('WATCHDOG: prior v0.2.9 watchdog cleanup attempted');}catch(err){ttaDebugError('WATCHDOG: prior cleanup failed',err);}
-    const tick=()=>{if(!document.documentElement){ttaDebug('WATCHDOG: tick skipped · no documentElement');return;}const beforeFab=document.getElementById('tta-fab'),beforeRoot=document.getElementById('tta-root'),root=ensureAnalyzerRoot();if(state.open&&(!root||!root.classList.contains('show'))){ttaDebug('WATCHDOG: stale open state repaired',{root:ttaElementSummary(root)});state.open=false;}if(!beforeFab||!beforeRoot)ttaDebug('WATCHDOG: missing UI detected',{fab:ttaElementSummary(beforeFab),root:ttaElementSummary(beforeRoot)});ensureFabMounted();};
-    const observer=new MutationObserver(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root')){ttaDebug('WATCHDOG: mutation detected missing UI');tick();}});observer.observe(document.documentElement,{childList:true,subtree:true});
-    const interval=setInterval(tick,1200),onViewport=()=>{const fab=document.getElementById('tta-fab');if(fab&&!state.open){ttaDebug('WATCHDOG: viewport event',{innerWidth:window.innerWidth,innerHeight:window.innerHeight});applyFabPosition(fab);}};
-    window.addEventListener('resize',onViewport,{passive:true});window.addEventListener('pageshow',()=>{ttaDebug('WATCHDOG: pageshow');tick();},{passive:true});
-    const cleanup=()=>{try{observer.disconnect();clearInterval(interval);window.removeEventListener('resize',onViewport);}catch(err){ttaDebugError('WATCHDOG: cleanup failed',err);}};
-    window.__TTA_FAB_WATCHDOG_V029__={instance:TTA_INSTANCE_ID,cleanup,observer,interval};ttaDebug('WATCHDOG: installed',{intervalMs:1200});
+    if (!document.getElementById('tta-fab')) {
+      const fab = document.createElement('button'); fab.id = 'tta-fab';
+      fab.innerHTML = fabIconSvg();
+      document.body.appendChild(fab);bindFabDrag(fab);requestAnimationFrame(()=>applyFabPosition(fab));
+    } else { const fab=document.getElementById('tta-fab');bindFabDrag(fab);applyFabPosition(fab); }
+    if (!document.getElementById('tta-root')) {
+      const root = document.createElement('div'); root.id = 'tta-root'; document.body.appendChild(root);
+    }
+    updateFabState();
+    render();
   }
 
   let demoTxCache=null;
@@ -876,29 +801,26 @@
     return {acquiredCost,remainingCost,marketValue,unrealized:marketValue-remainingCost,realizedProfit,acquiredQty,remainingQty,byMethod:[...byMethod.values()].sort((a,b)=>b.market-a.market||b.cost-a.cost)};
   }
   function periodChipsHtml(){return `<div class="tta-chips">${[['7d','7 days'],['14d','14 days'],['30d','30 days'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>${state.dateMode==='custom'?`<div class="tta-customdates"><input type="date" data-custom="from" value="${esc(state.customFrom)}"><input type="date" data-custom="to" value="${esc(state.customTo)}"></div>`:''}`;}
-  function financialNavHtml(){return `<div class="tta-fin-nav" aria-label="Financial sections"><button class="tta-navcard" data-act="cashflow"><span class="tta-navsymbol cash">↕</span><span class="tta-navcopy"><strong>Cash Flow</strong><small>Money in, out & transfers</small></span><span class="tta-navarrow">›</span></button><button class="tta-navcard" data-act="trade"><span class="tta-navsymbol trade">▦</span><span class="tta-navcopy"><strong>Trade Analysis</strong><small>FIFO, acquisitions & profit</small></span><span class="tta-navarrow">›</span></button><button class="tta-navcard" data-act="networth"><span class="tta-navsymbol worth">◇</span><span class="tta-navcopy"><strong>Net Worth</strong><small>Assets, holdings & portfolio</small></span><span class="tta-navarrow">›</span></button></div>`;}
-  function flowLegendHtml(){return `<div class="tta-flowlegend" aria-label="Cash flow color guide"><span><i class="in">+</i> Money in</span><span><i class="out">−</i> Money out</span><span><i class="transfer">↔</i> Transfer</span></div>`;}
-  function cashBreakdownHtml(summary,limit=8){const rows=summary.categories.slice(0,limit);return rows.length?`<div class="tta-breakdown"><div class="tta-breakhead"><span>Category</span><b>Money in</b><b>Money out</b></div>${rows.map(r=>`<div class="tta-breakrow"><span>${esc(r.category)}</span><b class="pos">${r.earned?`+${money(r.earned,true)}`:'—'}</b><b class="neg secondary-value">${r.spent?`−${money(r.spent,true)}`:'—'}</b></div>`).join('')}</div>`:'<div class="tta-empty">No recognized cash movements in this period yet.</div>';}
-  function cashFlowRowsHtml(rows,limit=200){return rows.slice(0,limit).map(x=>{const isTransfer=x.direction.startsWith('transfer'),symbol=isTransfer?'↔':x.direction==='in'?'+':'−',label=isTransfer?'Transfer':x.direction==='in'?'Money in':'Money out';return `<tr><td><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span></td><td><span class="tta-flowbadge ${isTransfer?'transfer':x.direction}"><strong>${symbol}</strong>${label}</span></td><td>${esc(x.category)}</td><td class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${symbol} ${money(x.amount)}</td></tr>`;}).join('')||'<tr><td colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';}
+  function financialNavHtml(){return `<div class="tta-fin-nav" aria-label="Financial tools"><button class="tta-btn secondary tta-toolcard" data-act="cashflow"><strong>↕ Cash Flow</strong><small>Money in, out & transfers</small></button><button class="tta-btn secondary tta-toolcard" data-act="trade"><strong>▦ Trade Analysis</strong><small>FIFO, acquisitions & profit</small></button><button class="tta-btn secondary tta-toolcard" data-act="networth"><strong>◇ Net Worth</strong><small>Assets, holdings & portfolio</small></button></div>`;}
+  function flowLegendHtml(){return `<div class="tta-flowlegend"><span class="in">+ Money in</span><span class="out">− Money out</span><span class="transfer">↔ Transfer</span></div>`;}
+  function cashBreakdownHtml(summary,limit=8){const rows=summary.categories.slice(0,limit);return rows.length?`<div class="tta-breakdown">${rows.map(r=>`<div class="tta-breakrow"><span>${esc(r.category)}</span><b class="pos">${r.earned?money(r.earned,true):'—'}</b><b class="neg secondary-value">${r.spent?money(r.spent,true):'—'}</b></div>`).join('')}</div>`:'<div class="tta-empty">No recognized cash movements in this period yet.</div>';}
+  function cashFlowRowsHtml(rows,limit=200){return rows.slice(0,limit).map(x=>`<tr><td><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span></td><td><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td>${esc(x.category)}</td><td class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'↔ '}${money(x.amount)}</td></tr>`).join('')||'<tr><td colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';}
   function dashboardHtml() {
-    const today=cashFlowBoundsToday(),sum=cashFlowSummary(today.from,today.to),snap=latestFinancialSnapshot(),portfolio=analyzerPortfolio(),nw=Number(snap?.networth?.total)||0;
-    const todayRows=allCashFlows().filter(x=>x.timestamp>=today.from&&x.timestamp<=today.to),recent=todayRows.slice(0,12),lastSync=state.sync?.lastSync?tctDateTimeStr(state.sync.lastSync):'';
-    return `${header('Cash Flow Analyzer',`v${VERSION} · simple financial overview`)}<div class="tta-content tta-dashboard">
-      ${!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':''}
-      <div class="tta-period tta-dashboard-top"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${lastSync?`Last sync ${esc(lastSync)} TCT`:'Run Quick Sync to load today’s movements'}</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div>
-      <div class="tta-bento-grid tta-cash-bento">
-        <section class="tta-bento tta-bento-hero"><div class="tta-bento-kicker">Consolidated cash flow today</div><b class="tta-consolidated ${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b><div class="tta-flow-equation"><span class="in">+ ${money(sum.earned)}</span><span>−</span><span class="out">${money(sum.spent)}</span></div><small>Money in minus money out for the current TCT day. Internal transfers do not change this total.</small></section>
-        <section class="tta-bento tta-bento-mini in"><span class="tta-mini-symbol">+</span><div><small>Money in today</small><b>${money(sum.earned)}</b></div></section>
-        <section class="tta-bento tta-bento-mini out"><span class="tta-mini-symbol">−</span><div><small>Money out today</small><b>${money(sum.spent)}</b></div></section>
-        <section class="tta-bento tta-bento-transfer"><span class="tta-mini-symbol">↔</span><div><small>Internal transfers today</small><b>${money(sum.transferIn+sum.transferOut)}</b><em>Tracked separately so moving your own money is not treated as income or spending.</em></div></section>
-      </div>
-      ${flowLegendHtml()}
-      <div class="tta-sectionintro"><div><small>Explore</small><h3>Financial tools</h3></div><span>Swipe cards sideways</span></div>
-      ${financialNavHtml()}
-      <div class="tta-sectionintro"><div><small>Snapshot</small><h3>Financial position</h3></div></div>
-      <div class="tta-bento-grid tta-position-bento"><section class="tta-bento"><small>Torn net worth</small><b>${snap?.networth?money(nw):'Sync to load'}</b></section><section class="tta-bento"><small>Recorded inventory value</small><b>${money(portfolio.marketValue)}</b></section><section class="tta-bento"><small>Realized trade profit</small><b class="${portfolio.realizedProfit>=0?'pos':'neg'}">${money(portfolio.realizedProfit)}</b></section></div>
-      <section class="tta-glass-section"><div class="tta-sectionhead"><div><small>Current TCT day</small><h3>Today’s cash movements</h3><span class="tta-sectionhint">${qty(todayRows.length)} recorded movement${todayRows.length===1?'':'s'} today</span></div><button class="tta-btn secondary" data-act="cashflow">Open ledger</button></div><div class="tta-table-scroll"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,12)}</tbody></table></div>${todayRows.length>12?`<div class="tta-morehint">Showing the latest 12 of ${qty(todayRows.length)} movements from today.</div>`:''}</section>
-    </div>`;
+    const today=cashFlowBoundsToday();
+    const sum=cashFlowSummary(today.from,today.to);
+    const snap=latestFinancialSnapshot();
+    const portfolio=analyzerPortfolio();
+    const nw=Number(snap?.networth?.total)||0;
+    const todayRows=allCashFlows().filter(x=>x.timestamp>=today.from&&x.timestamp<=today.to);
+    const recent=todayRows.slice(0,12);
+    const apiBanner=!hasApiKey()?'<div class="tta-banner"><strong>Preview mode.</strong> Add a Torn API key in Settings to build your financial ledger.</div>':'';
+    const lastSync=state.sync?.lastSync?`Last sync ${esc(tctDateTimeStr(state.sync.lastSync))} TCT`:'Run Quick Sync to load today’s movements';
+    const movementLabel=`${qty(todayRows.length)} movement${todayRows.length===1?'':'s'} recorded today`;
+    const moreLabel=todayRows.length>12?`<div class="tta-morehint">Showing the latest 12 of ${qty(todayRows.length)} movements from the current TCT day.</div>`:'';
+    const networthLabel=snap?.networth?money(nw):'Sync to load';
+    const netClass=sum.net>=0?'pos':'neg';
+    const profitClass=portfolio.realizedProfit>=0?'pos':'neg';
+    return `${header('Cash Flow Analyzer',`v${VERSION} · clear financial overview`)}<div class="tta-content tta-dashboard">${apiBanner}<div class="tta-period tta-dashboard-top"><div><small>Today · Torn City Time</small><strong>${esc(tctDateStr(today.from))}</strong><span class="tta-periodhint">${lastSync}</span></div><div class="tta-syncactions"><button class="tta-btn" data-act="syncQuick" ${state.syncing?'disabled':''}>${state.syncing?'Syncing…':'⚡ Quick Sync'}</button><button class="tta-btn secondary" data-act="syncFull" ${state.syncing?'disabled':''}>⟳ Full Resync</button></div></div><div class="tta-bento-grid"><section class="tta-bento tta-bento-hero"><small>Consolidated cash flow today</small><b class="tta-consolidated ${netClass}">${money(sum.net)}</b><div class="tta-equation"><span class="pos">+ ${money(sum.earned)}</span><span>−</span><span class="neg">${money(sum.spent)}</span></div><p>Money in minus money out for the current TCT day. Transfers are tracked separately.</p></section><section class="tta-bento"><small>Money in today</small><b class="pos">+ ${money(sum.earned)}</b></section><section class="tta-bento"><small>Money out today</small><b class="neg">− ${money(sum.spent)}</b></section><section class="tta-bento tta-transfer-card"><small>Internal transfers</small><b class="tta-transfer">↔ ${money(sum.transferIn+sum.transferOut)}</b><p>Moving your own money does not count as income or spending.</p></section></div>${flowLegendHtml()}<div class="tta-sectionintro"><div><small>Explore</small><h3>Financial tools</h3></div><span>Swipe the cards</span></div>${financialNavHtml()}<div class="tta-sectionintro"><div><small>Snapshot</small><h3>Financial position</h3></div></div><div class="tta-position-grid"><section class="tta-bento"><small>Torn net worth</small><b>${networthLabel}</b></section><section class="tta-bento"><small>Recorded inventory value</small><b>${money(portfolio.marketValue)}</b></section><section class="tta-bento"><small>Realized trade profit</small><b class="${profitClass}">${money(portfolio.realizedProfit)}</b></section></div><section class="tta-glass-section"><div class="tta-sectionhead"><div><small>Current TCT day</small><h3>Today’s cash movements</h3><span class="tta-sectionhint">${movementLabel}</span></div><button class="tta-btn secondary" data-act="cashflow">Open ledger</button></div><div class="tta-table-scroll"><table class="tta-flowtable"><tbody>${cashFlowRowsHtml(recent,12)}</tbody></table></div>${moreLabel}</section></div>`;
   }
   function cashFlowDateRange() {
     const serverNow=Math.min(Number(state.sync?.lastSync)||nowSec(),nowSec()),bounds=selectedPeriodBoundsTct(serverNow);let from=bounds.from,to=bounds.to;
@@ -907,7 +829,7 @@
   }
   function cashFlowHtml() {
     const {from,to}=cashFlowDateRange(),sum=cashFlowSummary(from,to),q=String(state.cashSearch||'').trim().toLowerCase(),cat=String(state.cashCategory||'all');let rows=allCashFlows().filter(x=>x.timestamp>=from&&x.timestamp<=to);if(cat!=='all')rows=rows.filter(x=>x.category===cat);if(q)rows=rows.filter(x=>`${x.title} ${x.category} ${x.source}`.toLowerCase().includes(q));const cats=[...new Set(allCashFlows().map(x=>x.category))].sort();
-    return `${header('Cash Flow','Understand where your money comes from and where it goes',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-bento-grid tta-cash-bento tta-page-bento"><section class="tta-bento tta-bento-hero"><div class="tta-bento-kicker">Consolidated cash flow</div><b class="tta-consolidated ${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b><div class="tta-flow-equation"><span class="in">+ ${money(sum.earned)}</span><span>−</span><span class="out">${money(sum.spent)}</span></div><small>Money in minus money out for the selected period. Transfers are shown separately.</small></section><section class="tta-bento tta-bento-mini in"><span class="tta-mini-symbol">+</span><div><small>Money in</small><b>${money(sum.earned)}</b></div></section><section class="tta-bento tta-bento-mini out"><span class="tta-mini-symbol">−</span><div><small>Money out</small><b>${money(sum.spent)}</b></div></section></div>${flowLegendHtml()}<section class="tta-glass-section"><div class="tta-sectionintro"><div><small>Summary</small><h3>By category</h3></div></div>${cashBreakdownHtml(sum,20)}</section><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow…" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><section class="tta-glass-section"><div class="tta-sectionintro"><div><small>Ledger</small><h3>Money movements</h3></div><span>${qty(rows.length)} result${rows.length===1?'':'s'}</span></div><div class="tta-ledgerwrap"><table class="tta-flowtable"><thead><tr><th>Event</th><th>Flow</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${cashFlowRowsHtml(rows)}</tbody></table></div></section><div class="tta-note tta-friendly-note">Transfers stay visible but are excluded from money-in and money-out totals. Item sales and purchases use the analyzer’s normalized trade history.</div></div>`;
+    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div><div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow…" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable"><thead><tr><th>Event</th><th>Flow</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${cashFlowRowsHtml(rows)}</tbody></table></div><div class="tta-note">Internal transfers remain visible but are excluded from earned/spent totals. Item buys/sales come from the normalized trade ledger; Player Trade cash uses the actual cash exchanged, not the analyzer's allocated item valuation.</div></div>`;
   }
   function labeledKey(k){return String(k).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
   function moneyBreakdownHtml(obj){return Object.entries(obj||{}).map(([k,v])=>{if(typeof v==='object'&&v){const amount=Number(v.amount??v.money??0)||0;return `<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(amount)}</b></div>`;}return typeof v==='number'?`<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(v)}</b></div>`:'';}).join('');}
@@ -981,29 +903,27 @@
   }
 
   async function openAnalyzer() {
-    ttaDebug('OPEN: requested',{stateOpenBefore:state.open,view:state.view,fab:ttaElementSummary(document.getElementById('tta-fab')),root:ttaElementSummary(document.getElementById('tta-root'))});
     state.open=true;
-    const fab=document.getElementById('tta-fab');if(fab)fab.style.setProperty('display','none','important');
-    const root=document.getElementById('tta-root');if(!root){ttaDebug('OPEN: aborted · root missing');return;}
+    const fab=document.getElementById('tta-fab');if(fab)fab.style.display='none';
+    const root=document.getElementById('tta-root');if(!root)return;
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     if(root.querySelector('.tta-shell')&&root.dataset.view===state.view)return;
     root.innerHTML='<div class="tta-openloader"><div><span class="tta-spinner xl"></span><strong>Opening Cash Flow Analyzer</strong><small>Preparing cached financial history and analytics…</small></div></div>';
-    await nextPaint();ttaDebug('OPEN: calling render',{view:state.view});render({preserveScroll:false});ttaDebug('OPEN: complete',{root:ttaElementSummary(root)});
+    await nextPaint();render({preserveScroll:false});
   }
 
   function render(options={}) {
-    const root=document.getElementById('tta-root');if(!root){ttaDebug('RENDER: skipped · root missing',{stateOpen:state.open,view:state.view});return;}
-    ttaDebug('RENDER: enter',{stateOpen:state.open,view:state.view,preserveScroll:options.preserveScroll});
+    const root=document.getElementById('tta-root');if(!root)return;
     const previousView=root.dataset.view||'',previousShell=root.querySelector('.tta-shell');
     const preserveScroll=options.preserveScroll??(previousView===state.view),previousScroll=preserveScroll&&previousShell?previousShell.scrollTop:0;
     updateFabState();
-    if(!state.open){root.classList.remove('show');root.setAttribute('aria-hidden','true');ttaDebug('RENDER: analyzer closed · FAB should be visible');requestAnimationFrame(()=>ttaFabSnapshot('render closed'));return;}
+    if(!state.open){root.classList.remove('show');root.setAttribute('aria-hidden','true');return;}
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     const wasDemo=state.demo;state.demo=!hasApiKey()&&!state.transactions.length;if(wasDemo!==state.demo)resetAnalyticsCache();
     if(state.demo&&!state.catalog.length)state.catalog=demoCatalog();
     root.innerHTML=`<div class="tta-shell">${state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml()}</div>${loadingHtml()}<div id="tta-toast" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     root.dataset.view=state.view;root.setAttribute('aria-busy',state.busy?.active?'true':'false');bind();
-    if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);ttaDebug('RENDER: complete',{view:state.view,stateOpen:state.open,rootClass:root.className});
+    if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);
   }
 
   let toastTimer=null;
@@ -1021,8 +941,8 @@
       const granEl=e.target.closest('[data-gran]');
       if(granEl&&root.contains(granEl)){state.granularity=granEl.dataset.gran;save('granularity',state.granularity);await withBusy('Updating chart','Grouping realized profit by the selected interval…',async()=>render());return;}
       const el=e.target.closest('[data-act]');if(!el||!root.contains(el))return;e.stopPropagation();const act=el.dataset.act;
-      if(act==='close'){ttaDebug('UI: close requested',{view:state.view});state.open=false;if(!state.syncing)setBusy(false);render();}
-      else if(act==='minimizeSync'){ttaDebug('UI: minimize sync requested');state.open=false;render();}
+      if(act==='close'){state.open=false;if(!state.syncing)setBusy(false);render();}
+      else if(act==='minimizeSync'){state.open=false;render();}
       else if(act==='back'){state.view=state.view==='ledger'?'trade':'dashboard';state.search='';render();}
       else if(act==='settings'){state.view='settings';render();}
       else if(act==='cashflow'){state.view='cash';render({preserveScroll:false});}
@@ -1970,12 +1890,6 @@
   }
   document.addEventListener('click',e=>{const el=e.target?.closest?.('#tta-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
 
-  let ttaBootAttempts=0;
-  const boot=()=>{
-    ttaBootAttempts++;ttaDebug('BOOT: attempt',{attempt:ttaBootAttempts,readyState:document.readyState,bodyPresent:!!document.body,documentElementPresent:!!document.documentElement});
-    if(document.body){
-      try{ttaDebug('BOOT: calling mount');mount();ttaDebug('BOOT: calling installFabWatchdog');installFabWatchdog();ttaDebug('BOOT: calling resumePendingSync');resumePendingSync();ttaDebug('BOOT: completed');requestAnimationFrame(()=>ttaFabSnapshot('boot complete RAF'));}
-      catch(err){ttaDebugError('BOOT: fatal exception',err,{attempt:ttaBootAttempts});setTimeout(()=>ttaFabSnapshot('after boot fatal'),0);}
-    }else setTimeout(boot,250);
-  }; boot();
+  const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();
+  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);
 })();

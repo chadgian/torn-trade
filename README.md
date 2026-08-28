@@ -2,7 +2,7 @@
 
 A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
 
-**Current version:** v0.2.10
+**Current version:** v0.2.11
 
 ## Install
 
@@ -210,83 +210,11 @@ Syncing is now split into two explicit modes:
 - Saved sync jobs remember which mode they belong to, so a Quick Sync cannot accidentally resume an old Full Resync and vice versa.
 
 
-## v0.2.2 — Bento UI refresh
+## v0.2.11 — Clean Bento runtime rebuild
 
-- Dashboard redesigned into a lighter Bento-style glass layout with clearer visual hierarchy and more readable text.
-- Financial navigation cards now scroll horizontally inside their own strip; the analyzer page itself is constrained from horizontal scrolling.
-- Today is always based on the current Torn City Time day, not the previous sync date.
-- Added a top-level consolidated cash-flow figure: money in minus money out for the current TCT day. Internal transfers remain separate.
-- Added consistent flow legend and clearer + / − / ↔ symbols for money in, money out and transfers.
-- Recent cash movements on the dashboard are explicitly limited to the current TCT day.
-
-
-## v0.2.3 — Floating launcher reliability
-
-- Restores the compact floating launcher after the Bento UI refresh.
-- Gives the launcher an isolated top-level stacking context and explicit visible/hidden state.
-- Recreates the launcher automatically if Torn page navigation removes it.
-- Re-clamps saved launcher coordinates to the current viewport.
-
-
-## v0.2.4 — isolated Torn PDA launcher
-
-- Mounts the floating launcher directly under the document root rather than inside Torn's body layout.
-- Forces critical launcher visibility, size, position and stacking styles inline with `!important`.
-- Resets an invalid/off-screen saved launcher position back to a safe default.
-- Embeds the terminal/data-pulse SVG styling directly in the icon so Torn CSS cannot make the icon disappear.
-- Rechecks launcher presence and viewport visibility during Torn SPA navigation.
-
-
-## v0.2.5 — Shadow DOM launcher
-
-- Moves the floating launcher into a valid host under `body` instead of placing the button directly under `html`.
-- Isolates the launcher button in Shadow DOM so Torn/Torn PDA page CSS cannot hide or restyle it.
-- Reattaches the Shadow DOM host if Torn SPA navigation replaces the body content.
-- Keeps the compact draggable terminal/data-pulse button and sync spinner.
-
-
-## v0.2.6 — Floating launcher reliability
-
-- Reverted the floating launcher from the experimental Shadow DOM/zero-size host architecture to the known-working direct document-body button model.
-- The launcher is appended after the analyzer root and forced to the top compositor layer with a maximum practical z-index.
-- Removed the Shadow DOM lookup mismatch that caused the watchdog to repeatedly think the FAB was missing.
-- Keeps draggable position, terminal/data-pulse icon, sync spinner and automatic remount checks.
-- Bento dashboard and financial UI remain unchanged.
-
-
-## v0.2.7 — Launcher runtime isolation
-
-- Root-cause hardening after comparing the last known-good pre-Bento launcher with the Bento-era releases. The Bento commit did not delete the launcher functions, so the repair now targets indirect/runtime conflicts instead of only CSS.
-- Uses new isolated DOM ids for the current launcher, analyzer root and style tag so older installed/stale copies cannot move, hide or restyle the current UI.
-- Uses a runtime ownership token so duplicate copies of the same current release do not create competing watchdogs.
-- Suppresses legacy `#tta-fab`, `#tta-fab-host`, `#tta-root` and `#tta-css` UI nodes while keeping the existing local accounting data namespace intact.
-- Resets the old saved launcher coordinate once and clamps future positions against Android's visual viewport.
-- Adds element hit-testing and several safe fallback positions when a DOM layer covers the button.
-- Forces the launcher into its own compositor layer and keeps it alive even if dashboard rendering throws.
-
-
-## v0.2.8 — Torn PDA launcher lifecycle repair
-
-- Root cause: Torn PDA can tear down a userscript execution context while leaving the same-version runtime marker on `window`. The old guard then returned before remounting the launcher.
-- Every new injection now supersedes the prior runtime token and mounts a fresh launcher/watchdog instead of trusting a stale marker.
-- Legacy launcher nodes are hidden only after the current launcher is confirmed interactable, preserving a fallback during recovery.
-- Launcher visibility now depends on the actual visible analyzer overlay, not only the `state.open` boolean.
-- Stale open-state recovery and old watchdog cleanup are included; Bento card scrolling remains isolated and unchanged.
-
-
-## v0.2.9 — Floating launcher restoration
-
-- Restores the original known-working `#tta-fab` / `#tta-root` DOM contract used before the launcher regression.
-- Removes the experimental alternate launcher namespace and legacy-suppression stack.
-- The launcher uses inline visibility safeguards and is recreated if Torn SPA navigation removes it.
-- Same-version userscript reinjection replaces the launcher node so click/drag listeners always belong to the live execution context.
-- Automated DOM validation checks initial visibility, click-to-open, removal recovery, body replacement recovery, and reinjection.
-
-
-## v0.2.10 — Launcher diagnostics
-
-- Adds structured console diagnostics prefixed with `[TTA]` around userscript boot, CSS injection, root/FAB mounting, state application, rendering and Torn-SPA watchdog recovery.
-- FAB snapshots report its DOM attachment, bounding rectangle, computed display/visibility/opacity/z-index/pointer-events, saved coordinates, viewport metrics, and the topmost element at the launcher center.
-- Browser/runtime errors and unhandled promise rejections are surfaced with `[TTA]` diagnostics.
-- Run `window.__TTA_DEBUG_DUMP__()` in the console for an on-demand launcher snapshot.
-- This release is diagnostic only; cash-flow, sync, trade/FIFO, net-worth and Bento accounting behavior are unchanged.
+- Rebuilt from the proven v0.2.1 launcher/runtime instead of layering additional launcher watchdogs.
+- Reapplies the Bento/glass dashboard and current-TCT daily cash-flow view as presentation-only changes.
+- Restores the original floating launcher mount, drag, click and visibility code verbatim from v0.2.1.
+- Prevents page-wide horizontal scrolling while keeping financial navigation and wide ledgers independently scrollable.
+- Consolidated cash flow today is money in minus money out for the current TCT day; internal transfers remain separate.
+- Source validation includes the original baseline, current production source, rebuilt source and a Torn-PDA-style API-key substituted source.
