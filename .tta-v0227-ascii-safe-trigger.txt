@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.27 with ASCII-safe userscript source to prevent Torn PDA mojibake.
