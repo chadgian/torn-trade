@@ -1,1 +1,1 @@
-Publish Torn Cash Flow Analyzer v0.2.15 with dashboard cleanup, Help page, daily net-worth activity, and highlighted Financial Tools portal.
+Publish Torn Cash Flow Analyzer v0.2.15 with dashboard cleanup, Help page, daily net-worth activity, and highlighted Financial Tools portal. Retry after workflow fix.
