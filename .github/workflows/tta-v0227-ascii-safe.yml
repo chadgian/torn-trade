@@ -1,0 +1,44 @@
+name: Torn Cash Flow Analyzer v0.2.27 ASCII-safe source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0227-ascii-safe-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0227-ascii-safe.py
+
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.27" torn-trade-analyzer.user.js
+          grep -F "const VERSION = '0.2.27';" torn-trade-analyzer.user.js
+          grep -F "https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js" torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text(encoding='ascii')
+          assert all(ord(c)<128 for c in s)
+          assert '\\u26A1' in s or '\\u2195' in s or '\\u00B7' in s
+          print('ASCII-safe userscript verified')
+          PY
+
+      - name: Commit userscript
+        run: |
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Make userscript source ASCII-safe for Torn PDA'
+          git push origin main
