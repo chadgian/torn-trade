@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
-// @namespace    chadgian.torn.trade.analyzer
+// @namespace    obliviate.torn.trade.analyzer
 // @version      0.2.25
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
-// @author       chadgian + ChatGPT
+// @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
 // @grant        none
