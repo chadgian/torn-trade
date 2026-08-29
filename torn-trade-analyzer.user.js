@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.32
+// @version      0.2.33
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.32';
+  const VERSION = '0.2.33';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -1393,7 +1393,7 @@
     const paidAction=/\b(buy|bought|purchase|purchased|sell|sold|sale|listed|listing|win|won)\b/i;
     const itemMovement=/(item|plushie|flower|drug|weapon|armor|armour|temporary).*(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win)|(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win).*(item|plushie|flower|drug|weapon|armor|armour|temporary)/i;
     const freeContext=/(crime success|organized crime success|city find|mission reward|seasonal gift|christmas town|easter egg hunt|halloween basket|job special|company special|event reward|competition reward|reward|loot|items? incoming|item.*received|item.*gained|item.*found)/i;
-    const moneyContext=/(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|points|award|income|expense|cost|profit|loss)/i;
+    const moneyContext=/(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime|points|award|income|expense|cost|profit|loss)/i;
     const byId=new Map();
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
@@ -1482,7 +1482,7 @@
   }
 
   function financialTitleContext(title) {
-    return /(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|points|award|reward|income|expense|cost|profit|loss)/i.test(String(title||''));
+    return /(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime|points|award|reward|income|expense|cost|profit|loss)/i.test(String(title||''));
   }
   function flattenNumericFields(value,path='',out=[],depth=0) {
     if(value==null||depth>7)return out;
@@ -1531,7 +1531,7 @@
     if(/rehab/.test(s))return 'Rehab';
     if(/education|course/.test(s))return 'Education';
     if(/bounty/.test(s))return 'Bounties';
-    if(/crime|mug/.test(s))return 'Crime / Mugging';
+    if(/crime|mug|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/.test(s))return 'Crime / Mugging';
     if(/wage|salary|job pay|company pay/.test(s))return 'Wages / Job';
     if(/fee|tax/.test(s))return 'Fees / Taxes';
     if(/point/.test(s))return 'Points';
@@ -1555,8 +1555,10 @@
     const f=bestMoneyField(payload,meta?.label||'');return f?Math.abs(Number(f.value)||0):0;
   }
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
-    if(parsedItemRows?.length)return[];
-    const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||'');
+    const entryTitle=String(entry?.details?.title||'');
+    const crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(entryTitle);
+    if(parsedItemRows?.length&&!crimeContext)return[];
+    const logTypeId=Number(entry?.details?.id)||0,title=entryTitle;
     const payload={...(entry?.params||{}),...(entry?.data||{})},explicit=EXPLICIT_CASH_LOGS.get(logTypeId);
     if(explicit){
       const amount=explicitCashAmount(payload,explicit);if(!(amount>0))return[];
@@ -1566,9 +1568,17 @@
     if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title)||!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
     const field=bestMoneyField(payload,title);if(!field)return[];
-    const direction=cashFlowDirection(title,field.path,logTypeId);if(!direction)return[];
+    let direction=cashFlowDirection(title,field.path,logTypeId);
+    if(crimeContext){
+      const success=/\b(success|successful|succeeded|reward|rewarded)\b/i.test(title);
+      const incomingField=/(money|cash).*(gain|gained|receive|received|earn|earned|reward|payout|profit)|(?:gain|gained|receive|received|earn|earned|reward|payout|profit).*(money|cash)/i.test(field.path);
+      const outgoingField=/(spent|paid|cost|fee|fine|lost|loss|expense)/i.test(field.path);
+      const failed=/\b(fail|failed|failure|unsuccessful)\b/i.test(title);
+      if(!outgoingField&&!failed&&(success||incomingField))direction='in';
+    }
+    if(!direction)return[];
     const amount=Math.abs(Number(field.value)||0);if(!(amount>0))return[];
-    return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction,amount,category:cashFlowCategory(title,direction),source:'Torn Log',title,logId:logTypeId,field:field.path,transfer:direction.startsWith('transfer')}];
+    return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction,amount,category:cashFlowCategory(title,direction),source:crimeContext?'Crime Reward':'Torn Log',title,logId:logTypeId,field:field.path,transfer:direction.startsWith('transfer')}];
   }
   function parsePlayerTransferEntry(entry) {
     const logTypeId=Number(entry?.details?.id)||0,meta=PLAYER_ITEM_LOGS.get(logTypeId);if(!meta)return[];
