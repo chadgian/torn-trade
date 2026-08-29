@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.31 with cross-device text spacing and wrapping fixes.
