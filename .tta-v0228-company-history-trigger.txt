@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.28 with safe company gross-income history backfill from Torn daily snapshots.
