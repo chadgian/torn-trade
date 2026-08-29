@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.30
+// @version      0.2.31
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.30';
+  const VERSION = '0.2.31';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -338,6 +338,53 @@
       .tta-insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tta-insight-grid>.tta-fin-section{margin:0}.tta-analytics-bars{display:grid;gap:8px;margin-top:10px}.tta-analytics-row{display:grid;gap:4px}.tta-analytics-label{display:flex;justify-content:space-between;gap:8px;font-size:9px}.tta-analytics-label span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tta-muted)}.tta-analytics-label b{white-space:nowrap}.tta-analytics-track,.tta-goal-track{height:6px;border-radius:999px;background:#071018;overflow:hidden;border:1px solid #ffffff14}.tta-analytics-track span,.tta-goal-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--tta-green),var(--tta-blue))}.tta-analytics-row small,.tta-allocation-row small{color:var(--tta-faint);font-size:8px}.tta-unmapped-list{display:grid;gap:6px}.tta-unmapped{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 9px;border:1px solid #ffffff18;border-radius:11px;background:#ffffff07}.tta-unmapped strong{display:block;font-size:10px}.tta-unmapped small{display:block;margin-top:2px;color:var(--tta-faint);font-size:8px;line-height:1.35}.tta-unmapped b{font-size:10px;white-space:nowrap}.tta-goal-form{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:6px;margin-bottom:9px}.tta-goal-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.tta-goal{padding:9px;border:1px solid #ffffff1b;border-radius:13px;background:#ffffff08}.tta-goal-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.tta-goal-head strong{display:block;font-size:10.5px}.tta-goal-head small{display:block;color:var(--tta-faint);font-size:8px}.tta-goal-remove{width:27px!important;height:27px!important;min-width:27px!important;min-height:27px!important;flex-basis:27px!important}.tta-goal-values{display:flex;gap:5px;align-items:baseline;margin:8px 0 6px}.tta-goal-values b{font-size:14px}.tta-goal-values span{font-size:8.5px;color:var(--tta-muted)}.tta-goal>small{display:block;margin-top:5px;color:var(--tta-faint);font-size:8px}.tta-nw-chart{width:100%;overflow:hidden}.tta-nw-chart svg{width:100%;height:150px;display:block}.tta-nw-line{fill:none;stroke:var(--tta-blue);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.tta-nw-point{fill:var(--tta-green);stroke:#0b151d;stroke-width:1}.tta-nw-chart-meta{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-top:3px;color:var(--tta-faint);font-size:8px}.tta-nw-chart-meta span:last-child{text-align:right}.tta-nw-chart-meta b{text-align:center;font-size:10px}.tta-allocation{display:grid;gap:8px}.tta-allocation-row{display:grid;grid-template-columns:minmax(0,1fr) 1.2fr auto;gap:8px;align-items:center}.tta-allocation-row>div:first-child{display:flex;justify-content:space-between;gap:6px;font-size:9px}.tta-allocation-row>div:first-child span{color:var(--tta-muted)}.tta-allocation-row b{white-space:nowrap}.tta-backup-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
       @media(max-width:640px){.tta-insight-grid{grid-template-columns:1fr}.tta-goal-form{grid-template-columns:1fr 1fr}.tta-goal-form #tta-goal-label{grid-column:1/-1}.tta-goal-form .tta-btn{grid-column:1/-1}.tta-goal-list{grid-template-columns:1fr}}
       @media(max-width:420px){.tta-allocation-row{grid-template-columns:1fr auto}.tta-allocation-row .tta-analytics-track{grid-column:1/-1}.tta-goal-form{grid-template-columns:1fr}.tta-goal-form #tta-goal-label,.tta-goal-form .tta-btn{grid-column:auto}.tta-backup-actions{grid-template-columns:1fr}}
+
+
+      /* v0.2.31 cross-device text and spacing safety */
+      #tta-root{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+      #tta-root .tta-content,#tta-root .tta-dashboard,#tta-root .tta-feature-portal,#tta-root .tta-fin-section,#tta-root .tta-glass-section,#tta-root .tta-bento,#tta-root .tta-toolcard{min-width:0}
+      #tta-root .tta-sectionintro,#tta-root .tta-sectionhead,#tta-root .tta-portal-head{min-width:0;align-items:flex-start}
+      #tta-root .tta-sectionintro>div,#tta-root .tta-sectionhead>div,#tta-root .tta-portal-head>div{min-width:0;display:grid;grid-template-columns:minmax(0,1fr);align-content:start;row-gap:4px}
+      #tta-root .tta-sectionintro small,#tta-root .tta-sectionhead small,#tta-root .tta-portal-head small{position:static;display:block;margin:0;padding:0;line-height:1.35;min-height:1.35em;white-space:normal;overflow-wrap:anywhere}
+      #tta-root .tta-sectionintro h3,#tta-root .tta-sectionhead h3,#tta-root .tta-portal-head h3{position:static;display:block;margin:0;padding:0;line-height:1.2;min-height:1.2em;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+      #tta-root .tta-sectionintro{margin-top:16px;margin-bottom:10px;gap:10px}
+      #tta-root .tta-sectionintro>span,#tta-root .tta-sectionhint,#tta-root .tta-morehint{line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+      #tta-root .tta-portal-head{gap:9px;margin-bottom:12px}
+      #tta-root .tta-portal-head>span{line-height:1.4;white-space:normal;flex:0 1 auto}
+      #tta-root .tta-feature-portal .tta-toolcard{height:auto;align-content:center}
+      #tta-root .tta-toolcopy{min-width:0;overflow:visible}
+      #tta-root .tta-toolcopy strong,#tta-root .tta-toolcopy small,#tta-root .tta-toolcopy em{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}
+      #tta-root .tta-toolcopy strong{line-height:1.25}
+      #tta-root .tta-toolcopy em{line-height:1.3}
+      #tta-root .tta-bento small,#tta-root .tta-bento b,#tta-root .tta-bento p,#tta-root .tta-cashcard small,#tta-root .tta-cashcard b{line-height:1.35}
+      #tta-root .tta-fin-row span,#tta-root .tta-fin-row b{line-height:1.4}
+      #tta-root .tta-flowtitle{line-height:1.35;white-space:normal;overflow-wrap:anywhere}
+      #tta-root .tta-flowmeta{line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+      #tta-root .tta-nw-change-copy strong,#tta-root .tta-nw-change-copy small{white-space:normal;overflow-wrap:anywhere}
+      #tta-root .tta-btn,#tta-root .tta-chip,#tta-root .tta-iconbtn,#tta-root .tta-back{flex-shrink:0}
+      @media(max-width:520px){
+        #tta-root .tta-portal-head{flex-direction:column;align-items:stretch;gap:9px}
+        #tta-root .tta-portal-head>span{width:100%;margin-top:1px}
+        #tta-root .tta-sectionintro{align-items:flex-start}
+        #tta-root .tta-sectionintro h3,#tta-root .tta-portal-head h3{font-size:clamp(14px,5vw,18px)}
+        #tta-root .tta-sectionintro small,#tta-root .tta-portal-head small{font-size:8px}
+        #tta-root .tta-feature-portal .tta-toolcard{min-height:0;padding-top:12px;padding-bottom:12px}
+        #tta-root .tta-toolcopy em{margin-top:6px}
+      }
+      @media(max-width:430px){
+        #tta-root .tta-sectionintro{display:grid;grid-template-columns:minmax(0,1fr);align-items:start}
+        #tta-root .tta-sectionintro>span,#tta-root .tta-sectionintro>.tta-btn,#tta-root .tta-sectionintro>.tta-sectionhint{justify-self:start;max-width:100%}
+        #tta-root .tta-sectionintro>.tta-btn{width:auto;min-width:0;white-space:normal}
+        #tta-root .tta-sectionhead{flex-wrap:wrap}
+        #tta-root .tta-sectionhead>div{flex:1 1 180px}
+        #tta-root .tta-sectionhead>.tta-btn{max-width:100%;white-space:normal}
+      }
+      @media(max-width:360px){
+        #tta-root .tta-sectionintro h3,#tta-root .tta-portal-head h3{font-size:14px}
+        #tta-root .tta-sectionintro{margin-top:14px;margin-bottom:9px}
+        #tta-root .tta-feature-portal{padding-left:9px;padding-right:9px}
+      }
+
     `;
     document.head.appendChild(s);
   }
