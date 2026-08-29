@@ -1,0 +1,1 @@
+Publish Torn Cash Flow Analyzer v0.2.24 workspace click fix and responsive landscape/desktop layout.
