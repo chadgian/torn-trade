@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.17 compact floating launcher and UI consistency sweep.
