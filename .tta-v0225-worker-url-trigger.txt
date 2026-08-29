@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.25 using neutral Cloudflare Worker update/download URLs.
