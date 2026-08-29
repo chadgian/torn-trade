@@ -54,7 +54,7 @@ bind_new="""  function bindPortalMouseDrag(root) {
     bindPortalMouseDrag(root);
     root.addEventListener('click',async e=>{
       const portal=e.target?.closest?.('.tta-fin-nav.portal');
-      if(portal?.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}
+      if(portal&&portal.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}
       const dateEl=e.target.closest('[data-date]');
 """
 if bind_anchor not in s: raise SystemExit('bind anchor missing')
