@@ -1,0 +1,119 @@
+name: Torn Cash Flow Analyzer v0.2.14 background quick sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0214-background-sync-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch userscript
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('torn-trade-analyzer.user.js')
+          s = path.read_text(encoding='utf-8')
+
+          def once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              s = s.replace(old, new, 1)
+
+          once('// @version      0.2.13', '// @version      0.2.14', 'metadata version')
+          once("const VERSION = '0.2.13';", "const VERSION = '0.2.14';", 'runtime version')
+          once(
+              '  const REQUEST_GAP_MS = 700; // ~86 requests/minute, keeping headroom under Torn\'s 100/min user limit.\n',
+              '  const REQUEST_GAP_MS = 700; // ~86 requests/minute, keeping headroom under Torn\'s 100/min user limit.\n  const BACKGROUND_QUICK_SYNC_MS = 60 * 1000;\n',
+              'background interval constant'
+          )
+          once(
+              "    syncing: false,\n    syncProgress: '',\n",
+              "    syncing: false,\n    backgroundSyncing: false,\n    backgroundSyncProgress: '',\n    syncProgress: '',\n",
+              'background sync state'
+          )
+          once(
+              '  function setBusyDetail(detail) {state.busy={...(state.busy||{}),detail};updateBusyDom();}',
+              '  function setBusyDetail(detail) {if(state.backgroundSyncing)return;state.busy={...(state.busy||{}),detail};updateBusyDom();}',
+              'silent busy detail'
+          )
+          once(
+              "  function setSyncProgress(msg) {\n    state.syncProgress=String(msg||'');\n    const text=document.getElementById('tta-sync-progress-text');if(text)text.textContent=state.syncProgress;\n    if(state.syncing)setBusyDetail(state.syncProgress);\n  }",
+              "  function setSyncProgress(msg) {\n    const value=String(msg||'');\n    if(state.backgroundSyncing){state.backgroundSyncProgress=value;return;}\n    state.syncProgress=value;\n    const text=document.getElementById('tta-sync-progress-text');if(text)text.textContent=state.syncProgress;\n    if(state.syncing)setBusyDetail(state.syncProgress);\n  }",
+              'silent sync progress'
+          )
+          once(
+              "  function checkpointSyncJob(job,progress='') {\n    if(progress){job.progress=String(progress);setSyncProgress(job.progress);}\n    if(!saveSyncJob(job))throw new Error('Unable to save the resumable sync checkpoint. Free some browser storage and try again.');\n  }",
+              "  function checkpointSyncJob(job,progress='') {\n    if(progress){job.progress=String(progress);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}\n    if(!saveSyncJob(job))throw new Error('Unable to save the resumable sync checkpoint. Free some browser storage and try again.');\n  }",
+              'background checkpoint progress'
+          )
+          once(
+              "  function createResumableSyncJob(syncMode='quick') {",
+              "  function createResumableSyncJob(syncMode='quick',background=false) {",
+              'job signature'
+          )
+          once(
+              "    const job={schema:SYNC_JOB_SCHEMA_VERSION,id:",
+              "    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:",
+              'job background marker'
+          )
+          once(
+              "  async function runResumableSync(job,resumed=false) {\n    if(state.syncing)return;\n    state.syncing=true;state.syncCancel=false;updateFabState();",
+              "  async function runResumableSync(job,resumed=false,options={}) {\n    const background=!!(options?.background||job?.background);\n    if(state.syncing||state.backgroundSyncing)return;\n    if(background)state.backgroundSyncing=true;else state.syncing=true;\n    state.syncCancel=false;if(!background)updateFabState();",
+              'resumable sync startup'
+          )
+          once(
+              "    setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);\n    const syncBtn=document.querySelector('#tta-root [data-act=\"sync\"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class=\"tta-sync\"><span class=\"tta-spinner\"></span>Syncing</span>';}\n    if(state.open)await nextPaint();",
+              "    if(!background){\n      setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);\n      const syncBtn=document.querySelector('#tta-root [data-act=\"sync\"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class=\"tta-sync\"><span class=\"tta-spinner\"></span>Syncing</span>';}\n      if(state.open)await nextPaint();\n    }",
+              'silent sync UI suppression'
+          )
+          once(
+              "    }catch(e){\n      job.lastError=String(e?.message||e);job.lastErrorAt=nowSec();\n      try{checkpointSyncJob(job,`Sync paused at saved checkpoint · ${job.lastError} · tap Sync or reload a Torn page to retry.`);}catch(saveError){setSyncProgress(`Sync stopped: ${saveError.message}`);clearSyncJob();abandonResumableMarkers(job);}\n    }\n    finally{state.syncing=false;updateFabState();setBusy(false);render();}\n  }\n  async function syncAll(options={}) {\n    if(state.syncing)return;\n    if(!hasApiKey()){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');return;}\n    const requestedMode=options?.mode==='full'?'full':'quick';\n    let job=options?.job||loadSyncJob();\n    if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}\n    if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}\n    if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}\n    if(!job)job=createResumableSyncJob(requestedMode);\n    return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup');\n  }",
+              "    }catch(e){\n      job.lastError=String(e?.message||e);job.lastErrorAt=nowSec();\n      if(background){\n        try{commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();}catch(_){}\n        state.backgroundSyncProgress=`Background Quick Sync skipped · ${job.lastError}`;\n      }else{\n        try{checkpointSyncJob(job,`Sync paused at saved checkpoint · ${job.lastError} · tap Sync or reload a Torn page to retry.`);}catch(saveError){setSyncProgress(`Sync stopped: ${saveError.message}`);clearSyncJob();abandonResumableMarkers(job);}\n      }\n    }\n    finally{\n      if(background){state.backgroundSyncing=false;}\n      else{state.syncing=false;updateFabState();setBusy(false);render();}\n    }\n  }\n  async function syncAll(options={}) {\n    const background=!!options?.background;\n    if(background){if(state.syncing||state.backgroundSyncing)return;}\n    else{if(state.syncing)return;if(state.backgroundSyncing){toast('Background Quick Sync is already updating the latest data.');return;}}\n    if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');}return;}\n    const requestedMode=options?.mode==='full'?'full':'quick';\n    let job=options?.job||loadSyncJob();\n    if(background&&job&&!options?.job)return;\n    if(job?.background&&!background&&!options?.job){discardStaleSyncJob(job);job=null;}\n    if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}\n    if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}\n    if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}\n    if(!job)job=createResumableSyncJob(requestedMode,background);\n    if(background)job.background=true;\n    return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});\n  }",
+              'background-aware sync runner'
+          )
+          once(
+              "  function resumePendingSync() {\n    if(resumeBootStarted||state.syncing)return;\n    const job=loadSyncJob();if(!job)return;\n    if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}",
+              "  function resumePendingSync() {\n    if(resumeBootStarted||state.syncing||state.backgroundSyncing)return;\n    const job=loadSyncJob();if(!job)return;\n    if(job.background){discardStaleSyncJob(job);return;}\n    if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}",
+              'background checkpoint boot handling'
+          )
+          once(
+              "  repairCashFlowAccountingRows();\n  const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();\n  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);",
+              "  let backgroundQuickSyncTimer=0;\n  async function backgroundQuickSyncTick() {\n    if(!hasApiKey()||state.syncing||state.backgroundSyncing)return;\n    if(loadSyncJob())return;\n    try{await syncAll({mode:'quick',background:true});}catch(_){}\n  }\n  function startBackgroundQuickSync() {\n    if(backgroundQuickSyncTimer)return;\n    backgroundQuickSyncTimer=setInterval(()=>{void backgroundQuickSyncTick();},BACKGROUND_QUICK_SYNC_MS);\n  }\n\n  repairCashFlowAccountingRows();\n  const boot=()=>{if(document.body){mount();resumePendingSync();startBackgroundQuickSync();}else setTimeout(boot,250)}; boot();\n  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);",
+              'one-minute background scheduler'
+          )
+
+          path.write_text(s, encoding='utf-8')
+
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.14" torn-trade-analyzer.user.js
+          grep -F "BACKGROUND_QUICK_SYNC_MS = 60 * 1000" torn-trade-analyzer.user.js
+          grep -F "backgroundQuickSyncTick" torn-trade-analyzer.user.js
+          grep -F "if(background){state.backgroundSyncing=false;}" torn-trade-analyzer.user.js
+
+      - name: Commit userscript
+        run: |
+          if git diff --quiet -- torn-trade-analyzer.user.js; then
+            echo 'No userscript changes to commit.'
+            exit 0
+          fi
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Add silent one-minute background Quick Sync'
+          git push origin main
