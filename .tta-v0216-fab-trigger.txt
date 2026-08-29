@@ -1,1 +1,1 @@
-Publish Torn Cash Flow Analyzer v0.2.16 floating launcher redesign.
+Publish Torn Cash Flow Analyzer v0.2.16 floating launcher redesign. Retry after workflow fix.
