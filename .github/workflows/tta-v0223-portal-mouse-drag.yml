@@ -1,0 +1,38 @@
+name: Torn Cash Flow Analyzer v0.2.23 portal mouse drag
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0223-portal-mouse-drag-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0223-portal-mouse-drag.py
+
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.23" torn-trade-analyzer.user.js
+          grep -F "function bindPortalMouseDrag" torn-trade-analyzer.user.js
+          grep -F ".tta-fin-nav.portal.dragging" torn-trade-analyzer.user.js
+          grep -F "portal.dataset.suppressClick==='1'" torn-trade-analyzer.user.js
+
+      - name: Commit userscript
+        run: |
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Enable mouse drag scrolling for financial workspace portal'
+          git push origin main
