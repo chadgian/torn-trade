@@ -1,1 +1,0 @@
-Publish corrected Torn Cash Flow Analyzer v0.2.29 exact observed company profit/loss only.
