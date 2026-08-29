@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.15
+// @version      0.2.16
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.15';
+  const VERSION = '0.2.16';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -166,12 +166,15 @@
       :root{--tta-bg:#0b0f14;--tta-panel:#111821;--tta-card:#151e28;--tta-soft:#1f2c39;--tta-line:#34475a;--tta-text:#f7fbff;--tta-muted:#b9c8d6;--tta-faint:#91a5b7;--tta-green:#63efb1;--tta-red:#ff7d8a;--tta-blue:#7fc1ff;--tta-yellow:#ffda73}
       #tta-root,#tta-root *,#tta-fab,#tta-fab *{box-sizing:border-box}
       #tta-root button,#tta-fab{font-family:inherit;-webkit-appearance:none;appearance:none;margin:0;line-height:1.15;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:40px;height:40px;min-width:40px;min-height:40px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #38566a;border-radius:50%;background:linear-gradient(135deg,#1a352f,#183951);color:#fff;box-shadow:0 8px 22px #0008;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center}
-      #tta-fab .tta-fabicon{display:grid;place-items:center;width:23px;height:23px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:23px;height:23px;overflow:visible;filter:drop-shadow(0 0 4px #63efb144)}#tta-fab .tta-terminal-frame{fill:#0a1219;stroke:#7fc1ff;stroke-width:1.35}#tta-fab .tta-terminal-bar{stroke:#38566a;stroke-width:1.15}#tta-fab .tta-terminal-prompt{fill:none;stroke:#63efb1;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-terminal-cursor{stroke:#b9c8d6;stroke-width:1.35;stroke-linecap:round}#tta-fab .tta-data-pulse{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.55;stroke-linecap:round;stroke-linejoin:round}
-      #tta-fab.dragging{cursor:grabbing;opacity:.92;transform:scale(1.02)}
-      #tta-fab .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--tta-green);box-shadow:0 0 14px var(--tta-green)}
-      #tta-fab.syncing{border-color:#ff9aa8;background:linear-gradient(135deg,#5d2931,#7b333e);color:#ffe9ec;box-shadow:0 12px 35px #0009,0 0 18px #ff859655}
-      #tta-fab .tta-fabspinner{width:14px;height:14px;flex:0 0 14px;border:2px solid #ffccd244;border-top-color:#ffb0ba;border-right-color:#ffb0ba;border-radius:50%;animation:tta-spin .78s linear infinite}
+      #tta-fab{position:fixed;right:14px;bottom:86px;z-index:2147483000;width:52px;height:52px;min-width:52px;min-height:52px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;border:1px solid #91cdf75c;border-radius:17px;background:linear-gradient(145deg,#355665e8,#27434fe8 58%,#233b47ed);color:#fff;box-shadow:0 14px 32px #07151e66,0 0 0 1px #79dfb314,inset 0 1px #ffffff2a,inset 0 -10px 20px #0d1b2430;padding:0;font:700 18px/1 system-ui;display:inline-flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease,background .14s ease}
+      #tta-fab:before{content:"";position:absolute;left:7px;right:7px;top:5px;height:1px;border-radius:999px;background:linear-gradient(90deg,transparent,#ffffff70,transparent);pointer-events:none}
+      #tta-fab:after{content:"";position:absolute;width:26px;height:26px;right:-8px;bottom:-9px;border-radius:50%;background:#79dfb31d;filter:blur(4px);pointer-events:none}
+      #tta-fab .tta-fabicon{position:relative;z-index:1;display:grid;place-items:center;width:31px;height:31px;pointer-events:none}#tta-fab .tta-fabicon svg{display:block;width:31px;height:31px;overflow:visible;filter:drop-shadow(0 5px 10px #07151e78)}#tta-fab .tta-fab-panel{fill:#ffffff0b;stroke:#ffffff2f;stroke-width:1}#tta-fab .tta-fab-grid{fill:none;stroke:#ffffff16;stroke-width:.8}#tta-fab .tta-fab-line{fill:none;stroke:url(#ttaFabPulse);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}#tta-fab .tta-fab-dot{fill:#79dfb3;filter:drop-shadow(0 0 3px #79dfb3aa)}#tta-fab .tta-fab-mark{fill:#91cdf7}
+      #tta-fab:hover{border-color:#91cdf790;box-shadow:0 16px 36px #07151e72,0 0 0 1px #79dfb325,0 0 22px #91cdf71e,inset 0 1px #ffffff35}
+      #tta-fab:active{transform:scale(.96)}
+      #tta-fab.dragging{cursor:grabbing;opacity:.94;transform:scale(1.035);border-color:#79dfb39a;box-shadow:0 18px 40px #07151e78,0 0 24px #79dfb325,inset 0 1px #ffffff38}
+      #tta-fab.syncing{border-color:#79dfb387;background:linear-gradient(145deg,#31594f,#294a51 56%,#274353);box-shadow:0 14px 34px #07151e70,0 0 24px #79dfb326,inset 0 1px #ffffff30}
+      #tta-fab .tta-fabspinner{position:relative;z-index:1;width:22px;height:22px;flex:0 0 22px;border:2px solid #91cdf736;border-top-color:#79dfb3;border-right-color:#91cdf7;border-radius:50%;box-shadow:0 0 12px #79dfb31c;animation:tta-spin .78s linear infinite}
       #tta-root{position:fixed;inset:0;z-index:2147482999;background:#06090dcc;backdrop-filter:blur(5px);display:none;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--tta-text);font-size:14px;line-height:1.4}
       #tta-root.show{display:block}.tta-shell{position:absolute;inset:0;background:var(--tta-bg);overflow:auto;overscroll-behavior:contain;padding-bottom:max(38px,env(safe-area-inset-bottom))}.tta-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:9px;min-height:62px;padding:10px 12px;background:#0b0f14f2;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(8px)}
       .tta-brand{display:flex;align-items:center;gap:9px;min-width:0;flex:1}.tta-mark{width:38px;height:38px;flex:0 0 38px;border-radius:11px;background:linear-gradient(145deg,#183d32,#17394f);display:grid;place-items:center;font-size:19px;line-height:1}.tta-brandcopy{min-width:0}.tta-title{color:var(--tta-text);font-size:15px;font-weight:850;letter-spacing:.15px;line-height:1.2}.tta-sub{font-size:11px;color:var(--tta-muted);margin-top:2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -279,7 +282,7 @@
     window.addEventListener('resize',()=>applyFabPosition(fab),{passive:true});
   }
   function fabIconSvg() {
-    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="5" y1="0" x2="20" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#63efb1"/><stop offset="1" stop-color="#7fc1ff"/></linearGradient></defs><rect class="tta-terminal-frame" x="2.5" y="3.25" width="19" height="17.5" rx="3"/><path class="tta-terminal-bar" d="M3.25 7h17.5"/><circle cx="5.25" cy="5.2" r=".65" fill="#63efb1"/><circle cx="7.45" cy="5.2" r=".65" fill="#7fc1ff"/><path class="tta-terminal-prompt" d="M5.4 10.1l2 1.8-2 1.8"/><path class="tta-terminal-cursor" d="M8.8 13.7h2.2"/><path class="tta-data-pulse" d="M5 17.25h2.15l1.05-2.05 1.45 3.5 1.75-5.15 1.55 3.7h1.85l1.1-1.8 1.05 1.8H19"/></svg></span>`;
+    return `<span class="tta-fabicon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><defs><linearGradient id="ttaFabPulse" x1="7" y1="23" x2="25" y2="8" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#79dfb3"/><stop offset="1" stop-color="#91cdf7"/></linearGradient></defs><rect class="tta-fab-panel" x="4.5" y="5" width="23" height="21" rx="6"/><path class="tta-fab-grid" d="M9 10.5h14M9 15.5h14M9 20.5h14M12 9v13M18 9v13M24 9v13"/><path class="tta-fab-line" d="M8 21l4.1-4.2 3.5 2.2 4.2-6.4 4.2 2.4"/><circle class="tta-fab-dot" cx="24" cy="15" r="1.8"/><path class="tta-fab-mark" d="M7.5 8.3h4.2v1.3H7.5z"/></svg></span>`;
   }
 
   function updateFabState() {
