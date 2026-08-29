@@ -1,20 +1,20 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.24
+// @version      0.2.25
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
 // @run-at       document-end
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.user.js
-// @downloadURL  https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.user.js
+// @updateURL    https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js
+// @downloadURL  https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
-  const VERSION = '0.2.24';
+  const VERSION = '0.2.25';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
