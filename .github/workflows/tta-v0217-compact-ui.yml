@@ -1,0 +1,39 @@
+name: Torn Cash Flow Analyzer v0.2.17 compact UI sweep
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0217-compact-ui-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0217-compact-ui.py
+
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.17" torn-trade-analyzer.user.js
+          grep -F "#tta-fab{width:42px;height:42px" torn-trade-analyzer.user.js
+          grep -F "v0.2.17 compact UI consistency sweep" torn-trade-analyzer.user.js
+          grep -F ".tta-keyinputrow{grid-template-columns:1fr}" torn-trade-analyzer.user.js
+          grep -F ".tta-nw-change-copy strong{font-size:10px;white-space:normal" torn-trade-analyzer.user.js
+
+      - name: Commit userscript
+        run: |
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Compact floating button and sweep UI consistency'
+          git push origin main
