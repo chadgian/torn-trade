@@ -1,0 +1,56 @@
+name: Torn Cash Flow Analyzer v0.2.18 finance suite
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0218-finance-suite-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Prepare patch helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/tta-v0218-finance-suite.py')
+          s=p.read_text()
+          s=s.replace("s2,n=re.subn(pattern,repl,s,count=1,flags=flags)","s2,n=re.subn(pattern,lambda m: repl,s,count=1,flags=flags)")
+          p.write_text(s)
+          PY
+
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0218-finance-suite.py
+
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.18" torn-trade-analyzer.user.js
+          grep -F "[4800,{direction:'out',field:'money',category:'Player Transfers'" torn-trade-analyzer.user.js
+          grep -F "[4810,{direction:'in',field:'money',category:'Player Transfers'" torn-trade-analyzer.user.js
+          grep -F "[4102,{direction:'out',label:'Item sent'}]" torn-trade-analyzer.user.js
+          grep -F "[4103,{direction:'in',label:'Item received'}]" torn-trade-analyzer.user.js
+          grep -F "function insightsHtml()" torn-trade-analyzer.user.js
+          grep -F "function netWorthTimelineHtml()" torn-trade-analyzer.user.js
+          grep -F "function assetAllocationHtml(nw)" torn-trade-analyzer.user.js
+          grep -F "function exportBackup()" torn-trade-analyzer.user.js
+          grep -F "function importBackup()" torn-trade-analyzer.user.js
+          grep -F "FIFO profit/loss unavailable" torn-trade-analyzer.user.js
+          grep -F "Unrecognized financial events" torn-trade-analyzer.user.js
+
+      - name: Commit userscript
+        run: |
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Add player transfers and financial insights suite'
+          git push origin main
