@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    chadgian.torn.trade.analyzer
-// @version      0.2.13
+// @version      0.2.14
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       chadgian + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,11 +14,12 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.13';
+  const VERSION = '0.2.14';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
   const REQUEST_GAP_MS = 700; // ~86 requests/minute, keeping headroom under Torn's 100/min user limit.
+  const BACKGROUND_QUICK_SYNC_MS = 60 * 1000;
   const MAX_LOG_IDS_PER_REQUEST = 10;
   const CATALOG_SCHEMA_VERSION = 2;
   const KNOWN_TRANSACTION_LOGS = new Map([
@@ -70,6 +71,8 @@
     expanded: null,
     search: '',
     syncing: false,
+    backgroundSyncing: false,
+    backgroundSyncProgress: '',
     syncProgress: '',
     syncCancel: false,
     toast: '',
@@ -919,12 +922,14 @@
   function setBusy(active,title='',detail='',cancellable=false) {
     state.busy={active:!!active,title,detail,cancellable:!!cancellable};updateBusyDom();
   }
-  function setBusyDetail(detail) {state.busy={...(state.busy||{}),detail};updateBusyDom();}
+  function setBusyDetail(detail) {if(state.backgroundSyncing)return;state.busy={...(state.busy||{}),detail};updateBusyDom();}
   function nextPaint(){return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));}
   async function withBusy(title,detail,fn,{cancellable=false}={}) {setBusy(true,title,detail,cancellable);await nextPaint();try{return await fn();}finally{setBusy(false);}}
 
   function setSyncProgress(msg) {
-    state.syncProgress=String(msg||'');
+    const value=String(msg||'');
+    if(state.backgroundSyncing){state.backgroundSyncProgress=value;return;}
+    state.syncProgress=value;
     const text=document.getElementById('tta-sync-progress-text');if(text)text.textContent=state.syncProgress;
     if(state.syncing)setBusyDetail(state.syncProgress);
   }
@@ -1663,7 +1668,7 @@
   }
   function syncJobCancelled(job){return !!(state.syncCancel||job?.cancelled);}
   function checkpointSyncJob(job,progress='') {
-    if(progress){job.progress=String(progress);setSyncProgress(job.progress);}
+    if(progress){job.progress=String(progress);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}
     if(!saveSyncJob(job))throw new Error('Unable to save the resumable sync checkpoint. Free some browser storage and try again.');
   }
   function stripSyncRunMarkers() {
@@ -1712,13 +1717,13 @@
   function newSyncDiagnostics(job,mode,logTypes,batches) {
     return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
-  function createResumableSyncJob(syncMode='quick') {
+  function createResumableSyncJob(syncMode='quick',background=false) {
     stripSyncRunMarkers();
     const mode=syncMode==='full'?'full':'quick',now=nowSec(),last=Number(state.sync?.lastSync)||0;
     const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
     const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} – ${tctDateTimeStr(now)} TCT`;
     const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
-    const job={schema:SYNC_JOB_SCHEMA_VERSION,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning…`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT…`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{}};
+    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning…`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT…`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{}};
     checkpointSyncJob(job,job.progress);return job;
   }
 
@@ -1890,14 +1895,18 @@
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT · ${qty(freshCount)} new item rows · ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen · ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
-  async function runResumableSync(job,resumed=false) {
-    if(state.syncing)return;
-    state.syncing=true;state.syncCancel=false;updateFabState();
+  async function runResumableSync(job,resumed=false,options={}) {
+    const background=!!(options?.background||job?.background);
+    if(state.syncing||state.backgroundSyncing)return;
+    if(background)state.backgroundSyncing=true;else state.syncing=true;
+    state.syncCancel=false;if(!background)updateFabState();
     if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload · /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;checkpointSyncJob(job,`Resumed after page reload · ${prior}`);}
     else setSyncProgress(job.progress||`Preparing historical scan for ${job.periodText}…`);
-    setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);
-    const syncBtn=document.querySelector('#tta-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
-    if(state.open)await nextPaint();
+    if(!background){
+      setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);
+      const syncBtn=document.querySelector('#tta-root [data-act="sync"]');if(syncBtn){syncBtn.disabled=true;syncBtn.innerHTML='<span class="tta-sync"><span class="tta-spinner"></span>Syncing</span>';}
+      if(state.open)await nextPaint();
+    }
     try{
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
@@ -1918,24 +1927,38 @@
       }
     }catch(e){
       job.lastError=String(e?.message||e);job.lastErrorAt=nowSec();
-      try{checkpointSyncJob(job,`Sync paused at saved checkpoint · ${job.lastError} · tap Sync or reload a Torn page to retry.`);}catch(saveError){setSyncProgress(`Sync stopped: ${saveError.message}`);clearSyncJob();abandonResumableMarkers(job);}
+      if(background){
+        try{commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();}catch(_){}
+        state.backgroundSyncProgress=`Background Quick Sync skipped · ${job.lastError}`;
+      }else{
+        try{checkpointSyncJob(job,`Sync paused at saved checkpoint · ${job.lastError} · tap Sync or reload a Torn page to retry.`);}catch(saveError){setSyncProgress(`Sync stopped: ${saveError.message}`);clearSyncJob();abandonResumableMarkers(job);}
+      }
     }
-    finally{state.syncing=false;updateFabState();setBusy(false);render();}
+    finally{
+      if(background){state.backgroundSyncing=false;}
+      else{state.syncing=false;updateFabState();setBusy(false);render();}
+    }
   }
   async function syncAll(options={}) {
-    if(state.syncing)return;
-    if(!hasApiKey()){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');return;}
+    const background=!!options?.background;
+    if(background){if(state.syncing||state.backgroundSyncing)return;}
+    else{if(state.syncing)return;if(state.backgroundSyncing){toast('Background Quick Sync is already updating the latest data.');return;}}
+    if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings → API Key to sync real history.');}return;}
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
+    if(background&&job&&!options?.job)return;
+    if(job?.background&&!background&&!options?.job){discardStaleSyncJob(job);job=null;}
     if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
     if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}
-    if(!job)job=createResumableSyncJob(requestedMode);
-    return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup');
+    if(!job)job=createResumableSyncJob(requestedMode,background);
+    if(background)job.background=true;
+    return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }
   function resumePendingSync() {
-    if(resumeBootStarted||state.syncing)return;
+    if(resumeBootStarted||state.syncing||state.backgroundSyncing)return;
     const job=loadSyncJob();if(!job)return;
+    if(job.background){discardStaleSyncJob(job);return;}
     if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}
     // Do not auto-resume checkpoints whose end time is already stale; the next manual Sync starts fresh.
     if(syncJobIsStale(job)){discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
@@ -1946,7 +1969,18 @@
   }
   document.addEventListener('click',e=>{const el=e.target?.closest?.('#tta-root [data-act="cancelSync"]');if(el)persistSyncCancellation();},true);
 
+  let backgroundQuickSyncTimer=0;
+  async function backgroundQuickSyncTick() {
+    if(!hasApiKey()||state.syncing||state.backgroundSyncing)return;
+    if(loadSyncJob())return;
+    try{await syncAll({mode:'quick',background:true});}catch(_){}
+  }
+  function startBackgroundQuickSync() {
+    if(backgroundQuickSyncTimer)return;
+    backgroundQuickSyncTimer=setInterval(()=>{void backgroundQuickSyncTick();},BACKGROUND_QUICK_SYNC_MS);
+  }
+
   repairCashFlowAccountingRows();
-  const boot=()=>{if(document.body){mount();resumePendingSync();}else setTimeout(boot,250)}; boot();
+  const boot=()=>{if(document.body){mount();resumePendingSync();startBackgroundQuickSync();}else setTimeout(boot,250)}; boot();
   setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);
 })();
