@@ -1,0 +1,1 @@
+Publish Torn Cash Flow Analyzer v0.2.30 with human-readable item and quantity details across financial activity views.
