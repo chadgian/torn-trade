@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.28
+// @version      0.2.29
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,11 +14,11 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.28';
+  const VERSION = '0.2.29';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
-  const ANALYZER_CUSTOM_KEY_URL = 'https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=CashFlowAnalyzer&user=log,trade,trades,money,networth&company=profile,employees,snapshot&torn=items,logtypes';
+  const ANALYZER_CUSTOM_KEY_URL = 'https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=CashFlowAnalyzer&user=log,trade,trades,money,networth&company=profile,employees&torn=items,logtypes';
   const REQUEST_GAP_MS = 700; // ~86 requests/minute, keeping headroom under Torn's 100/min user limit.
   const BACKGROUND_QUICK_SYNC_MS = 60 * 1000;
   const MAX_LOG_IDS_PER_REQUEST = 10;
@@ -65,7 +65,6 @@
     transactions: load('transactions', []),
     cashFlows: load('cashFlows', []),
     playerTransfers: load('playerTransfers', []),
-    companyHistory: load('companyHistory', []),
     unrecognizedFinancial: load('unrecognizedFinancial', []),
     goals: load('goals', []),
     financialSnapshots: load('financialSnapshots', []),
@@ -108,6 +107,7 @@
 
   // v0.1.27 removes the old calendar-month preset. Migrate saved users to 30 days.
   if(state.dateMode==='month'){state.dateMode='30d';save('dateMode','30d');}
+  try{localStorage.removeItem(NS+('company'+'History'));}catch(_){}
 
   function load(k, fallback) {
     try {
@@ -158,7 +158,7 @@
   function hasApiKey() { return !!activeApiKey(); }
   function keySource() { return savedApiKey()?'Saved API key':injectedApiKey()?'Torn PDA API key':'No API key'; }
 
-  async function httpGetText(url) {
+  async function httpGet(url) {
     let text;
     if (typeof window.PDA_httpGet === 'function') {
       const r = await window.PDA_httpGet(url, {});
@@ -169,12 +169,7 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       text = await r.text();
     }
-    return String(text ?? '');
-  }
-
-  async function httpGet(url) {
-    const text=await httpGetText(url);
-    const json=JSON.parse(text);
+    const json = JSON.parse(text);
     if (json.error) throw new Error(`Torn API ${json.error.code}: ${json.error.error}`);
     return json;
   }
@@ -187,21 +182,6 @@
     u.searchParams.set('comment', 'TornTradeAnalyzer');
     Object.entries(params).forEach(([k,v]) => { if (v !== '' && v != null) u.searchParams.set(k, String(v)); });
     return httpGet(u.toString());
-  }
-
-  async function apiGetText(path, params = {}) {
-    const key=activeApiKey();
-    if (!key) throw new Error('No Torn API key is configured. Add one in Settings \u2192 API Key.');
-    const u = new URL(API + path);
-    u.searchParams.set('key', key);
-    u.searchParams.set('comment', 'TornTradeAnalyzer');
-    Object.entries(params).forEach(([k,v]) => { if (v !== '' && v != null) u.searchParams.set(k, String(v)); });
-    const text=await httpGetText(u.toString());
-    const trimmed=text.trim();
-    if(trimmed.startsWith('{')){
-      try{const json=JSON.parse(trimmed);if(json?.error)throw new Error(`Torn API ${json.error.code}: ${json.error.error}`);}catch(e){if(String(e?.message||'').startsWith('Torn API '))throw e;}
-    }
-    return text;
   }
 
   function injectCss() {
@@ -926,57 +906,6 @@
     if(!snap.networth&&!snap.money)return null;
     const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);state.financialSnapshots=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);save('financialSnapshots',state.financialSnapshots);return snap;
   }
-  function parseCsvRow(line) {
-    const out=[];let cur='',quoted=false;
-    for(let i=0;i<String(line||'').length;i++){
-      const ch=line[i];
-      if(ch==='"'){
-        if(quoted&&line[i+1]==='"'){cur+='"';i++;}
-        else quoted=!quoted;
-      }else if(ch===','&&!quoted){out.push(cur);cur='';}
-      else cur+=ch;
-    }
-    out.push(cur);return out;
-  }
-  function companySnapshotRecord(csv,companyId) {
-    const lines=String(csv||'').trim().split(/\r?\n/).filter(Boolean);if(lines.length<2)return null;
-    const header=parseCsvRow(lines[0].replace(/^\uFEFF/,'')).map(x=>String(x||'').trim().toLowerCase());
-    const idIndex=header.indexOf('id'),incomeIndex=header.indexOf('daily_income'),customersIndex=header.indexOf('daily_customers'),weeklyIncomeIndex=header.indexOf('weekly_income'),weeklyCustomersIndex=header.indexOf('weekly_customers');
-    if(idIndex<0||incomeIndex<0)return null;
-    for(let i=1;i<lines.length;i++){
-      const cols=parseCsvRow(lines[i]);if(Number(cols[idIndex])!==Number(companyId))continue;
-      return {grossIncome:Number(cols[incomeIndex])||0,dailyCustomers:customersIndex>=0?Number(cols[customersIndex])||0:0,weeklyIncome:weeklyIncomeIndex>=0?Number(cols[weeklyIncomeIndex])||0:0,weeklyCustomers:weeklyCustomersIndex>=0?Number(cols[weeklyCustomersIndex])||0:0};
-    }
-    return null;
-  }
-  async function refreshHistoricalCompanyIncome(userId,serverNow=nowSec()) {
-    const me=Number(userId)||0;if(!(me>0))return {added:0,checked:0,errors:0};
-    let profileData;
-    try{profileData=await apiGet('/company/profile');}catch(e){return {added:0,checked:0,errors:1,error:String(e?.message||e)};}
-    const profile=profileData?.profile;
-    if(!profile||Number(profile?.director?.id)!==me)return {added:0,checked:0,errors:0};
-    const companyId=Number(profile?.id)||0;if(!(companyId>0))return {added:0,checked:0,errors:0};
-    const serverTs=Number(serverNow)||nowSec(),today=tctDayStart(serverTs),existing=new Map((state.companyHistory||[]).filter(x=>Number(x?.companyId)===companyId).map(x=>[Number(x.snapshotDay),x]));
-    let added=0,checked=0,errors=0,firstError='';
-    for(let offset=0;offset<30;offset++){
-      if(state.syncCancel)break;
-      const snapshotDay=today-(offset*86400);if(existing.has(snapshotDay))continue;
-      setSyncProgress(`Company history backfill ${offset+1}/30 - ${tctDateStr(snapshotDay)}...`);
-      try{
-        const csv=await apiGetText('/company/snapshot',{timestamp:snapshotDay+43200}),rec=companySnapshotRecord(csv,companyId);checked++;
-        if(rec){
-          existing.set(snapshotDay,{id:`company-history:${companyId}:${snapshotDay}`,companyId,snapshotDay,timestamp:snapshotDay-(6*3600),grossIncome:rec.grossIncome,dailyCustomers:rec.dailyCustomers,weeklyIncome:rec.weeklyIncome,weeklyCustomers:rec.weeklyCustomers,source:'Torn Company Snapshot'});added++;
-          state.companyHistory=[...new Map([...(state.companyHistory||[]).filter(x=>Number(x?.companyId)!==companyId).map(x=>[String(x.id),x]),...[...existing.values()].map(x=>[String(x.id),x])]).values()].sort((a,b)=>(Number(a.timestamp)||0)-(Number(b.timestamp)||0)).slice(-90);save('companyHistory',state.companyHistory);
-        }
-      }catch(e){
-        errors++;if(!firstError)firstError=String(e?.message||e);
-        if(/key|permission|access|selection/i.test(firstError))break;
-      }
-      if(offset<29)await sleep(REQUEST_GAP_MS);
-    }
-    return {added,checked,errors,error:firstError};
-  }
-
   async function refreshCompanyDailyAdjustment(userId,serverNow=nowSec()) {
     const me=Number(userId)||0;if(!(me>0))return null;
     let profileData;
@@ -1051,17 +980,9 @@
     if(state.dateMode==='all'){from=Infinity;for(const x of allCashFlows()){const ts=Number(x?.timestamp);if(Number.isFinite(ts)&&ts<from)from=ts;}if(!Number.isFinite(from))from=0;}
     return {from,to};
   }
-  function companyHistoryHtml(from,to) {
-    const exact=(state.cashFlows||[]).filter(x=>x?.category==='Company Profit / Loss'&&Number(x.timestamp)>=from&&Number(x.timestamp)<=to),byTs=new Map();
-    for(const h of state.companyHistory||[]){const ts=Number(h?.timestamp)||0;if(ts>=from&&ts<=to)byTs.set(ts,{...h});}
-    for(const x of exact){const ts=Number(x.timestamp)||0,prev=byTs.get(ts)||{timestamp:ts,companyId:Number(x.companyId)||0,grossIncome:Number(x.grossIncome)||0,source:'Observed by analyzer'};byTs.set(ts,{...prev,exact:x,grossIncome:Number(prev.grossIncome)||Number(x.grossIncome)||0});}
-    const rows=[...byTs.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));if(!rows.length)return '';
-    return `<div class="tta-fin-section"><div class="tta-sectionhead"><div><small>Company history</small><h3>Daily company performance</h3><span class="tta-sectionhint">Historical snapshot income is gross only</span></div></div><div class="tta-table-scroll"><table class="tta-flowtable"><thead><tr><th>Company day</th><th style="text-align:right">Gross income</th><th style="text-align:right">Net P/L</th><th>Basis</th></tr></thead><tbody>${rows.map(r=>{const x=r.exact,net=x?(x.direction==='in'?Number(x.amount)||0:-(Number(x.amount)||0)):null;return `<tr><td><span class="tta-flowtitle">${esc(tctDateStr(r.timestamp))}</span><span class="tta-flowmeta">18:00 TCT</span></td><td class="num pos">${money(r.grossIncome||0)}</td><td class="num ${net==null?'':net>=0?'pos':'neg'}">${net==null?'Costs unavailable':money(net)}</td><td><span class="tta-flowmeta">${x?'Observed income, wages and ads':'Torn snapshot - gross only'}</span></td></tr>`;}).join('')}</tbody></table></div><div class="tta-note">Torn provides historical company daily income snapshots, but not historical employee wages or advertising budgets. Gross-only snapshot rows are informational and are excluded from Cash Flow earned/spent totals. Exact Company Profit / Loss is shown only for company days whose costs were observed by this analyzer.</div></div>`;
-  }
-
   function cashFlowHtml() {
     const {from,to}=cashFlowDateRange(),sum=cashFlowSummary(from,to),q=String(state.cashSearch||'').trim().toLowerCase(),cat=String(state.cashCategory||'all');let rows=allCashFlows().filter(x=>x.timestamp>=from&&x.timestamp<=to);if(cat!=='all')rows=rows.filter(x=>x.category===cat);if(q)rows=rows.filter(x=>`${x.title} ${x.category} ${x.source} ${x.counterpartyName||''} ${x.counterpartyId||''}`.toLowerCase().includes(q));const cats=[...new Set(allCashFlows().map(x=>x.category))].sort();
-    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div><div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div>${companyHistoryHtml(from,to)}<div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow\u2026" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable"><thead><tr><th>Event</th><th>Flow</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${cashFlowRowsHtml(rows)}</tbody></table></div><div class="tta-note">Internal transfers remain visible but are excluded from earned/spent totals. Direct player-to-player money sent/received is counted as outgoing/incoming cash. Item gifts/transfers are tracked in Net Worth instead of Cash Flow. Item buys/sales come from the normalized trade ledger; Player Trade cash uses the actual cash exchanged, not the analyzer's allocated item valuation.</div></div>`;
+    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div><div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow\u2026" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable"><thead><tr><th>Event</th><th>Flow</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${cashFlowRowsHtml(rows)}</tbody></table></div><div class="tta-note">Internal transfers remain visible but are excluded from earned/spent totals. Direct player-to-player money sent/received is counted as outgoing/incoming cash. Item gifts/transfers are tracked in Net Worth instead of Cash Flow. Item buys/sales come from the normalized trade ledger; Player Trade cash uses the actual cash exchanged, not the analyzer's allocated item valuation.</div></div>`;
   }
   function labeledKey(k){return String(k).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
   function moneyBreakdownHtml(obj){return Object.entries(obj||{}).map(([k,v])=>{if(typeof v==='object'&&v){const amount=Number(v.amount??v.money??0)||0;return `<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(amount)}</b></div>`;}return typeof v==='number'?`<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(v)}</b></div>`:'';}).join('');}
@@ -1086,11 +1007,11 @@
   function assetAllocationHtml(nw){if(!nw)return '<div class="tta-empty">No Torn net-worth snapshot loaded.</div>';const groups=[['Money',sumMoneyTree(nw.money)],['Items',sumMoneyTree(nw.items)],['Points',Number(nw.points)||0],['Other assets',sumMoneyTree(nw.assets)]].filter(x=>x[1]>0),total=groups.reduce((n,x)=>n+x[1],0);return groups.length?`<div class="tta-allocation">${groups.map(([label,value])=>{const pct=total?value/total*100:0;return `<div class="tta-allocation-row"><div><span>${esc(label)}</span><b>${money(value,true)}</b></div><div class="tta-analytics-track"><span style="width:${Math.max(2,pct).toFixed(1)}%"></span></div><small>${pct.toFixed(1)}%</small></div>`;}).join('')}</div>`:'<div class="tta-empty">No positive asset categories are present in the latest snapshot.</div>';}
   function csvCell(v){const s=String(v??'');return /[",]/.test(s)||s.includes(String.fromCharCode(10))||s.includes(String.fromCharCode(13))?`"${s.replace(/"/g,'""')}"`:s;}
   function downloadTextFile(name,text,type='text/plain;charset=utf-8'){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);}
-  function backupPayload(){return {schema:1,app:'Torn Cash Flow Analyzer',version:VERSION,exportedAt:nowSec(),data:{transactions:state.transactions,cashFlows:state.cashFlows,playerTransfers:state.playerTransfers,companyHistory:state.companyHistory,unrecognizedFinancial:state.unrecognizedFinancial,financialSnapshots:state.financialSnapshots,goals:state.goals,tracked:state.tracked,pinnedIds:state.pinnedIds,hiddenIds:state.hiddenIds,sync:state.sync,dateMode:state.dateMode,customFrom:state.customFrom,customTo:state.customTo,granularity:state.granularity}};}
+  function backupPayload(){return {schema:1,app:'Torn Cash Flow Analyzer',version:VERSION,exportedAt:nowSec(),data:{transactions:state.transactions,cashFlows:state.cashFlows,playerTransfers:state.playerTransfers,unrecognizedFinancial:state.unrecognizedFinancial,financialSnapshots:state.financialSnapshots,goals:state.goals,tracked:state.tracked,pinnedIds:state.pinnedIds,hiddenIds:state.hiddenIds,sync:state.sync,dateMode:state.dateMode,customFrom:state.customFrom,customTo:state.customTo,granularity:state.granularity}};}
   function exportBackup(){downloadTextFile(`torn-cash-flow-backup-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(backupPayload(),null,2),'application/json;charset=utf-8');}
   function exportCashCsv(){const rows=allCashFlows(),head=['Timestamp TCT','Direction','Category','Title','Source','Amount','Counterparty ID','Counterparty'];const body=rows.map(x=>[tctDateTimeStr(x.timestamp),x.direction,x.category,x.title,x.source,x.amount,x.counterpartyId||'',x.counterpartyName||'']);downloadTextFile(`torn-cash-flow-${new Date().toISOString().slice(0,10)}.csv`,[head,...body].map(r=>r.map(csvCell).join(',')).join(String.fromCharCode(10)),'text/csv;charset=utf-8');}
   function exportNetWorthCsv(){const head=['Timestamp TCT','Total','Money','Items','Points','Other assets'];const body=(state.financialSnapshots||[]).filter(x=>x?.networth).map(x=>{const n=x.networth;return [tctDateTimeStr(n.timestamp||x.timestamp),n.total,sumMoneyTree(n.money),sumMoneyTree(n.items),Number(n.points)||0,sumMoneyTree(n.assets)];});downloadTextFile(`torn-net-worth-${new Date().toISOString().slice(0,10)}.csv`,[head,...body].map(r=>r.map(csvCell).join(',')).join(String.fromCharCode(10)),'text/csv;charset=utf-8');}
-  function importBackup(){const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.style.display='none';document.body.appendChild(input);input.addEventListener('change',()=>{const file=input.files?.[0];if(!file){input.remove();return;}const r=new FileReader();r.onload=()=>{try{const parsed=JSON.parse(String(r.result||'')),d=parsed?.data;if(!d||!Array.isArray(d.transactions)||!Array.isArray(d.cashFlows)||!Array.isArray(d.financialSnapshots))throw new Error('Invalid analyzer backup');const keys=['transactions','cashFlows','playerTransfers','companyHistory','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','sync','dateMode','customFrom','customTo','granularity'];for(const k of keys)if(d[k]!==undefined)localStorage.setItem(NS+k,JSON.stringify(d[k]));toast('Backup imported. Reloading analyzer\u2026');setTimeout(()=>location.reload(),450);}catch(e){toast(`Import failed: ${e.message}`);}finally{input.remove();}};r.readAsText(file);});input.click();}
+  function importBackup(){const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.style.display='none';document.body.appendChild(input);input.addEventListener('change',()=>{const file=input.files?.[0];if(!file){input.remove();return;}const r=new FileReader();r.onload=()=>{try{const parsed=JSON.parse(String(r.result||'')),d=parsed?.data;if(!d||!Array.isArray(d.transactions)||!Array.isArray(d.cashFlows)||!Array.isArray(d.financialSnapshots))throw new Error('Invalid analyzer backup');const keys=['transactions','cashFlows','playerTransfers','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','sync','dateMode','customFrom','customTo','granularity'];for(const k of keys)if(d[k]!==undefined)localStorage.setItem(NS+k,JSON.stringify(d[k]));toast('Backup imported. Reloading analyzer\u2026');setTimeout(()=>location.reload(),450);}catch(e){toast(`Import failed: ${e.message}`);}finally{input.remove();}};r.readAsText(file);});input.click();}
 
   function dailyNetWorthActivity() {
     const now=nowSec(),from=tctDayStart(now),to=now;
@@ -1155,8 +1076,8 @@
     const catalogWhen=catalogUpdated?new Date(catalogUpdated*1000).toLocaleString():'Never';
     const hiddenHtml=hiddenItems.length?`<div class="tta-hiddenlist">${hiddenItems.map(x=>`<div class="tta-hiddenrow"><span>${esc(x.name)} <small>#${x.id}</small></span><button class="tta-btn secondary" data-act="restoreItem" data-id="${x.id}">Restore</button></div>`).join('')}</div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="restoreAllItems">Restore all hidden items</button></div>`:'<div class="tta-banner">No hidden items.</div>';
     return `${header('Settings','Storage, API access & reset',true)}<div class="tta-content tta-settings">
-      <div class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(status)}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${esc(masked)}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn secondary tta-keycreate" data-act="createApiKey" title="Create a Torn custom API key for this analyzer">\uFF0B Create key</button><button class="tta-btn" data-act="saveApiKey">Save & test</button></div><div class="tta-keynote"><strong>Create key</strong> opens Torn's official API settings and generates a custom key named <strong>CashFlowAnalyzer</strong> with only the selections used by this analyzer: User Log/Trade/Trades/Money/Networth, Company Profile/Employees/Snapshot, and Torn Items/Logtypes. Copy the generated key, return here, paste it above, then tap <strong>Save & test</strong>. Your key is stored only on this device and is sent only to Torn's official API; it is never uploaded to GitHub or sent to us. User Log remains unrestricted by log category so financial activity, player transfers and free-item/reward history can be discovered.</div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved API key</button></div>':''}</div>
-      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal cash-flow, spending, earnings, net-worth and trade analysis from recognized Torn financial/item activity.<br>Key storage: locally only / not shared.<br>Required custom-key selections: <strong>User \u2192 Log, Trade, Trades, Money, Networth</strong>; <strong>Company \u2192 Profile, Employees, Snapshot</strong>; <strong>Torn \u2192 Items, Logtypes</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' \u00B7 Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized item transactions \u00B7 ${qty(state.cashFlows.length)} direct cash-flow logs \u00B7 ${qty(state.playerTransfers.length)} player item-transfer rows \u00B7 ${qty(state.companyHistory.length)} company history snapshots \u00B7 ${qty(state.unrecognizedFinancial.length)} unrecognized financial diagnostics \u00B7 ${qty(state.financialSnapshots.length)} financial snapshots \u00B7 ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs \u00B7 ${qty(state.sync.diagnostics.pages||0)} log pages \u00B7 ${qty(state.sync.diagnostics.logTypes||0)} candidate log types \u00B7 ${qty(state.sync.diagnostics.cashFlowRows||0)} direct cash-flow rows recognized \u00B7 ${qty(state.sync.diagnostics.playerTransferRows||0)} player item-transfer rows \u00B7 ${qty(state.sync.diagnostics.unrecognizedFinancialRows||0)} unrecognized money-bearing logs.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items \u00B7 ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched \u00B7 ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped \u00B7 ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows \u00B7 ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in mixed scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) \u00B7 ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Dedicated Abroad Buy (4201) verification: ${qty(state.sync.diagnostics.abroadVerifyRawRows||0)} raw log(s) \u00B7 ${qty(state.sync.diagnostics.abroadVerifyParsedRows||0)} parsed row(s) \u00B7 ${qty(state.sync.diagnostics.abroadVerifyQty||0)} item(s).${state.sync.diagnostics.abroadVerifyLatestRawTimestamp?`<br>Latest raw Abroad Buy log: ${esc(tctDateTimeStr(state.sync.diagnostics.abroadVerifyLatestRawTimestamp))} TCT.`:''}${state.sync.diagnostics.latestParsedAcquisitionTimestamp?`<br>Latest parsed acquisition: ${esc(tctDateTimeStr(state.sync.diagnostics.latestParsedAcquisitionTimestamp))} TCT.`:''}<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} \u2013 ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Backup & export</label><div class="tta-fin-section"><div class="tta-settings-actions tta-backup-actions"><button class="tta-btn secondary" data-act="exportBackup">Export JSON backup</button><button class="tta-btn secondary" data-act="importBackup">Import backup</button><button class="tta-btn secondary" data-act="exportCashCsv">Export Cash Flow CSV</button><button class="tta-btn secondary" data-act="exportNetWorthCsv">Export Net Worth CSV</button></div><div class="tta-snapshot-note">Backups include analyzer history, snapshots, transfer records, preferences and goals. Your API key is intentionally excluded.</div></div><label>Hidden items \u00B7 ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
+      <div class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(status)}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${esc(masked)}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn secondary tta-keycreate" data-act="createApiKey" title="Create a Torn custom API key for this analyzer">\uFF0B Create key</button><button class="tta-btn" data-act="saveApiKey">Save & test</button></div><div class="tta-keynote"><strong>Create key</strong> opens Torn's official API settings and generates a custom key named <strong>CashFlowAnalyzer</strong> with only the selections used by this analyzer: User Log/Trade/Trades/Money/Networth, Company Profile/Employees, and Torn Items/Logtypes. Copy the generated key, return here, paste it above, then tap <strong>Save & test</strong>. Your key is stored only on this device and is sent only to Torn's official API; it is never uploaded to GitHub or sent to us. User Log remains unrestricted by log category so financial activity, player transfers and free-item/reward history can be discovered.</div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved API key</button></div>':''}</div>
+      <div class="tta-tos"><strong>Privacy / Torn API use</strong><br>Data storage: only locally on this device.<br>Data sharing: nobody.<br>Purpose: personal cash-flow, spending, earnings, net-worth and trade analysis from recognized Torn financial/item activity.<br>Key storage: locally only / not shared.<br>Required custom-key selections: <strong>User \u2192 Log, Trade, Trades, Money, Networth</strong>; <strong>Company \u2192 Profile, Employees</strong>; <strong>Torn \u2192 Items, Logtypes</strong>. Torn PDA's injected key remains supported as a fallback.</div><label>Last successful sync</label><div class="tta-banner">${esc(when)}${state.sync.firstSyncComplete?' \u00B7 Historical backfill completed':''}</div><label>Local data</label><div class="tta-banner">${qty(state.transactions.length)} normalized item transactions \u00B7 ${qty(state.cashFlows.length)} direct cash-flow logs \u00B7 ${qty(state.playerTransfers.length)} player item-transfer rows \u00B7 ${qty(state.unrecognizedFinancial.length)} unrecognized financial diagnostics \u00B7 ${qty(state.financialSnapshots.length)} financial snapshots \u00B7 ${qty(state.catalog.length)} Torn items cached. Raw Torn logs are not retained.<br>Item catalog / market values updated: ${esc(catalogWhen)}.${state.sync.diagnostics?`<br>Last scan: ${qty(state.sync.diagnostics.rawRows||0)} raw logs \u00B7 ${qty(state.sync.diagnostics.pages||0)} log pages \u00B7 ${qty(state.sync.diagnostics.logTypes||0)} candidate log types \u00B7 ${qty(state.sync.diagnostics.cashFlowRows||0)} direct cash-flow rows recognized \u00B7 ${qty(state.sync.diagnostics.playerTransferRows||0)} player item-transfer rows \u00B7 ${qty(state.sync.diagnostics.unrecognizedFinancialRows||0)} unrecognized money-bearing logs.<br>Player trades: ${qty(state.sync.diagnostics.tradesWithItems||0)} with items \u00B7 ${qty(state.sync.diagnostics.tradeDetails||0)} missing details fetched \u00B7 ${qty(state.sync.diagnostics.tradeDetailsSkipped||0)} already verified details skipped \u00B7 ${qty(state.sync.diagnostics.tradeTransactions||0)} allocated item rows \u00B7 ${qty(state.sync.diagnostics.tradeSoldQty||0)} items sold via trades.<br>Foreign Market acquisitions in mixed scan: ${qty(state.sync.diagnostics.foreignBuyRows||0)} row(s) \u00B7 ${qty(state.sync.diagnostics.foreignBuyQty||0)} item(s).<br>Dedicated Abroad Buy (4201) verification: ${qty(state.sync.diagnostics.abroadVerifyRawRows||0)} raw log(s) \u00B7 ${qty(state.sync.diagnostics.abroadVerifyParsedRows||0)} parsed row(s) \u00B7 ${qty(state.sync.diagnostics.abroadVerifyQty||0)} item(s).${state.sync.diagnostics.abroadVerifyLatestRawTimestamp?`<br>Latest raw Abroad Buy log: ${esc(tctDateTimeStr(state.sync.diagnostics.abroadVerifyLatestRawTimestamp))} TCT.`:''}${state.sync.diagnostics.latestParsedAcquisitionTimestamp?`<br>Latest parsed acquisition: ${esc(tctDateTimeStr(state.sync.diagnostics.latestParsedAcquisitionTimestamp))} TCT.`:''}<br>Freshness safety window: recheck recent ${qty(state.sync.diagnostics.recentLogRecheckHours||72)}h of User Logs and ${qty(state.sync.diagnostics.recentTradeRecheckHours||6)}h of Player Trades on live-period syncs.<br>Incremental cache: ${qty(state.sync.diagnostics.existingRowsSkipped||0)} existing transaction rows skipped.${state.sync.diagnostics.periodFrom?`<br>Period scanned: ${esc(dateStr(state.sync.diagnostics.periodFrom))} \u2013 ${esc(dateStr(Math.min(state.sync.diagnostics.periodTo||nowSec(),nowSec())))}`:'<br>Period scanned: all available history.'}`:''}</div><label>Backup & export</label><div class="tta-fin-section"><div class="tta-settings-actions tta-backup-actions"><button class="tta-btn secondary" data-act="exportBackup">Export JSON backup</button><button class="tta-btn secondary" data-act="importBackup">Import backup</button><button class="tta-btn secondary" data-act="exportCashCsv">Export Cash Flow CSV</button><button class="tta-btn secondary" data-act="exportNetWorthCsv">Export Net Worth CSV</button></div><div class="tta-snapshot-note">Backups include analyzer history, snapshots, transfer records, preferences and goals. Your API key is intentionally excluded.</div></div><label>Hidden items \u00B7 ${qty(hiddenItems.length)}</label>${hiddenHtml}<div class="tta-settings-actions"><button class="tta-btn secondary" data-act="refreshCatalog">Refresh Torn item catalog</button><button class="tta-btn danger" data-act="resetData">Reset analyzer data</button></div></div>`;
   }
 
   function loadingHtml() {
@@ -1323,7 +1244,7 @@
         await withBusy('Refreshing catalog','Downloading the latest Torn item catalog and market values\u2026',async()=>{state.catalog=[];state.catalogVersion=0;state.catalogUpdatedAt=0;save('catalog',[]);save('catalogVersion',0);save('catalogUpdatedAt',0);await ensureCatalog(true);});render();toast(`Item catalog and market values refreshed \u00B7 ${qty(state.catalog.length)} items.`);
       }
       else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
-        ['tracked','transactions','cashFlows','playerTransfers','companyHistory','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.companyHistory=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
+        ['tracked','transactions','cashFlows','playerTransfers','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
       }
     });
 
@@ -2268,7 +2189,7 @@
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
-        else if(job.phase==='finalize'){await refreshFinancialSnapshot();if(job.syncMode==='full'){const h=await refreshHistoricalCompanyIncome(job.userId,Number(job.tctNow)||nowSec());if(h?.error)job.companyHistoryError=h.error;job.companyHistoryAdded=Number(h?.added)||0;}await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());finishResumableSync(job);break;}
+        else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());finishResumableSync(job);break;}
         else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
       }
       if(syncJobCancelled(job)){
