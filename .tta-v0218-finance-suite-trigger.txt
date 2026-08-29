@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.18 player transfers, analytics, goals and backup suite.
