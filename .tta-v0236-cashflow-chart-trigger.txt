@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.36 with an interactive cash flow trend chart.
