@@ -1,0 +1,43 @@
+name: Torn Cash Flow Analyzer v0.2.37 sticky cash axis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0237-sticky-cash-axis-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'Remove v0.2.37') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0237-sticky-cash-axis.py
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -F "// @version      0.2.37" torn-trade-analyzer.user.js
+          grep -F "tta-cash-chartframe" torn-trade-analyzer.user.js
+          grep -F "tta-cash-axis-wrap" torn-trade-analyzer.user.js
+          grep -F "tta-cash-axis-svg" torn-trade-analyzer.user.js
+          grep -F "fixed money scale" torn-trade-analyzer.user.js
+          grep -F "https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js" torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_bytes()
+          assert all(b < 128 for b in s)
+          PY
+      - name: Commit userscript
+        run: |
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Keep cash flow money scale visible while scrolling'
+          git push origin main
