@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.33
+// @version      0.2.34
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.33';
+  const VERSION = '0.2.34';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -108,6 +108,9 @@
   // v0.1.27 removes the old calendar-month preset. Migrate saved users to 30 days.
   if(state.dateMode==='month'){state.dateMode='30d';save('dateMode','30d');}
   try{localStorage.removeItem(NS+('company'+'History'));}catch(_){}
+  // v0.2.34 removes false Crime Reward rows created when an item quantity such as
+  // items_gained.1 = 1 was misread as $1 of crime income.
+  purgeBogusCrimeCashRows();
 
   function load(k, fallback) {
     try {
@@ -1554,6 +1557,35 @@
     const direct=Number(nestedValue(payload,meta?.field));if(Number.isFinite(direct)&&direct!==0)return Math.abs(direct);
     const f=bestMoneyField(payload,meta?.label||'');return f?Math.abs(Number(f.value)||0):0;
   }
+  function strictCrimeCashField(payload,title='') {
+    const rows=flattenNumericFields(payload),t=String(title||'').toLowerCase();
+    const incoming=/(^|\.)(money_gained|money_received|money_earned|money_reward|money_rewarded|cash_gained|cash_received|cash_earned|cash_reward|cash_rewarded)$/i;
+    const outgoing=/(^|\.)(money_lost|money_spent|money_paid|cash_lost|cash_spent|cash_paid)$/i;
+    const legacyMoney=/(^|\.)(money|cash)$/i;
+    let best=null;
+    for(const row of rows){
+      if(!Number.isFinite(row.value)||row.value===0)continue;
+      let direction='';
+      if(incoming.test(row.path))direction='in';
+      else if(outgoing.test(row.path))direction='out';
+      else if(legacyMoney.test(row.path)&&/crime success money gain|crime fail money loss/.test(t))direction=/fail money loss/.test(t)?'out':'in';
+      if(!direction)continue;
+      const score=/(money_gained|money_received|cash_gained|cash_received)$/.test(row.path)?20:10;
+      if(!best||score>best.score||(score===best.score&&Math.abs(row.value)>Math.abs(best.value)))best={...row,direction,score};
+    }
+    return best;
+  }
+  function purgeBogusCrimeCashRows() {
+    const before=(state.cashFlows||[]).length;
+    state.cashFlows=(state.cashFlows||[]).filter(row=>{
+      if(String(row?.source||'')!=='Crime Reward')return true;
+      const field=String(row?.field||'');
+      return /(money|cash)/i.test(field);
+    });
+    const removed=before-state.cashFlows.length;
+    if(removed>0){save('cashFlows',state.cashFlows);resetAnalyticsCache();}
+    return removed;
+  }
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
     const entryTitle=String(entry?.details?.title||'');
     const crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(entryTitle);
@@ -1567,18 +1599,15 @@
     }
     if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title)||!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
-    const field=bestMoneyField(payload,title);if(!field)return[];
-    let direction=cashFlowDirection(title,field.path,logTypeId);
     if(crimeContext){
-      const success=/\b(success|successful|succeeded|reward|rewarded)\b/i.test(title);
-      const incomingField=/(money|cash).*(gain|gained|receive|received|earn|earned|reward|payout|profit)|(?:gain|gained|receive|received|earn|earned|reward|payout|profit).*(money|cash)/i.test(field.path);
-      const outgoingField=/(spent|paid|cost|fee|fine|lost|loss|expense)/i.test(field.path);
-      const failed=/\b(fail|failed|failure|unsuccessful)\b/i.test(title);
-      if(!outgoingField&&!failed&&(success||incomingField))direction='in';
+      const field=strictCrimeCashField(payload,title);if(!field)return[];
+      const amount=Math.abs(Number(field.value)||0);if(!(amount>0))return[];
+      return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction:field.direction,amount,category:'Crime / Mugging',source:'Crime Reward',title,logId:logTypeId,field:field.path,transfer:false}];
     }
-    if(!direction)return[];
+    const field=bestMoneyField(payload,title);if(!field)return[];
+    const direction=cashFlowDirection(title,field.path,logTypeId);if(!direction)return[];
     const amount=Math.abs(Number(field.value)||0);if(!(amount>0))return[];
-    return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction,amount,category:cashFlowCategory(title,direction),source:crimeContext?'Crime Reward':'Torn Log',title,logId:logTypeId,field:field.path,transfer:direction.startsWith('transfer')}];
+    return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction,amount,category:cashFlowCategory(title,direction),source:'Torn Log',title,logId:logTypeId,field:field.path,transfer:direction.startsWith('transfer')}];
   }
   function parsePlayerTransferEntry(entry) {
     const logTypeId=Number(entry?.details?.id)||0,meta=PLAYER_ITEM_LOGS.get(logTypeId);if(!meta)return[];
@@ -1593,7 +1622,7 @@
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
     if(!financialTitleContext(`${title} ${category}`)||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
-    const payload={...(entry?.params||{}),...(entry?.data||{})},field=bestMoneyField(payload,title);if(!field)return null;
+    const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);if(!field)return null;
     return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:category||'Financial',field:field.path,amount:Math.abs(Number(field.value)||0)};
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
