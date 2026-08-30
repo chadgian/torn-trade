@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.39 with selectable daily Net Worth changes and explicit Company P/L activity.
