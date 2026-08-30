@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.35 with the strict crime-cash parser and safe startup cleanup.
