@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.37 with a fixed left money scale for the interactive Cash Flow graph.
