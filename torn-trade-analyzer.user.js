@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.36
+// @version      0.2.37
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.36';
+  const VERSION = '0.2.37';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -395,10 +395,11 @@
       .tta-cashflow-chartcard{margin-top:10px}
       .tta-cashflow-chartcard .tta-charthead>div:first-child{min-width:0;display:grid;gap:3px}.tta-cashflow-chartcard .tta-charthead small{color:var(--tta-faint);font-size:8px;line-height:1.35;white-space:normal}
       .tta-cashlegend{display:flex;flex-wrap:wrap;gap:7px 12px;margin:7px 0 3px;color:var(--tta-muted);font-size:8px;font-weight:700}.tta-cashlegend span{display:inline-flex;align-items:center;gap:5px}.tta-cashlegend span:before{content:"";width:14px;height:2px;border-radius:99px;background:currentColor}.tta-cashlegend .in{color:var(--tta-green)}.tta-cashlegend .out{color:var(--tta-red)}.tta-cashlegend .net{color:var(--tta-blue)}
+      .tta-cash-chartframe{display:flex;align-items:stretch;min-width:0;width:100%;overflow:hidden}.tta-cash-axis-wrap{position:relative;z-index:4;flex:0 0 56px;width:56px;height:214px;background:linear-gradient(90deg,var(--tta-card) 0%,var(--tta-card) 88%,#151e28e8 100%);border-right:1px solid #34475a88;box-shadow:8px 0 14px #06090d24}.tta-cash-axis-svg{display:block;width:56px;height:214px;overflow:visible}.tta-cash-axis-label{font-weight:700;fill:var(--tta-muted)}.tta-axis-tick{stroke:var(--tta-line);stroke-width:1}.tta-cash-chartframe>.tta-chartviewport{flex:1 1 auto;min-width:0;margin:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
       .tta-cash-svg{display:block;height:214px;width:100%}.tta-cashline{fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}.tta-cashline.in{stroke:var(--tta-green)}.tta-cashline.out{stroke:var(--tta-red)}.tta-cashline.net{stroke:var(--tta-blue);stroke-width:2.5}
       .tta-cashpoint{fill:transparent;stroke:none;cursor:pointer;outline:none}.tta-cashpoint:hover,.tta-cashpoint:focus,.tta-cashpoint.active{fill:#ffffff0b}.tta-cashpoint:focus{stroke:var(--tta-blue);stroke-width:1;stroke-dasharray:3 3}
       .tta-charttooltip.tta-cashtooltip{display:grid;gap:2px;min-width:156px;text-align:left}.tta-charttooltip.tta-cashtooltip strong{margin-bottom:2px}.tta-charttooltip.tta-cashtooltip span{font-size:8px;line-height:1.35;white-space:nowrap}
-      @media(max-width:520px){.tta-cashflow-chartcard .tta-charthead{align-items:flex-start;gap:8px}.tta-cashflow-chartcard .tta-charthead>div:first-child{width:100%}.tta-cashflow-chartcard .tta-seg{flex-shrink:0}.tta-cash-svg{height:205px}}
+      @media(max-width:520px){.tta-cashflow-chartcard .tta-charthead{align-items:flex-start;gap:8px}.tta-cashflow-chartcard .tta-charthead>div:first-child{width:100%}.tta-cashflow-chartcard .tta-seg{flex-shrink:0}.tta-cash-svg,.tta-cash-axis-wrap,.tta-cash-axis-svg{height:205px}.tta-cash-axis-wrap{flex-basis:52px;width:52px}.tta-cash-axis-svg{width:52px}}
 
     `;
     document.head.appendChild(s);
@@ -1103,13 +1104,15 @@
   }
   function cashFlowChartSvg(series) {
     if(!series.length)return '<div class="tta-empty">No incoming or outgoing cash flow is recorded in this period yet.</div>';
-    const h=214,padL=54,padR=10,padT=18,padB=28,gap=Math.max(24,Math.min(42,620/Math.max(1,series.length))),w=Math.max(390,Math.ceil(padL+padR+series.length*gap)),innerH=h-padT-padB;
+    const h=214,axisW=56,padL=8,padR=10,padT=18,padB=28,gap=Math.max(24,Math.min(42,620/Math.max(1,series.length))),w=Math.max(334,Math.ceil(padL+padR+series.length*gap)),innerH=h-padT-padB;
     const peak=Math.max(1,...series.flatMap(x=>[Math.abs(Number(x.moneyIn)||0),Math.abs(Number(x.moneyOut)||0),Math.abs(Number(x.net)||0)])),max=peak*1.08,min=-max,y=v=>padT+(max-v)/(max-min)*innerH,zero=y(0);
     const x=i=>padL+gap*i+gap/2,pathFor=key=>series.map((r,i)=>`${i?'L':'M'}${x(i).toFixed(2)},${y(key==='moneyOut'?-(Number(r[key])||0):(Number(r[key])||0)).toFixed(2)}`).join(' ');
-    const grid=[-1,-.5,0,.5,1].map(f=>{const yy=y(max*f),v=max*f;return `<line class="tta-grid" x1="${padL}" y1="${yy}" x2="${w-padR}" y2="${yy}"/><text class="tta-axis" x="3" y="${yy+3}">${esc(money(v,true))}</text>`}).join('');
+    const ticks=[-1,-.5,0,.5,1];
+    const grid=ticks.map(f=>{const yy=y(max*f);return `<line class="tta-grid" x1="0" y1="${yy}" x2="${w-padR}" y2="${yy}"/>`}).join('');
+    const axis=ticks.map(f=>{const yy=y(max*f),v=max*f;return `<g><line class="tta-axis-tick" x1="${axisW-6}" y1="${yy}" x2="${axisW}" y2="${yy}"/><text class="tta-axis tta-cash-axis-label" text-anchor="end" x="${axisW-9}" y="${yy+3}">${esc(money(v,true))}</text></g>`}).join('');
     const labelStride=Math.max(1,Math.ceil(series.length/10)),labels=series.map((r,i)=>{if(series.length>10&&i%labelStride!==0&&i!==series.length-1)return'';const d=new Date(r.t*1000),lab=state.granularity==='month'?d.toLocaleDateString(undefined,{timeZone:'UTC',month:'short'}):d.toLocaleDateString(undefined,{timeZone:'UTC',month:'short',day:'numeric'});return `<text class="tta-axis" text-anchor="middle" x="${x(i)}" y="${h-7}">${esc(lab)}</text>`}).join('');
     const hits=series.map((r,i)=>{const left=padL+gap*i,label=cashFlowBucketLabel(r.t),aria=`${label}: money in ${money(r.moneyIn)}, money out ${money(r.moneyOut)}, net ${money(r.net)}`;return `<rect class="tta-cashpoint" x="${left}" y="${padT}" width="${gap}" height="${innerH}" tabindex="0" role="button" aria-label="${esc(aria)}" data-label="${esc(label)}" data-money-in="${Number(r.moneyIn)||0}" data-money-out="${Number(r.moneyOut)||0}" data-net="${Number(r.net)||0}"></rect>`}).join('');
-    return `<div class="tta-chartinteractive tta-cash-chart ${state.granularity==='day'?'day':''}"><div class="tta-charttooltip" role="status" aria-live="polite" data-pinned="0"></div><div class="tta-chartviewport"><svg class="tta-svg tta-cash-svg" viewBox="0 0 ${w} ${h}" style="min-width:${w}px" role="img" aria-label="Cash flow trend with money in above zero, money out below zero and net cash flow"><line class="tta-zero" x1="${padL}" y1="${zero}" x2="${w-padR}" y2="${zero}"/>${grid}<path class="tta-cashline in" d="${pathFor('moneyIn')}"></path><path class="tta-cashline out" d="${pathFor('moneyOut')}"></path><path class="tta-cashline net" d="${pathFor('net')}"></path>${hits}${labels}</svg></div></div>`;
+    return `<div class="tta-chartinteractive tta-cash-chart ${state.granularity==='day'?'day':''}"><div class="tta-charttooltip" role="status" aria-live="polite" data-pinned="0"></div><div class="tta-cash-chartframe"><div class="tta-cash-axis-wrap" aria-hidden="true"><svg class="tta-cash-axis-svg" viewBox="0 0 ${axisW} ${h}" preserveAspectRatio="none">${axis}</svg></div><div class="tta-chartviewport"><svg class="tta-svg tta-cash-svg" viewBox="0 0 ${w} ${h}" style="min-width:${w}px" role="img" aria-label="Cash flow trend with a fixed money scale, money in above zero, money out below zero and net cash flow"><line class="tta-zero" x1="0" y1="${zero}" x2="${w-padR}" y2="${zero}"/>${grid}<path class="tta-cashline in" d="${pathFor('moneyIn')}"></path><path class="tta-cashline out" d="${pathFor('moneyOut')}"></path><path class="tta-cashline net" d="${pathFor('net')}"></path>${hits}${labels}</svg></div></div></div>`;
   }
   function cashFlowChartHtml() {
     const series=cashFlowSeries();
