@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.34
+// @version      0.2.35
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.34';
+  const VERSION = '0.2.35';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -1583,7 +1583,9 @@
       return /(money|cash)/i.test(field);
     });
     const removed=before-state.cashFlows.length;
-    if(removed>0){save('cashFlows',state.cashFlows);resetAnalyticsCache();}
+    // This migration runs during startup before perfCache is initialized, so only
+    // persist the cleaned rows here. Analytics caches are still empty at this point.
+    if(removed>0)save('cashFlows',state.cashFlows);
     return removed;
   }
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
