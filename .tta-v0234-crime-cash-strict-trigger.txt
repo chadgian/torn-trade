@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.34 with strict crime cash fields and automatic cleanup of false one-dollar crime rows.
