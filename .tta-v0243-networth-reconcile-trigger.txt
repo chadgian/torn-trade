@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.43 with analyzer-detected Net Worth movement and paid item purchase cash/value reconciliation.
