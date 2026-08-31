@@ -17,7 +17,9 @@ jobs:
         with:
           ref: main
       - name: Patch userscript
-        run: python .github/scripts/tta-v0245-networth-audit.py
+        run: |
+          python .github/scripts/tta-v0245-fix-helper.py
+          python .github/scripts/tta-v0245-networth-audit.py
       - name: Verify userscript
         run: |
           node --check torn-trade-analyzer.user.js
@@ -30,6 +32,8 @@ jobs:
           grep -q 'netWorthComponentChanges' torn-trade-analyzer.user.js
           grep -q 'SYNC_CACHE_SCHEMA_VERSION = 3' torn-trade-analyzer.user.js
           grep -q 'function etaUnitTiming' torn-trade-analyzer.user.js
+          grep -q 'Torn snapshot components' torn-trade-analyzer.user.js
+          grep -q 'Cash side shown; counterpart asset value is not safely known' torn-trade-analyzer.user.js
           python - <<'PY'
           from pathlib import Path
           Path('torn-trade-analyzer.user.js').read_bytes().decode('ascii')
