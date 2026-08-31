@@ -18,6 +18,17 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - name: Fix helper anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/tta-v0240-item-consumption.py')
+          s=p.read_text()
+          old="rep(\"'transactions','cashFlows','playerTransfers','unrecognizedFinancial'\",\"'transactions','cashFlows','playerTransfers','itemConsumptions','unrecognizedFinancial'\",'reset keys')"
+          new="rep(\"['tracked','transactions','cashFlows','playerTransfers','unrecognizedFinancial'\",\"['tracked','transactions','cashFlows','playerTransfers','itemConsumptions','unrecognizedFinancial'\",'reset keys')"
+          if old not in s: raise SystemExit('helper reset anchor not found')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Patch userscript
         run: python .github/scripts/tta-v0240-item-consumption.py
       - name: Verify userscript
