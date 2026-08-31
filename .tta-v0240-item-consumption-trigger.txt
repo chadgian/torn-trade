@@ -1,0 +1,1 @@
+Publish Torn Cash Flow Analyzer v0.2.40 with item consumption tracked in Net Worth and FIFO inventory.
