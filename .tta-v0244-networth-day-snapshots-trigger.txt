@@ -1,1 +1,0 @@
-Publish Torn Cash Flow Analyzer v0.2.44 with within-day Torn snapshot movement and analyzer-detected Net Worth reconciliation.
