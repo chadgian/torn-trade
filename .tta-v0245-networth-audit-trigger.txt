@@ -1,0 +1,1 @@
+Publish Torn Cash Flow Analyzer v0.2.45 with canonical Player Trade Net Worth events, company wage-admin filtering, snapshot component reconciliation, and phase-aware Full Resync ETA.
