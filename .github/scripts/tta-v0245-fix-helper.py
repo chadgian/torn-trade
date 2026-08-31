@@ -13,4 +13,5 @@ s=s.replace(needle,component+needle,1)
 
 '''
 text=text[:start]+replacement+text[next_anchor:]
+text=text.replace("s,n=re.subn(eta_pat,eta_new,s,count=1,flags=re.S)","s,n=re.subn(eta_pat,lambda _m: eta_new,s,count=1,flags=re.S)")
 p.write_text(text,encoding='utf-8')
