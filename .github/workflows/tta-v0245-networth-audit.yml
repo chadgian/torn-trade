@@ -1,0 +1,48 @@
+name: Torn Cash Flow Analyzer v0.2.45 Net Worth audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0245-networth-audit-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0245-networth-audit.py
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -q '@version      0.2.45' torn-trade-analyzer.user.js
+          grep -q "const VERSION = '0.2.45';" torn-trade-analyzer.user.js
+          grep -q 'function parsePlayerTradeEvent' torn-trade-analyzer.user.js
+          grep -q 'function effectivePlayerTradeEvents' torn-trade-analyzer.user.js
+          grep -q "kind:'player-trade'" torn-trade-analyzer.user.js
+          grep -q 'isNonCashCompanyAdminLog' torn-trade-analyzer.user.js
+          grep -q 'netWorthComponentChanges' torn-trade-analyzer.user.js
+          grep -q 'SYNC_CACHE_SCHEMA_VERSION = 3' torn-trade-analyzer.user.js
+          grep -q 'function etaUnitTiming' torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          Path('torn-trade-analyzer.user.js').read_bytes().decode('ascii')
+          print('ASCII-safe source verified')
+          PY
+      - name: Commit userscript
+        run: |
+          if git diff --quiet -- torn-trade-analyzer.user.js; then
+            echo 'No runtime changes to commit'
+            exit 0
+          fi
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Audit Net Worth events and Player Trades'
+          git push origin main
