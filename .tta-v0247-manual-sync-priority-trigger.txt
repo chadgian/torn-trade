@@ -1,0 +1,1 @@
+Publish v0.2.47 so manual Quick Sync and Full Resync preempt a running background sync safely.
