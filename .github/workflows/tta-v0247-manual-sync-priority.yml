@@ -1,0 +1,49 @@
+name: Torn Cash Flow Analyzer v0.2.47 manual sync priority
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0247-manual-sync-priority-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0247-manual-sync-priority.py
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -q '@version      0.2.47' torn-trade-analyzer.user.js
+          grep -q "const VERSION = '0.2.47';" torn-trade-analyzer.user.js
+          grep -q 'async function yieldBackgroundSyncForManual' torn-trade-analyzer.user.js
+          grep -q 'manualSyncTakeover' torn-trade-analyzer.user.js
+          grep -q 'Pausing background Quick Sync so your manual sync can start' torn-trade-analyzer.user.js
+          grep -q 'while(state.backgroundSyncing&&Date.now()<deadline)' torn-trade-analyzer.user.js
+          if grep -q "Background Quick Sync is already updating the latest data" torn-trade-analyzer.user.js; then
+            echo 'Old manual-sync blocking message still exists'
+            exit 1
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          Path('torn-trade-analyzer.user.js').read_bytes().decode('ascii')
+          print('ASCII-safe source verified')
+          PY
+      - name: Commit userscript
+        run: |
+          if git diff --quiet -- torn-trade-analyzer.user.js; then
+            echo 'No runtime changes to commit'
+            exit 0
+          fi
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Allow manual sync to preempt background sync'
+          git push origin main
