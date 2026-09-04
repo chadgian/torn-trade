@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.46
+// @version      0.2.47
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.46';
+  const VERSION = '0.2.47';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -2590,10 +2590,31 @@
       else{state.syncing=false;updateFabState();setBusy(false);render();}
     }
   }
+  let manualSyncTakeover=false;
+  async function yieldBackgroundSyncForManual() {
+    if(!state.backgroundSyncing)return true;
+    toast('Pausing background Quick Sync so your manual sync can start\u2026');
+    state.syncCancel=true;
+    const bgJob=loadSyncJob();
+    if(bgJob?.background){bgJob.cancelled=true;bgJob.progress='Yielding to manual sync after the current API request\u2026';saveSyncJob(bgJob);}
+    const deadline=Date.now()+30000;
+    while(state.backgroundSyncing&&Date.now()<deadline)await sleep(50);
+    if(state.backgroundSyncing){toast('Background sync is still finishing its current API request. Tap Sync again in a moment.');return false;}
+    state.syncCancel=false;state.backgroundSyncProgress='';
+    const leftover=loadSyncJob();if(leftover?.background)discardStaleSyncJob(leftover);
+    return true;
+  }
   async function syncAll(options={}) {
     const background=!!options?.background;
-    if(background){if(state.syncing||state.backgroundSyncing)return;}
-    else{if(state.syncing)return;if(state.backgroundSyncing){toast('Background Quick Sync is already updating the latest data.');return;}}
+    if(background){if(state.syncing||state.backgroundSyncing||manualSyncTakeover)return;}
+    else{
+      if(state.syncing||manualSyncTakeover)return;
+      manualSyncTakeover=true;
+      try{
+        if(state.backgroundSyncing){const yielded=await yieldBackgroundSyncForManual();if(!yielded)return;}
+        if(state.syncing)return;
+      }finally{manualSyncTakeover=false;}
+    }
     if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings \u2192 API Key to sync real history.');}return;}
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
