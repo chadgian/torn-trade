@@ -1,0 +1,55 @@
+name: Torn Cash Flow Analyzer v0.2.46 trade profit repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.tta-v0246-trade-profit-fix-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch userscript
+        run: python .github/scripts/tta-v0246-trade-profit-fix.py
+      - name: Verify userscript
+        run: |
+          node --check torn-trade-analyzer.user.js
+          grep -q '@version      0.2.46' torn-trade-analyzer.user.js
+          grep -q "const VERSION = '0.2.46';" torn-trade-analyzer.user.js
+          grep -q 'const SYNC_CACHE_SCHEMA_VERSION = 4;' torn-trade-analyzer.user.js
+          grep -q 'const RECENT_LOG_RECHECK_SEC = 6 \* 3600;' torn-trade-analyzer.user.js
+          grep -q 'const RECENT_TRADE_RECHECK_SEC = 24 \* 3600;' torn-trade-analyzer.user.js
+          grep -q 'const BACKGROUND_LOG_RECHECK_SEC = 15 \* 60;' torn-trade-analyzer.user.js
+          grep -q 'const BACKGROUND_TRADE_RECHECK_SEC = 60 \* 60;' torn-trade-analyzer.user.js
+          grep -q 'transactionRowsUpdated' torn-trade-analyzer.user.js
+          grep -q 'tradeDetailsDeferred' torn-trade-analyzer.user.js
+          grep -q 'detail verified and FIFO rows cached' torn-trade-analyzer.user.js
+          grep -q 'job.logScanPeriod={from:logFrom' torn-trade-analyzer.user.js
+          grep -q 'job.tradeScanPeriod={from:tradeFrom' torn-trade-analyzer.user.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('torn-trade-analyzer.user.js').read_text(encoding='ascii')
+          bad="for(const t of state.playerTrades||[]){const id=Number(t?.tradeId)||0;if(id>0&&!c.verifiedTrades[id])"
+          assert bad not in s, 'playerTrades still seeds verified trade cache'
+          assert "rawItemEntries.length>0&&!rows.length" in s
+          assert "Math.abs(parsedItemQty-expectedItemQty)<1e-7" in s
+          print('trade ingestion repair assertions passed')
+          PY
+      - name: Commit userscript
+        run: |
+          if git diff --quiet -- torn-trade-analyzer.user.js; then
+            echo 'No runtime changes to commit'
+            exit 0
+          fi
+          git config user.name 'chatgpt-torn-maintainer'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add torn-trade-analyzer.user.js
+          git commit -m 'Repair sale ingestion and FIFO trade profit'
+          git push origin main
