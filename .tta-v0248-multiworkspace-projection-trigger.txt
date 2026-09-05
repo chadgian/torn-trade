@@ -1,0 +1,1 @@
+Publish v0.2.48 so one Torn event can feed every applicable analyzer workspace without feature exclusivity.
