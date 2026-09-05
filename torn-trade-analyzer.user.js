@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.2.47
+// @version      0.2.48
 // @description  Torn cash-flow, spending, earnings, company profit, net-worth and trade analytics with a clean Bento dashboard, TCT daily flow and fast sync modes. Data stays on-device.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.2.47';
+  const VERSION = '0.2.48';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -1744,7 +1744,14 @@
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
     const entryTitle=String(entry?.details?.title||'');
     const crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(entryTitle);
-    if(parsedItemRows?.length&&!crimeContext)return[];
+    // A raw Torn event may legitimately project into several analyzer workspaces at once.
+    // Only suppress generic cash extraction when a normalized paid item buy/sell already
+    // owns that same cash movement; free/reward item rows must not hide separate money.
+    const itemRowsOwnCashMovement=(parsedItemRows||[]).some(t=>{
+      const side=String(t?.side||''),total=Math.max(0,Number(t?.total)||0);
+      return (side==='buy'||side==='sell')&&total>0&&!t?.free;
+    });
+    if(itemRowsOwnCashMovement&&!crimeContext)return[];
     const logTypeId=Number(entry?.details?.id)||0,title=entryTitle;
     if(isNonCashCompanyAdminLog(title))return[];
     const payload={...(entry?.params||{}),...(entry?.data||{})},explicit=EXPLICIT_CASH_LOGS.get(logTypeId);
@@ -2393,6 +2400,8 @@
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
         if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
+        // Multi-workspace projection: do not consume a raw event after the first match.
+        // Item transactions, cash flow, transfers and consumption are independent views.
         const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
         const transferRows=parsePlayerTransferEntry(r);job.diagnostics.playerTransferRows=(Number(job.diagnostics.playerTransferRows)||0)+transferRows.length;checkpointPlayerTransferRows(transferRows);
         const consumptionRows=parseItemConsumptionEntry(r);job.diagnostics.itemConsumptionRows=(Number(job.diagnostics.itemConsumptionRows)||0)+consumptionRows.length;checkpointItemConsumptionRows(consumptionRows);
