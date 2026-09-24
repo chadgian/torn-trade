@@ -2132,13 +2132,13 @@
   const SYNC_JOB_SCHEMA_VERSION = 2;
   // v0.2.0 expands User Log scope from trade/item history to money events.
   // Bump the schema so old trade-only day coverage cannot suppress the first cash-flow backfill.
-  const SYNC_CACHE_SCHEMA_VERSION = 4;
+  const SYNC_CACHE_SCHEMA_VERSION = 5;
   const INCREMENTAL_OVERLAP_SEC = 300;
   // Torn User Logs and finished Player Trades can become visible after a sync has
   // already advanced lastSync. Foreground Quick Sync uses a wider repair window;
   // the one-minute background sync uses a small overlap to stay lightweight.
-  const RECENT_LOG_RECHECK_SEC = 6 * 3600;
-  const RECENT_TRADE_RECHECK_SEC = 24 * 3600;
+  const RECENT_LOG_RECHECK_SEC = 72 * 3600;
+  const RECENT_TRADE_RECHECK_SEC = 72 * 3600;
   const BACKGROUND_LOG_RECHECK_SEC = 15 * 60;
   const BACKGROUND_TRADE_RECHECK_SEC = 60 * 60;
   const STALE_SYNC_JOB_SEC = 5 * 60;
@@ -2218,10 +2218,16 @@
     };
     apply('log',job.logScanPeriod);apply('trade',job.tradeScanPeriod);saveSyncCache();
   }
-  function isTradeVerified(job,id) {
-    id=Number(id)||0;if(!(id>0))return false;
+  function isTradeVerified(job,header) {
+    const id=Number(typeof header==='object'?header?.id:header)||0;if(!(id>0))return false;
     if((job.verifiedTradeIds||[]).includes(id))return true;
-    return !!ensureSyncCache().verifiedTrades[id];
+    const verifiedAt=Number(ensureSyncCache().verifiedTrades[id])||0;
+    if(!verifiedAt)return false;
+    // Recheck recent trades even when their IDs were previously cached. Torn can
+    // expose a completed trade before its item details are fully available.
+    const activityAt=Number(typeof header==='object'?(header.modified_at||header.completed_at||header.timestamp):0)||0;
+    if(activityAt>=nowSec()-RECENT_TRADE_RECHECK_SEC)return false;
+    return true;
   }
   function markTradeVerified(job,id,ts=0) {
     id=Number(id)||0;if(!(id>0))return;
@@ -2458,8 +2464,8 @@
   }
 
   function compactTradeHeader(row) {
-    const id=Number(row?.id)||0,ts=Number(row?.completed_at||row?.timestamp)||0,n=Number(row?.items);
-    return id>0&&ts>0?{id,completed_at:ts,items:Number.isFinite(n)?n:null}:null;
+    const id=Number(row?.id)||0,ts=Number(row?.completed_at||row?.timestamp)||0,n=Number(row?.items),modified=Number(row?.modified_at)||0;
+    return id>0&&ts>0?{id,completed_at:ts,modified_at:modified>0?modified:null,items:Number.isFinite(n)?n:null}:null;
   }
   async function runResumableTradeList(job) {
     const scanPeriod=job.tradeScanPeriod;
@@ -2484,7 +2490,7 @@
     const headers=job.tradeHeaders||[];
     while((Number(job.tradeDetailIndex)||0)<headers.length&&!syncJobCancelled(job)){
       const i=Number(job.tradeDetailIndex)||0,h=headers[i];
-      if(isTradeVerified(job,h.id)){
+      if(isTradeVerified(job,h)){
         job.diagnostics.tradeDetailsSkipped=(Number(job.diagnostics.tradeDetailsSkipped)||0)+1;job.tradeDetailIndex=i+1;
         checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 already verified, skipped`);continue;
       }
@@ -2513,7 +2519,7 @@
         job.diagnostics.tradeBoughtQty=(Number(job.diagnostics.tradeBoughtQty)||0)+boughtRows.reduce((n,x)=>n+(Number(x.qty)||0),0);
         checkpointTransactionRows(job,rows);
       }
-      markTradeVerified(job,h.id,h.completed_at);job.tradeDetailIndex=i+1;checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
+      markTradeVerified(job,h.id,Math.max(Number(h.modified_at)||0,Number(h.completed_at)||0,Number(h.timestamp)||0));job.tradeDetailIndex=i+1;checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
       if(job.tradeDetailIndex<headers.length&&!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
     if(!syncJobCancelled(job)){job.phase='finalize';checkpointSyncJob(job,'Finalizing cached history and FIFO inputs\u2026');return true;}return false;
