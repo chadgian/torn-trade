@@ -844,6 +844,10 @@
 
   function tradeHtml() {
     const s=overall(),rows=historyItemRows(),allItems=effectiveTracked(),range=dateRange();
+    const salesTab=state.tradeTab==='sales',sales=salesTab?latestSalesRows():[];
+    const profit=salesTab?sales.reduce((total,row)=>total+row.realizedProfit,0):s.profit;
+    const sold=salesTab?sales.reduce((total,row)=>total+Number(row.qty),0):s.sold;
+    const proceeds=sales.reduce((total,row)=>total+(row.proceedsKnown===false?0:Number(row.netTotal??row.total)||0),0);
     const requested=selectedPeriodBounds();
     const coverageFrom=Number(state.sync?.coverageFrom);
     const needsBackfill=hasApiKey()&&state.sync?.firstSyncComplete&&requested.from>0&&(!Number.isFinite(coverageFrom)||coverageFrom>requested.from);
@@ -857,9 +861,9 @@
       ${state.syncProgress?`<div class="tta-banner tta-status-banner"><span class="tta-status-dot"></span><span id="tta-sync-progress-text">${esc(state.syncProgress)}</span></div>`:''}
       <div class="tta-chips">${[['7d','7 days'],['14d','14 days'],['30d','30 days'],['all','All'],['custom','Custom']].map(([k,l])=>`<button class="tta-chip ${state.dateMode===k?'active':''}" data-date="${k}">${l}</button>`).join('')}</div>
       ${state.dateMode==='custom'?`<div class="tta-customdates"><input type="date" data-custom="from" value="${esc(state.customFrom)}"><input type="date" data-custom="to" value="${esc(state.customTo)}"></div>`:''}
-      <div class="tta-summary"><div class="tta-stat main"><label>Profit \u00B7 acquisition date</label><b class="${s.profit>=0?'pos':'neg'}">${money(s.profit)}</b></div><div class="tta-stat"><label>Acquired</label><b>${qty(s.bought)}</b></div><div class="tta-stat"><label>Sold</label><b>${qty(s.sold)}</b></div></div>
-      <div class="tta-chartcard"><div class="tta-charthead"><h3>Profit by acquisition date</h3><div class="tta-seg">${['day','week','month'].map(g=>`<button class="${state.granularity===g?'active':''}" data-gran="${g}">${g[0].toUpperCase()+g.slice(1)}</button>`).join('')}</div></div>${chartSvg(profitSeries())}</div>
       <div class="tta-seg tta-view-tabs"><button data-act="tradeTab" data-tab="items" class="${state.tradeTab==='items'?'active':''}">Items</button><button data-act="tradeTab" data-tab="sales" class="${state.tradeTab==='sales'?'active':''}">Latest sales</button></div>
+      <div class="tta-summary"><div class="tta-stat main"><label>${salesTab?'FIFO profit / sale date':'Profit / acquisition date'}</label><b class="${profit>=0?'pos':'neg'}">${money(profit)}</b></div><div class="tta-stat"><label>${salesTab?'Known net proceeds':'Acquired'}</label><b>${salesTab?money(proceeds):qty(s.bought)}</b></div><div class="tta-stat"><label>Sold</label><b>${qty(sold)}</b></div></div>
+      ${salesTab?'':`<div class="tta-chartcard"><div class="tta-charthead"><h3>Profit by acquisition date</h3><div class="tta-seg">${['day','week','month'].map(g=>`<button class="${state.granularity===g?'active':''}" data-gran="${g}">${g[0].toUpperCase()+g.slice(1)}</button>`).join('')}</div></div>${chartSvg(profitSeries())}</div>`}
       ${state.tradeTab==='sales'?latestSalesHtml():`<div class="tta-sectionhead"><h3>Items in selected period \u00B7 <span id="tta-item-count">${qty(rows.length)}</span></h3><button class="tta-btn secondary" data-act="ledger">Acquisition history</button></div>
       <div class="tta-listtools"><div class="tta-searchwrap"><span class="tta-searchglyph">\u2315</span><input id="tta-history-search" class="tta-history-search" placeholder="Search item name or ID\u2026" value="${esc(state.itemSearch||'')}" autocomplete="off" aria-label="Search discovered items"><button class="tta-clearsearch" data-act="clearItemSearch" aria-label="Clear search" ${state.itemSearch?'':'hidden'}>\u00D7</button></div><select id="tta-sort-select" class="tta-history-search" aria-label="Sort items">${SORT_OPTIONS.map(option=>`<option value="${option.id}" ${state.sortMode===option.id?'selected':''}>${esc(option.label)}</option>`).join('')}</select></div>
       <div id="tta-list-meta" class="tta-listmeta">${esc(itemListMetaText(rows,allItems))}</div>
