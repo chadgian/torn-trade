@@ -31,7 +31,8 @@
     try{localStorage.setItem(NS+'notices',JSON.stringify(state.notices));}catch(_){}
   }
   function diagnosticFromError(error,source='interface') {
-    return reportDiagnostic(error?.code||'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{...(error?.context||{}),source});
+    if(error?.name==='QuotaExceededError'||error?.code===22)return reportDiagnostic('STORAGE_QUOTA','error','Browser storage is full. Export a backup, free browser storage and retry. The last successful sync has not advanced.',{source:'storage'});
+    return reportDiagnostic(typeof error?.code==='string'?error.code:'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{source,...(error?.context||{})});
   }
   function dataQualityNotices() {
     const rows=[...(state.notices||[])],add=(code,message,context={})=>rows.push({code,severity:'warning',message,context});
@@ -72,5 +73,8 @@
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
     for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated'])counts[key]=Number(d[key])||0;
-    return {app:'Torn Cash Flow Analyzer',version:VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,historyComplete:!!state.sync.firstSyncComplete,counts,notices:dataQualityNotices().map(n=>({code:n.code,severity:n.severity,message:redactText(n.message),context:safeDiagnosticContext(n.context)}))};
+    const job=loadSyncJob(),attemptCounts={};
+    for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
+    const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
+    return {app:'Torn Cash Flow Analyzer',version:VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,historyComplete:!!state.sync.firstSyncComplete,counts,pendingSync,notices:dataQualityNotices().map(n=>({code:n.code,severity:n.severity,message:redactText(n.message),context:safeDiagnosticContext(n.context)}))};
   }

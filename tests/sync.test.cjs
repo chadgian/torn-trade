@@ -12,7 +12,7 @@ test('precise pagination retains nanostamp and strips secrets from links',()=>{
 test('full pages without a cursor and foreign pagination sources never imply full coverage',()=>{
   const {app}=harness();assert.throws(()=>app.nextHistoryPage({}, {limit:100},Array.from({length:100},(_,id)=>({id})),[]),/no continuation/);
   assert.throws(()=>app.nextLogPageParams({_metadata:{links:{next:'https://elsewhere.example/path?key=secret'}}},{}),/invalid pagination/);
-  const job={id:'incomplete',tctNow:now,period:{from:0,to:now},diagnostics:{}};assert.throws(()=>app.finishResumableSync(job),/did not finish/);assert.equal(app.state.sync.lastSync,0);
+  const job={id:'incomplete',tctNow:now,period:{from:0,to:now},diagnostics:{}};return assert.rejects(app.finishResumableSync(job),/did not finish/).then(()=>assert.equal(app.state.sync.lastSync,0));
 });
 test('quick sync recovers delayed city-shop sales and updates visible accounting',async()=>{
   const responses=baseResponses(),raw=log('shop-sale',4210,'Item shop sell',now-3600,{item:206,quantity:3,cost_total:600});responses['/user/log']=url=>({log:url.searchParams.get('log').split(',').includes('4210')?[raw]:[],_metadata:{links:{next:null}}});
@@ -38,8 +38,8 @@ test('legacy transaction existence is not evidence of trade detail verification'
 test('history schema errors keep the last successful sync unchanged',async()=>{
   const responses=baseResponses();responses['/user/log']={wrong:[]};const {app}=harness({stored:{apiKey:key,sync:{lastSync:now-500}},responses});await app.syncAll({background:true});assert.equal(app.state.sync.lastSync,now-500);assert.equal(app.state.notices.some(x=>x.code==='SYNC_PAUSED'),true);assert.equal(app.state.backgroundSyncing,false);
 });
-test('full resync can restore previous rows and coverage after cancellation',()=>{
-  const original=[{id:'safe',itemId:206,side:'buy',qty:1,total:50,timestamp:100}],{app}=harness({stored:{transactions:original,sync:{lastSync:200,firstSyncComplete:true}}});app.resetHistoryForFullResync();assert.equal(app.state.transactions.length,0);app.restoreFullResyncBackup({fullResetDone:true});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,200);
+test('full resync can restore previous rows and coverage after cancellation',async()=>{
+  const original=[{id:'safe',itemId:206,side:'buy',qty:1,total:50,timestamp:100}],{app}=harness({stored:{transactions:original,sync:{lastSync:200,firstSyncComplete:true}}});await app.resetHistoryForFullResync();assert.equal(app.state.transactions.length,0);await app.restoreFullResyncBackup({fullResetDone:true});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,200);
 });
 test('diagnostics whitelist context and redact API keys and URLs',()=>{
   const {app}=harness({stored:{apiKey:key}});app.reportDiagnostic('TEST','warning',`Failed https://api.torn.com/?key=${key} key=${key}`,{source:'/user/log',raw:{key},url:`https://x/?key=${key}`,itemId:206});const report=JSON.stringify(app.diagnosticReport());assert.equal(report.includes(key),false);assert.equal(report.includes('https://'),false);assert.equal(report.includes('"raw"'),false);assert.equal(JSON.stringify(app.backupPayload()).includes(key),false);
@@ -62,4 +62,60 @@ test('another-tab sync lock prevents writes and unnecessary API calls',async()=>
 });
 test('Torn PDA native HTTP responses follow the same safe API parser',async()=>{
   const {app,context,calls}=harness({stored:{apiKey:key}});context.window.PDA_httpGet=async()=>({status:200,responseText:JSON.stringify({value:123})});assert.equal((await app.apiGet('/test')).value,123);assert.equal(calls.length,0);
+});
+test('metadata nanostamp advances even when the link repeats an inclusive second',async()=>{
+  const responses={'/user/log':url=>{
+    const cursor=url.searchParams.get('nanostamp');
+    if(cursor==='100000000002')return {log:[]};
+    return {log:[log(cursor?'second':'first',4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20})],_metadata:{nanostamp:cursor?'100000000002':'100000000003',links:{next:'https://api.torn.com/v2/user/log?limit=100&to=100&nanostamp=100000000003'}}};
+  }};
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses});
+  const job={id:'precise',period:{from:90,to:100},logScanPeriod:{from:90,to:100},logTypeIds:[4210],logMode:'filtered',diagnostics:{parsedRows:0,matchedRows:0}};
+  await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,2);assert.equal(calls.length,3);assert.equal(job.completedSources.log,true);
+});
+test('99-row nanostamp pages are not assumed to be terminal',()=>{
+  const {app}=harness();const next=app.nextHistoryPage({_metadata:{nanostamp:'100000000001'}},{limit:100,to:100},Array.from({length:99},(_,id)=>({id})),[]);assert.equal(next.nanostamp,'100000000001');
+});
+test('player trade list actually requests each next page instead of repeating page one',async()=>{
+  const responses=baseResponses();responses['/user/trades']=url=>url.searchParams.get('to')==='150'?{trades:[{id:2,completed_at:100}]}:{trades:[{id:1,completed_at:200}],_metadata:{links:{next:'https://api.torn.com/v2/user/trades?to=150&limit=100'}}};
+  const {app,calls}=harness({stored:{apiKey:key},responses});const job={id:'pages',tradeScanPeriod:{from:50,to:300},diagnostics:{},tradeHeaders:[]};
+  await app.runResumableTradeList(job);assert.deepEqual(Array.from(job.tradeHeaders,x=>x.id),[1,2]);assert.equal(calls[1].searchParams.get('to'),'150');assert.equal(job.completedSources.trade,true);
+});
+test('stalled pages retry without mutating committed cursors or skipping same-second rows',async()=>{
+  let requests=0;const {app}=harness({stored:{apiKey:key},responses:{'/user/log':()=>({log:[log('sale',4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20})],_metadata:{nanostamp:++requests<3?'100000000003':'100000000002'}})}});
+  const seen=[];const result=await app.historyPage('/user/log',{to:100,limit:100,nanostamp:'100000000003'},seen);
+  assert.equal(requests,3);assert.equal(seen.length,0);assert.equal(result.rows[0].id,'sale');assert.equal(result.next.nanostamp,'100000000002');assert.equal(app.state.notices[0].code,'PAGE_RETRY');
+});
+test('permanently stalled cursors remain errors rather than false completed coverage',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:[log('sale',4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20})],_metadata:{nanostamp:'100000000003'}}}});
+  await assert.rejects(app.historyPage('/user/log',{to:100,nanostamp:'100000000003'},[]),e=>e.code==='PAGE_REPEATED');assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+});
+test('history pagination rejects a different endpoint on the same API origin',()=>{
+  const {app}=harness();assert.throws(()=>app.nextHistoryPage({_metadata:{links:{next:'https://api.torn.com/v2/user/trades?to=100'}}},{to:100},[{id:1}],[]),e=>e.code==='PAGE_SOURCE_MISMATCH');
+});
+test('quota exceptions have actionable codes and errors keep their real source',()=>{
+  const {app}=harness();app.diagnosticFromError({code:22,name:'QuotaExceededError'},'sync');assert.equal(app.state.notices[0].code,'STORAGE_QUOTA');
+  app.diagnosticFromError(new app.AnalyzerError('PAGE_REPEATED','History stalled',{source:'log',count:100}),'sync');assert.equal(app.state.notices[0].context.source,'log');
+});
+test('failed attempt diagnostics remain separate from the last successful scan',()=>{
+  const {app}=harness({stored:{sync:{lastSync:200,diagnostics:{pages:67}},syncJob:{schema:3,active:true,period:{from:0,to:300},syncMode:'full',phase:'logs-filtered',lastError:'fixture',diagnostics:{pages:4,rawRows:300}},fullResyncBackup:{sync:{lastSync:200}}}});
+  const report=app.diagnosticReport();assert.equal(report.counts.pages,67);assert.equal(report.pendingSync.counts.pages,4);assert.equal(report.pendingSync.paused,true);assert.equal(report.pendingSync.recoveryAvailable,true);
+});
+test('long full rebuilds remain resumable instead of expiring after five minutes',()=>{
+  const {app}=harness(),job={syncMode:'full',period:{from:0,to:now-3600},updatedAt:now};
+  assert.equal(app.syncJobIsStale(job),false);assert.equal(app.syncJobIsStale({...job,syncMode:'quick'}),true);assert.equal(app.syncJobIsStale({...job,updatedAt:now-7*3600}),true);
+});
+test('successful full rebuild retires old sync errors without hiding unrelated storage errors',async()=>{
+  const responses=baseResponses();responses['/user/log']=url=>({log:url.searchParams.get('log').includes('4210')?[log('shop-sale',4210,'Item shop sell',now-3600,{item:206,quantity:2,cost_total:500})]:[]});
+  const {app,storage}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:now-500}},responses});
+  app.reportDiagnostic(22,'error','Old error',{source:'sync'});app.reportDiagnostic('PAGE_REPEATED','error','Old cursor',{source:'sync'});app.reportDiagnostic('STORAGE_WRITE','error','Catalog unavailable',{source:'catalog'});
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.lastSync,now);assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.transactions.length,1);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);assert.equal(storage.has('tta:v1:syncJob'),false);
+  assert.equal(app.state.notices.some(n=>n.code===22||n.code==='PAGE_REPEATED'),false);assert.equal(app.state.notices.some(n=>n.code==='STORAGE_WRITE'&&n.context.source==='catalog'),true);
+});
+test('failed full rebuild retains recovery and switching to quick sync restores original history',async()=>{
+  const responses=baseResponses();responses['/user/log']={error:{code:2}};
+  const original={id:'safe',itemId:206,side:'buy',qty:5,total:100,timestamp:100};
+  const {app,storage}=harness({stored:{apiKey:key,catalog:[item],transactions:[original],sync:{lastSync:now-500,firstSyncComplete:true}},responses});
+  await app.syncAll({mode:'full'});assert.equal(storage.has('tta:v1:fullResyncBackup'),true);assert.equal(app.diagnosticReport().pendingSync.paused,true);
+  await app.syncAll({mode:'quick'});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,now-500);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
 });

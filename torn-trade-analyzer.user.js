@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.3.2
+// @version      0.3.3
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.3.2';
+  const VERSION = '0.3.3';
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -254,7 +254,8 @@
     try{localStorage.setItem(NS+'notices',JSON.stringify(state.notices));}catch(_){}
   }
   function diagnosticFromError(error,source='interface') {
-    return reportDiagnostic(error?.code||'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{...(error?.context||{}),source});
+    if(error?.name==='QuotaExceededError'||error?.code===22)return reportDiagnostic('STORAGE_QUOTA','error','Browser storage is full. Export a backup, free browser storage and retry. The last successful sync has not advanced.',{source:'storage'});
+    return reportDiagnostic(typeof error?.code==='string'?error.code:'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{source,...(error?.context||{})});
   }
   function dataQualityNotices() {
     const rows=[...(state.notices||[])],add=(code,message,context={})=>rows.push({code,severity:'warning',message,context});
@@ -295,13 +296,61 @@
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
     for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated'])counts[key]=Number(d[key])||0;
-    return {app:'Torn Cash Flow Analyzer',version:VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,historyComplete:!!state.sync.firstSyncComplete,counts,notices:dataQualityNotices().map(n=>({code:n.code,severity:n.severity,message:redactText(n.message),context:safeDiagnosticContext(n.context)}))};
+    const job=loadSyncJob(),attemptCounts={};
+    for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
+    const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
+    return {app:'Torn Cash Flow Analyzer',version:VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,historyComplete:!!state.sync.firstSyncComplete,counts,pendingSync,notices:dataQualityNotices().map(n=>({code:n.code,severity:n.severity,message:redactText(n.message),context:safeDiagnosticContext(n.context)}))};
   }
 
 
   // Source: persistence.js
   const BACKUP_KEYS=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','sync','dateMode','customFrom','customTo','granularity','netWorthDate','netWorthTrackingStartedAt'];
   const IMPORT_CLEAR_KEYS=['syncJob','syncCache','fullResyncBackup'];
+  let historyRecoveryReady=Promise.resolve();
+  let historyRecoveryFailed=false;
+  function rebuildBackupStore(operation,value) {
+    return new Promise((resolve,reject)=>{
+      if(typeof indexedDB==='undefined'){reject(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','This browser cannot store a rebuild recovery copy.',{source:'storage'}));return;}
+      let db,settled=false,result;
+      const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timer);if(db)db.close();if(error)reject(error);else resolve(result);};
+      const timer=setTimeout(()=>finish(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','Recovery storage did not respond. Close other analyzer tabs and retry.',{source:'storage'})),10000);
+      const request=indexedDB.open('torn-analyzer-recovery',1);
+      request.onupgradeneeded=()=>request.result.createObjectStore('backups');
+      request.onerror=()=>finish(request.error);
+      request.onblocked=()=>finish(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','Recovery storage is blocked by another tab. Close other analyzer tabs and retry.',{source:'storage'}));
+      request.onsuccess=()=>{
+        db=request.result;if(settled){db.close();return;}
+        try{
+          const tx=db.transaction('backups',operation==='get'?'readonly':'readwrite'),store=tx.objectStore('backups');
+          const task=operation==='put'?store.put(value,NS):operation==='delete'?store.delete(NS):store.get(NS);
+          task.onsuccess=()=>{result=task.result;};
+          tx.oncomplete=()=>finish();tx.onabort=()=>finish(tx.error||new Error('Recovery transaction aborted'));tx.onerror=()=>{};
+        }catch(error){finish(error);}
+      };
+    });
+  }
+  async function saveFullResyncBackup(backup) {
+    // Keep the large recovery copy outside localStorage's small per-origin quota.
+    if(typeof indexedDB!=='undefined'){
+      await rebuildBackupStore('put',backup);
+      localStorage.setItem(NS+'fullResyncBackup',JSON.stringify({storage:'indexeddb',schema:1}));
+    }else localStorage.setItem(NS+'fullResyncBackup',JSON.stringify(backup));
+  }
+  async function readFullResyncBackup() {
+    const marker=load('fullResyncBackup',null);
+    if(marker?.storage!=='indexeddb')return marker;
+    const backup=await rebuildBackupStore('get');
+    if(!backup?.sync)throw new AnalyzerError('REBUILD_RECOVERY','The rebuild recovery copy is missing. Do not reset or import history; export the remaining data and report this error.',{source:'storage'});
+    return backup;
+  }
+  async function clearFullResyncBackup() {
+    const marker=load('fullResyncBackup',null);
+    localStorage.removeItem(NS+'fullResyncBackup');
+    if(marker?.storage==='indexeddb'){
+      try{await rebuildBackupStore('delete');resolveDiagnostic('REBUILD_CLEANUP');}
+      catch(_){reportDiagnostic('REBUILD_CLEANUP','info','Sync finished, but the old recovery copy could not be removed. It will be replaced by the next rebuild.',{source:'storage'});}
+    }
+  }
   function validateBackup(payload) {
     const data=payload?.data;
     if(payload?.schema!==1||payload?.app!=='Torn Cash Flow Analyzer'||!data)throw new AnalyzerError('IMPORT_FORMAT','This is not a supported analyzer backup.');
@@ -1234,10 +1283,36 @@
     const b=state.busy||{};
     return `<div id="tta-loading" class="tta-loading ${b.active?'show':''}" role="status" aria-live="polite" aria-hidden="${b.active?'false':'true'}"><div class="tta-loadingcard"><div class="tta-loadicon"><span class="tta-spinner xl"></span></div><div id="tta-loading-title" class="tta-loadingtitle">${esc(b.title||'Working\u2026')}</div><div id="tta-loading-detail" class="tta-loadingdetail">${esc(b.detail||'Preparing your data\u2026')}</div><div class="tta-loadingbar"><span></span></div><div class="tta-loadingactions"><button id="tta-loading-minimize" class="tta-btn secondary" data-act="minimizeSync" ${state.syncing?'':'hidden'}>\u2014 Minimize</button><button id="tta-loading-stop" class="tta-btn danger" data-act="cancelSync" ${b.cancellable?'':'hidden'}>Stop sync</button></div><div class="tta-loadinghint">Minimize to keep using Torn while the sync continues. You can reopen progress from the floating button at any time.</div></div></div>`;
   }
+  let transitionSequence=0,transitionTitle='';
+  function transitionHtml() {
+    return `<div id="tta-transition" class="tta-transition" role="status" aria-live="polite" ${transitionTitle?'':'hidden'}><span class="tta-spinner"></span><span>${esc(transitionTitle)}</span></div>`;
+  }
+  function updateTransitionDom() {
+    const el=document.getElementById('tta-transition');
+    if(el){el.hidden=!transitionTitle;el.innerHTML=`<span class="tta-spinner"></span><span>${esc(transitionTitle)}</span>`;}
+    const root=document.getElementById('tta-root');if(root){
+      root.setAttribute('aria-busy',state.busy?.active||transitionTitle?'true':'false');
+      if(transitionTitle){const top=root.getBoundingClientRect().top,header=root.querySelector('.tta-header'),nav=root.querySelector('.tta-workspaces');root.style.setProperty('--tta-transition-top',Math.max(0,(header?.getBoundingClientRect().bottom||top)-top,(nav?.getBoundingClientRect().bottom||top)-top)+'px');}
+    }
+  }
+  async function withTransition(title,fn) {
+    const token=++transitionSequence;transitionTitle=title;updateTransitionDom();
+    await nextPaint();
+    try{if(token===transitionSequence&&state.open)await fn();}
+    catch(error){diagnosticFromError(error,'transition');render();toast('This view could not be updated. See Data Quality.');}
+    finally{if(token===transitionSequence){transitionTitle='';updateTransitionDom();}}
+  }
+  function navigate(view,options={}) {
+    for(const key of ['searchTimer','ledgerSearchTimer','legacySearchTimer'])clearTimeout(perfCache[key]);
+    return withTransition('Opening '+({cash:'Cash Flow',trade:'Trade Analysis',networth:'Net Worth',ledger:'Acquisition Ledger',diagnostics:'Data Quality',dashboard:'Dashboard',settings:'Settings',help:'Help',insights:'Insights'}[view]||'view'),()=>{
+      state.view=view;if(view==='ledger')state.ledgerLimit=200;state.search='';render({preserveScroll:false,...options});
+    });
+  }
+  function cancelTransition(){transitionSequence++;transitionTitle='';updateTransitionDom();}
 
   function updateBusyDom() {
     const root=document.getElementById('tta-root'),el=document.getElementById('tta-loading'),b=state.busy||{};
-    if(root)root.setAttribute('aria-busy',b.active?'true':'false');if(!el)return;
+    if(root)root.setAttribute('aria-busy',b.active||transitionTitle?'true':'false');if(!el)return;
     el.classList.toggle('show',!!b.active);el.setAttribute('aria-hidden',b.active?'false':'true');
     const title=document.getElementById('tta-loading-title'),detail=document.getElementById('tta-loading-detail'),stop=document.getElementById('tta-loading-stop'),minimize=document.getElementById('tta-loading-minimize');
     if(title)title.textContent=b.title||'Working\u2026';if(detail)detail.textContent=b.detail||'Preparing your data\u2026';if(stop)stop.hidden=!b.cancellable;if(minimize)minimize.hidden=!state.syncing;
@@ -1280,11 +1355,12 @@
     if(state.demo&&!state.catalog.length)state.catalog=demoCatalog();
     const html=state.view==='diagnostics'?diagnosticsHtml():state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='help'?helpHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='insights'?insightsHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml();
     const content=html.replace(/(<div class="tta-content[^"]*">)/,`$1${state.view==='diagnostics'?'':qualityHtml()}`);
-    root.innerHTML=`<div class="tta-shell">${content}</div>${loadingHtml()}<div id="tta-toast" role="status" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
+    root.innerHTML=`<div class="tta-shell">${content}</div>${loadingHtml()}${transitionHtml()}<div id="tta-toast" role="status" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     state.renderPending=false;
-    root.dataset.view=state.view;root.setAttribute('aria-busy',state.busy?.active?'true':'false');bind();
+    root.dataset.view=state.view;root.setAttribute('aria-busy',state.busy?.active||transitionTitle?'true':'false');bind();
     if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);
     if(focusId&&previousView===state.view){const next=document.getElementById(focusId);if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange&&next.type!=='date')next.setSelectionRange(...selection);}}
+    if(transitionTitle)updateTransitionDom();
   }
 
   function queueAnalyticsRender() {
@@ -1344,28 +1420,22 @@
       const portal=e.target?.closest?.('.tta-fin-nav.portal');
       if(portal&&portal.dataset.suppressClick==='1'){e.preventDefault();e.stopPropagation();return;}
       const dateEl=e.target.closest('[data-date]');
-      if(dateEl&&root.contains(dateEl)){state.dateMode=dateEl.dataset.date;save('dateMode',state.dateMode);state.expanded=null;await withBusy('Updating period','Recalculating cached analytics for the selected dates\u2026',async()=>render());return;}
+      if(dateEl&&root.contains(dateEl)){state.dateMode=dateEl.dataset.date;save('dateMode',state.dateMode);state.expanded=null;await withTransition('Updating period',()=>render());return;}
       const granEl=e.target.closest('[data-gran]');
-      if(granEl&&root.contains(granEl)){state.granularity=granEl.dataset.gran;save('granularity',state.granularity);const detail=state.view==='cash'?'Grouping cash flow by the selected interval\u2026':'Grouping realized profit by the selected interval\u2026';await withBusy('Updating chart',detail,async()=>render());return;}
+      if(granEl&&root.contains(granEl)){state.granularity=granEl.dataset.gran;save('granularity',state.granularity);await withTransition('Updating chart',()=>render());return;}
       const el=e.target.closest('[data-act]');if(!el||!root.contains(el))return;e.stopPropagation();const act=el.dataset.act;
       if(['resetData','importBackup','saveApiKey','clearApiKey'].includes(act)&&(state.syncing||state.backgroundSyncing)){toast('Stop the current sync before changing history or API keys.');return;}
-      if(act==='close'){state.open=false;if(!state.syncing)setBusy(false);render();}
-      else if(act==='minimizeSync'){state.open=false;render();}
-      else if(act==='back'){state.view=state.view==='ledger'?'trade':'dashboard';state.search='';render();}
-      else if(act==='dashboard'){state.view='dashboard';render({preserveScroll:false});}
-      else if(act==='diagnostics'){state.view='diagnostics';render({preserveScroll:false});}
+      if(act==='close'){cancelTransition();state.open=false;if(!state.syncing)setBusy(false);render();}
+      else if(act==='minimizeSync'){cancelTransition();state.open=false;render();}
+      else if(act==='back'){await navigate(state.view==='ledger'?'trade':'dashboard');}
+      else if(['dashboard','diagnostics','settings','help','insights','trade','networth'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}
       else if(act==='clearDiagnostics'){state.notices=[];save('notices',[]);render();}
-      else if(act==='tradeTab'){state.tradeTab=el.dataset.tab;render();}
-      else if(act==='salesMore'){state.salesLimit=(state.salesLimit||100)+100;render();}
-      else if(act==='cashMore'){state.cashLimit=(state.cashLimit||200)+200;render();}
-      else if(act==='settings'){state.view='settings';render();}
-      else if(act==='help'){state.view='help';render({preserveScroll:false});}
-      else if(act==='cashflow'){state.view='cash';render({preserveScroll:false});}
-      else if(act==='insights'){state.view='insights';render({preserveScroll:false});}
-      else if(act==='trade'){state.view='trade';render({preserveScroll:false});}
-      else if(act==='networth'){state.view='networth';render({preserveScroll:false});}
-      else if(act==='netWorthToday'){state.netWorthDate=tctInputDate(nowSec());save('netWorthDate',state.netWorthDate);render({preserveScroll:true});}
+      else if(act==='tradeTab'){await withTransition('Updating Trade Analysis',()=>{state.tradeTab=el.dataset.tab;render();});}
+      else if(act==='salesMore'){state.salesLimit=(state.salesLimit||100)+100;await withTransition('Loading sales',()=>render());}
+      else if(act==='cashMore'){state.cashLimit=(state.cashLimit||200)+200;await withTransition('Loading cash activity',()=>render());}
+      else if(act==='cashflow'){await navigate('cash');}
+      else if(act==='netWorthToday'){state.netWorthDate=tctInputDate(nowSec());save('netWorthDate',state.netWorthDate);await withTransition('Updating Net Worth',()=>render({preserveScroll:true}));}
       else if(act==='refreshFinancial'){const snap=await withBusy('Refreshing finances','Loading current Torn money and net-worth snapshots\u2026',async()=>refreshFinancialSnapshot());render();toast(snap?'Financial snapshot updated. See Data Quality for any missing fields.':'Snapshot unavailable. See Data Quality.');}
       else if(act==='addGoal'){const type=String(document.getElementById('tta-goal-type')?.value||'networth'),target=Number(document.getElementById('tta-goal-target')?.value)||0,label=String(document.getElementById('tta-goal-label')?.value||'').trim();if(!(target>0)){toast('Enter a goal target greater than zero.');return;}state.goals=[...(state.goals||[]),{id:`g${Date.now().toString(36)}`,type,target,label,createdAt:nowSec()}];save('goals',state.goals);render();toast('Financial goal added.');}
       else if(act==='removeGoal'){state.goals=(state.goals||[]).filter(g=>String(g.id)!==String(el.dataset.id));save('goals',state.goals);render();}
@@ -1373,17 +1443,17 @@
       else if(act==='importBackup'){importBackup();}
       else if(act==='exportCashCsv'){exportCashCsv();toast('Cash Flow CSV exported.');}
       else if(act==='exportNetWorthCsv'){exportNetWorthCsv();toast('Net Worth CSV exported.');}
-      else if(act==='ledger'){state.view='ledger';state.ledgerLimit=200;render({preserveScroll:false});}
+      else if(act==='ledger'){await navigate('ledger');}
       else if(act==='ledgerSort'){
         const key=String(el.dataset.key||'acquiredAt');if(state.ledgerSort===key)state.ledgerSortDir=state.ledgerSortDir==='asc'?'desc':'asc';else{state.ledgerSort=key;state.ledgerSortDir=(key==='item'||key==='method'||key==='status')?'asc':'desc';}
-        save('ledgerSort',state.ledgerSort);save('ledgerSortDir',state.ledgerSortDir);state.ledgerLimit=200;renderLedgerRows();
+        save('ledgerSort',state.ledgerSort);save('ledgerSortDir',state.ledgerSortDir);state.ledgerLimit=200;await withTransition('Sorting ledger',()=>renderLedgerRows());
       }
-      else if(act==='clearLedgerSearch'){state.ledgerSearch='';save('ledgerSearch','');state.ledgerLimit=200;const input=document.getElementById('tta-ledger-search');if(input){input.value='';input.focus();}renderLedgerRows();}
-      else if(act==='ledgerMore'){state.ledgerLimit=(Number(state.ledgerLimit)||200)+200;renderLedgerRows();}
+      else if(act==='clearLedgerSearch'){state.ledgerSearch='';save('ledgerSearch','');state.ledgerLimit=200;const input=document.getElementById('tta-ledger-search');if(input){input.value='';input.focus();}await withTransition('Filtering ledger',()=>renderLedgerRows());}
+      else if(act==='ledgerMore'){state.ledgerLimit=(Number(state.ledgerLimit)||200)+200;await withTransition('Loading ledger rows',()=>renderLedgerRows());}
       else if(act==='addItem'){state.view='add';await withBusy('Loading catalog','Preparing the Torn item catalog\u2026',async()=>{await ensureCatalog();render();});setTimeout(()=>document.getElementById('tta-search')?.focus(),30);}
-      else if(act==='toggleItem'){state.expanded=Number(state.expanded)===Number(el.dataset.id)?null:Number(el.dataset.id);renderItemList();}
+      else if(act==='toggleItem'){state.expanded=Number(state.expanded)===Number(el.dataset.id)?null:Number(el.dataset.id);await withTransition('Loading item history',()=>renderItemList());}
       else if(act==='togglePin'){
-        const id=Number(el.dataset.id),pins=new Set((state.pinnedIds||[]).map(Number));if(pins.has(id))pins.delete(id);else pins.add(id);state.pinnedIds=[...pins];save('pinnedIds',state.pinnedIds);renderItemList();
+        const id=Number(el.dataset.id),pins=new Set((state.pinnedIds||[]).map(Number));if(pins.has(id))pins.delete(id);else pins.add(id);state.pinnedIds=[...pins];save('pinnedIds',state.pinnedIds);await withTransition('Updating items',()=>renderItemList());
       }
       else if(act==='hideItem'){
         const id=Number(el.dataset.id),hidden=new Set((state.hiddenIds||[]).map(Number));hidden.add(id);state.hiddenIds=[...hidden];save('hiddenIds',state.hiddenIds);if(Number(state.expanded)===id)state.expanded=null;renderItemList();toast(`${catalogItem(id).name} hidden. Restore it from Settings.`);
@@ -1394,9 +1464,9 @@
       else if(act==='restoreAllItems'){
         state.hiddenIds=[];save('hiddenIds',[]);render();toast('All hidden items restored.');
       }
-      else if(act==='cycleSort'){const i=Math.max(0,SORT_OPTIONS.findIndex(x=>x.id===state.sortMode));state.sortMode=SORT_OPTIONS[(i+1)%SORT_OPTIONS.length].id;save('sortMode',state.sortMode);renderItemList();}
-      else if(act==='clearItemSearch'){state.itemSearch='';save('itemSearch','');const input=document.getElementById('tta-history-search');if(input){input.value='';input.focus();}renderItemList();}
-      else if(act==='confirmAdd'){addTracked(Number(el.dataset.id));}
+      else if(act==='cycleSort'){const i=Math.max(0,SORT_OPTIONS.findIndex(x=>x.id===state.sortMode));state.sortMode=SORT_OPTIONS[(i+1)%SORT_OPTIONS.length].id;save('sortMode',state.sortMode);await withTransition('Sorting items',()=>renderItemList());}
+      else if(act==='clearItemSearch'){state.itemSearch='';save('itemSearch','');const input=document.getElementById('tta-history-search');if(input){input.value='';input.focus();}await withTransition('Filtering items',()=>renderItemList());}
+      else if(act==='confirmAdd'){await withTransition('Opening Trade Analysis',()=>addTracked(Number(el.dataset.id)));}
       else if(act==='removeItem'){removeTracked(Number(el.dataset.id));}
       else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick'});}
       else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full'});}
@@ -1409,7 +1479,7 @@
         if(key.length<16){toast('Enter a valid Torn API key first.');return;}state.apiKey=key;save('apiKey',key);state.demo=false;render();
         try{
           let info=null;await withBusy('Checking API key','Verifying access and refreshing the item catalog\u2026',async()=>{info=await inspectActiveKey();if(state.sync.accountId&&Number(state.sync.accountId)!==info.userId)throw new AnalyzerError('ACCOUNT_MISMATCH','This key belongs to a different account. Export and reset history before switching accounts.');await apiGet('/user/log',{limit:1});await ensureCatalog(true);});
-          toast(`API key confirmed (${info?.type||'access level '+(info?.level||'?')}).`);state.view='dashboard';render();await syncAll();
+          toast(`API key confirmed (${info?.type||'access level '+(info?.level||'?')}).`);await navigate('dashboard');await syncAll();
         }catch(err){if([1,2,13].includes(err.context?.apiCode)||err.code==='ACCOUNT_MISMATCH'){state.apiKey='';save('apiKey','');}diagnosticFromError(err,'key test');setBusy(false);render();toast(`API key test failed: ${err.message}`);}
       }
       else if(act==='clearApiKey'){state.apiKey='';save('apiKey','');state.demo=!hasApiKey();resetAnalyticsCache();render();toast(injectedApiKey()?'Saved key cleared. Torn PDA key will be used.':'Saved API key cleared.');}
@@ -1417,6 +1487,7 @@
         const updated=await withBusy('Refreshing catalog','Downloading the latest Torn item catalog and market values\u2026',async()=>ensureCatalog(true));render();toast(updated?`Catalog refreshed: ${qty(state.catalog.length)} items.`:'Catalog refresh failed. Cached values retained.');
       }
       else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
+        await clearFullResyncBackup();
         ['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
       }
       }catch(error){diagnosticFromError(error);setBusy(false);render();toast('Action failed. See Data Quality for details.');}
@@ -1427,7 +1498,7 @@
     root.addEventListener('focusin',e=>{const bar=e.target?.closest?.('.tta-profitbar');if(bar&&root.contains(bar))showChartTooltip(bar,false);const point=e.target?.closest?.('.tta-cashpoint');if(point&&root.contains(point))showCashFlowTooltip(point,false);});
     root.addEventListener('focusout',e=>{const bar=e.target?.closest?.('.tta-profitbar');if(bar&&root.contains(bar))hideChartTooltip(bar.closest('.tta-chartinteractive'));const point=e.target?.closest?.('.tta-cashpoint');if(point&&root.contains(point))hideCashFlowTooltip(point.closest('.tta-cash-chart'));});
     root.addEventListener('focusout',()=>{if(state.renderPending)setTimeout(()=>queueAnalyticsRender(),0);});
-    root.addEventListener('keydown',e=>{if(e.key==='Escape'){state.open=false;render();document.getElementById('tta-fab')?.focus();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role="button"]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
+    root.addEventListener('keydown',e=>{if(e.key==='Escape'){cancelTransition();state.open=false;render();document.getElementById('tta-fab')?.focus();}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role="button"]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
     root.addEventListener('click',e=>{
       const bar=e.target?.closest?.('.tta-profitbar');
       if(bar&&root.contains(bar)){e.stopPropagation();const wrap=bar.closest('.tta-chartinteractive'),tip=wrap?.querySelector('.tta-charttooltip'),same=bar.classList.contains('active')&&tip?.dataset.pinned==='1';if(same)hideChartTooltip(wrap,true);else showChartTooltip(bar,true);return;}
@@ -1438,31 +1509,33 @@
 
     root.addEventListener('input',e=>{
       const target=e.target;
-      if(target.id==='tta-sort-select'){state.sortMode=target.value;save('sortMode',state.sortMode);renderItemList();return;}
-      if(target.id==='tta-sales-search'){state.saleSearch=target.value;clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>render({preserveScroll:true}),140);return;}
+      if(target.id==='tta-sort-select'){state.sortMode=target.value;save('sortMode',state.sortMode);void withTransition('Sorting items',()=>renderItemList());return;}
+      if(target.id==='tta-sales-search'){state.saleSearch=target.value;clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>withTransition('Filtering sales',()=>render({preserveScroll:true})),140);return;}
       if(target.id==='tta-history-search'){
-        state.itemSearch=target.value;save('itemSearch',state.itemSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>renderItemList(),120);
+        state.itemSearch=target.value;save('itemSearch',state.itemSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>withTransition('Filtering items',()=>renderItemList()),120);
       }else if(target.id==='tta-cash-search'){
-        state.cashSearch=target.value;save('cashSearch',state.cashSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>render({preserveScroll:true}),140);
+        state.cashSearch=target.value;save('cashSearch',state.cashSearch);clearTimeout(perfCache.searchTimer);perfCache.searchTimer=setTimeout(()=>withTransition('Filtering cash activity',()=>render({preserveScroll:true})),140);
       }else if(target.id==='tta-ledger-search'){
-        state.ledgerSearch=target.value;save('ledgerSearch',state.ledgerSearch);state.ledgerLimit=200;clearTimeout(perfCache.ledgerSearchTimer);perfCache.ledgerSearchTimer=setTimeout(()=>renderLedgerRows(),120);
+        state.ledgerSearch=target.value;save('ledgerSearch',state.ledgerSearch);state.ledgerLimit=200;clearTimeout(perfCache.ledgerSearchTimer);perfCache.ledgerSearchTimer=setTimeout(()=>withTransition('Filtering ledger',()=>renderLedgerRows()),120);
       }else if(target.id==='tta-search'){
-        state.search=target.value;clearTimeout(perfCache.legacySearchTimer);perfCache.legacySearchTimer=setTimeout(()=>{render();const n=document.getElementById('tta-search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}},140);
+        state.search=target.value;clearTimeout(perfCache.legacySearchTimer);perfCache.legacySearchTimer=setTimeout(()=>withTransition('Filtering catalog',()=>{render();const n=document.getElementById('tta-search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}}),140);
       }
     });
 
     root.addEventListener('change',async e=>{
+      try{
       const target=e.target;
-      if(target.id==='tta-sort-select'){state.sortMode=target.value;save('sortMode',state.sortMode);renderItemList();return;}
-      if(target.id==='tta-sales-source'){state.saleSource=target.value;state.salesLimit=100;render({preserveScroll:true});return;}
-      if(target.id==='tta-networth-date'){const ts=tctDateInputStart(target.value),bounds=netWorthTrackingBounds();if(Number.isFinite(ts)){const day=Math.max(bounds.first,Math.min(bounds.today,tctDayStart(ts)));state.netWorthDate=tctInputDate(day);save('netWorthDate',state.netWorthDate);render({preserveScroll:true});}return;}
-      if(target.id==='tta-cash-category'){state.cashCategory=target.value;save('cashCategory',state.cashCategory);render({preserveScroll:true});return;}
+      if(target.id==='tta-sort-select'){state.sortMode=target.value;save('sortMode',state.sortMode);await withTransition('Sorting items',()=>renderItemList());return;}
+      if(target.id==='tta-sales-source'){state.saleSource=target.value;state.salesLimit=100;await withTransition('Filtering sales',()=>render({preserveScroll:true}));return;}
+      if(target.id==='tta-networth-date'){const ts=tctDateInputStart(target.value),bounds=netWorthTrackingBounds();if(Number.isFinite(ts)){const day=Math.max(bounds.first,Math.min(bounds.today,tctDayStart(ts)));state.netWorthDate=tctInputDate(day);save('netWorthDate',state.netWorthDate);await withTransition('Updating Net Worth',()=>render({preserveScroll:true}));}return;}
+      if(target.id==='tta-cash-category'){state.cashCategory=target.value;save('cashCategory',state.cashCategory);await withTransition('Filtering cash activity',()=>render({preserveScroll:true}));return;}
       if(target.dataset.ledgerFilter){
         const kind=target.dataset.ledgerFilter,val=target.value;if(kind==='source')state.ledgerSource=val;else if(kind==='status')state.ledgerStatus=val;else if(kind==='range')state.ledgerRange=val;
-        save(kind==='source'?'ledgerSource':kind==='status'?'ledgerStatus':'ledgerRange',val);state.ledgerLimit=200;renderLedgerRows();return;
+        save(kind==='source'?'ledgerSource':kind==='status'?'ledgerStatus':'ledgerRange',val);state.ledgerLimit=200;await withTransition('Filtering ledger',()=>renderLedgerRows());return;
       }
       if(!target.dataset.custom)return;if(target.dataset.custom==='from')state.customFrom=target.value;else state.customTo=target.value;save('customFrom',state.customFrom);save('customTo',state.customTo);state.expanded=null;
-      await withBusy('Updating custom period','Applying the selected dates to cached analytics\u2026',async()=>render());
+      await withTransition('Updating custom period',()=>render());
+      }catch(error){diagnosticFromError(error,'filters');render();toast('Filter update failed. See Data Quality.');}
     });
 
     root.addEventListener('focusin',e=>{const target=e.target;if(target.id==='tta-api-key'&&target.dataset.placeholderKey==='1'){target.value='';target.dataset.placeholderKey='0';}});
@@ -1957,12 +2030,12 @@
 
 
   // Source: sync.js
-  function nextLogPageParams(data,currentParams) {
+  function nextLogPageParams(data,currentParams,key='log') {
     const next=data?._metadata?.links?.next;
     if(!next)return null;
     try {
       const u=new URL(next,API+'/user/log');
-      if(u.origin!==new URL(API).origin||!u.pathname.startsWith('/v2/user/'))throw new Error('Unexpected pagination source');
+      if(u.origin!==new URL(API).origin||u.pathname.replace(/\/$/,'')!==`/v2/user/${key}`)throw new Error('Unexpected pagination source');
       const params={...currentParams};delete params.nanostamp;
       for(const [k,v] of u.searchParams.entries()){
         if(['from','to','offset','limit','sort','cat','log','nanostamp'].includes(k))params[k]=v;
@@ -1978,8 +2051,13 @@
   }
   function nextHistoryPage(data,params,rows,seen,key='log') {
     if(!rows.length)return null;
-    let next=nextLogPageParams(data,params);
-    if(!next&&key==='log'&&data?._metadata?.nanostamp)next={...params,nanostamp:String(data._metadata.nanostamp)};
+    let next=nextLogPageParams(data,params,key);
+    const precise=key==='log'?data?._metadata?.nanostamp:null;
+    if(precise!=null&&String(precise)!==''){
+      if(!/^\d+$/.test(String(precise)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
+      // The link can retain an inclusive second; metadata advances within that second.
+      next={...(next||params),nanostamp:String(precise)};
+    }
     if(!next) {
       // A full page without a precise cursor may hide events in its final second.
       if(rows.length>=Number(params.limit||100))throw new AnalyzerError('PAGE_INCOMPLETE','A full history page has no continuation cursor. Coverage remains incomplete.',{source:key});
@@ -1988,8 +2066,9 @@
     if(params.log!=null)next.log=params.log;
     if(params.cat!=null)next.cat=params.cat;
     if(params.from!=null)next.from=params.from;
-    const signature=JSON.stringify(Object.entries(next).sort(([a],[b])=>a.localeCompare(b)));
-    if(seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. Coverage remains incomplete.',{source:key});
+    const signature=JSON.stringify(Object.entries(next).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
+    const current=JSON.stringify(Object.entries(params).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
+    if(signature===current||seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. Retry Sync; coverage has not been marked complete.',{source:key,from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length});
     seen.push(signature);return next;
   }
 
@@ -2094,13 +2173,13 @@
   function syncJobIsStale(job) {
     if(!job?.period)return false;
     const now=nowSec(),end=Number(job.period.to)||0,updated=Number(job.updatedAt)||0;
-    return (end>0&&end<now-STALE_SYNC_JOB_SEC)||(updated>0&&updated<now-6*3600);
+    // A long full rebuild keeps its frozen end time; freshness is repaired afterward.
+    return (job.syncMode!=='full'&&end>0&&end<now-STALE_SYNC_JOB_SEC)||(updated>0&&updated<now-6*3600);
   }
-  function discardStaleSyncJob(job) {
+  async function discardStaleSyncJob(job) {
     if(!job)return;
-    commitTradeVerifications(job);
-    abandonResumableMarkers(job);
-    restoreFullResyncBackup(job);
+    if(job.fullResetDone)await restoreFullResyncBackup(job);
+    else{commitTradeVerifications(job);abandonResumableMarkers(job);}
     clearSyncJob();
   }
   function syncJobCancelled(job){return !!(state.syncCancel||job?.cancelled);}
@@ -2212,28 +2291,34 @@
     checkpointSyncJob(job,job.progress);return job;
   }
 
-  function resetHistoryForFullResync() {
+  async function resetHistoryForFullResync() {
     const backup={sync:state.sync,syncCache:load('syncCache',null)};
     const historyKeys=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial'];
     for(const key of historyKeys)backup[key]=state[key];
-    localStorage.setItem(NS+'fullResyncBackup',JSON.stringify(backup));
+    try{await saveFullResyncBackup(backup);}catch(error){
+      if(error?.name==='QuotaExceededError'||error?.code===22)throw new AnalyzerError('STORAGE_QUOTA','The recovery copy could not fit in browser storage. Existing history was not changed. Export a backup and free browser storage before retrying.',{source:'storage',phase:'backup'});
+      throw new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','The recovery copy could not be saved. Existing history was not changed. Close other analyzer tabs and retry.',{source:'storage',phase:'backup'});
+    }
     const nextSync={...(state.sync||{}),lastSync:0,coverageFrom:0,coverageTo:0,firstSyncComplete:false,autoDiscoveryComplete:false};
     try{
       for(const key of historyKeys)localStorage.setItem(NS+key,'[]');
       localStorage.removeItem(NS+'syncCache');localStorage.setItem(NS+'sync',JSON.stringify(nextSync));
     }catch(error){
-      try{restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
+      try{await restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
       throw new AnalyzerError('STORAGE_WRITE','The rebuild could not start. Previous history was retained or scheduled for recovery.');
     }
     for(const key of historyKeys)state[key]=[];
     state.sync=nextSync;syncCacheMem=null;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
-  function restoreFullResyncBackup(job) {
+  async function restoreFullResyncBackup(job) {
     if(!job?.fullResetDone)return;
-    const backup=load('fullResyncBackup',null);if(!backup)return;
+    const backup=await readFullResyncBackup();if(!backup)return;
+    if(typeof indexedDB!=='undefined'&&load('fullResyncBackup',null)?.storage!=='indexeddb')await saveFullResyncBackup(backup);
+    // The durable backup remains intact if restoring any of these keys fails.
+    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])localStorage.removeItem(NS+key);
     for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','sync']){localStorage.setItem(NS+key,JSON.stringify(backup[key]));state[key]=backup[key];}
     if(backup.syncCache)localStorage.setItem(NS+'syncCache',JSON.stringify(backup.syncCache));else localStorage.removeItem(NS+'syncCache');
-    localStorage.removeItem(NS+'fullResyncBackup');syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();
+    await clearFullResyncBackup();syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();resolveDiagnostic('REBUILD_RECOVERY');
   }
   async function syncApiGet(path,params={}) {
     let last;
@@ -2242,18 +2327,31 @@
     }
     throw last;
   }
+  async function historyPage(path,params,seen,key='log') {
+    for(let attempt=0;attempt<3;attempt++){
+      const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];
+      try{
+        const next=nextHistoryPage(data,params,rows,cursors,key);
+        if(attempt)reportDiagnostic('PAGE_RETRY','info','A stalled history page recovered after a fresh request. No history was skipped.',{source:key,count:attempt});
+        return {rows,next,seen:cursors};
+      }catch(error){
+        if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code)||attempt===2)throw error;
+        setSyncProgress(`Checking a stalled history page \u00B7 retry ${attempt+2}/3`);await sleep(REQUEST_GAP_MS);
+      }
+    }
+  }
   function advanceResumableLogBatch(job) {
     const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];
   }
   async function runResumableLogPhase(job,mode) {
     const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[],totalBatches=filtered?Math.ceil(ids.length/MAX_LOG_IDS_PER_REQUEST):1;
-    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';}
+    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];}
     while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
       const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
       checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params=job.logPageParams||{limit:100,to:cursor};if(scanPeriod.from>0)params.from=scanPeriod.from;if(filtered)params.log=batchIds.join(',');
-      const data=await syncApiGet('/user/log',params),rows=pageRows(data,'log');
+      const {rows,next,seen}=await historyPage('/user/log',params,job.logPageSeen||[]);
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
@@ -2275,7 +2373,6 @@
       if(!timestamps.length||rows.some(r=>!(Number(r.timestamp)>0)||r.id==null))throw new AnalyzerError('LOG_SCHEMA','History contains invalid timestamps or event IDs.',{source:'User Logs'});
       const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
       job.diagnostics.oldestTimestamp=job.diagnostics.oldestTimestamp?Math.min(job.diagnostics.oldestTimestamp,oldest):oldest;
-      const seen=job.logPageSeen||[],next=nextHistoryPage(data,params,rows,seen);
       if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
       checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
@@ -2288,11 +2385,11 @@
     const verifyFrom=Number(job.logScanPeriod?.from)||0;
     const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
     if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
-    let cursor=verifyTo,page=0;const seen=job.abroadPageSeen||[];
+    let cursor=verifyTo,page=0;
     while(!syncJobCancelled(job)){
       page++;checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
       const params=job.abroadPageParams||{limit:100,log:'4201',from:verifyFrom,to:cursor};
-      const data=await syncApiGet('/user/log',params),rows=pageRows(data,'log');
+      const {rows,next,seen}=await historyPage('/user/log',params,job.abroadPageSeen||[]);
       job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+1;
       job.diagnostics.abroadVerifyRawRows=(Number(job.diagnostics.abroadVerifyRawRows)||0)+rows.length;
       if(!rows.length)break;
@@ -2310,7 +2407,7 @@
         parsedRows.push(...parsed);
       }
       checkpointTransactionRows(job,parsedRows);
-      const next=nextHistoryPage(data,params,rows,seen);if(!next)break;
+      if(!next)break;
       job.abroadPageParams=next;job.abroadPageSeen=seen;cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
     }
     job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
@@ -2325,15 +2422,13 @@
     if(!scanPeriod){job.phase='finalize';checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
     const found=new Map([...Object.values(ensureSyncCache().pendingTrades),...(job.tradeHeaders||[])].map(x=>[Number(x.id),x]));
     let params=job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to};if(scanPeriod.from>0&&!('from'in params))params.from=scanPeriod.from;
-    const seen=job.tradeListSeen||[];
     while(!syncJobCancelled(job)){
       const page=(Number(job.diagnostics.tradeListPages)||0)+1;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
-      const data=await syncApiGet('/user/trades',params),rows=pageRows(data,'trades');job.diagnostics.tradeListPages=page;
+      const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
-      const next=nextHistoryPage(data,params,rows,seen,'trades');
       if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
-      job.tradeListSeen=seen;job.tradeListParams=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
+      job.tradeListSeen=seen;job.tradeListParams=next;params=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
     }
     return false;
   }
@@ -2406,7 +2501,7 @@
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
-    if(job.syncMode==='full'&&!job.fullResetDone){resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'API access confirmed \u00B7 local discovered history cleared \u00B7 starting full rebuild\u2026');}
+    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
@@ -2416,7 +2511,7 @@
     if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
     else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
   }
-  function finishResumableSync(job) {
+  async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
@@ -2428,7 +2523,12 @@
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
-    localStorage.removeItem(NS+'fullResyncBackup');resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
+    if(job.syncMode==='full'){
+      await clearFullResyncBackup();
+      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE',22])resolveDiagnostic(code);
+      for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
+    }
+    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
     const repaired=Number(d.missingLogDays)||0;
     if(!freshCount)setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
@@ -2449,7 +2549,7 @@
     try{
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
-        else if(job.phase==='logs-filtered'){
+      else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
           if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
           else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
@@ -2458,12 +2558,14 @@
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
-        else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());finishResumableSync(job);break;}
+        else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());await finishResumableSync(job);break;}
         else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
       }
       if(syncJobCancelled(job)){
-        job.cancelled=true;commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();setSyncProgress(`Sync stopped \u00B7 verified trade details remain cached \u00B7 partial new rows kept safely.`);
-        restoreFullResyncBackup(job);reportDiagnostic('SYNC_CANCELLED','warning','Sync stopped before coverage was verified. Full rebuilds restore the previous history.',{source:'sync',phase:job.phase});
+        job.cancelled=true;
+        if(job.fullResetDone)await restoreFullResyncBackup(job);else{commitTradeVerifications(job);abandonResumableMarkers(job);}
+        clearSyncJob();setSyncProgress(job.fullResetDone?'Sync stopped \u00B7 previous history restored.':'Sync stopped \u00B7 partial new rows kept safely.');
+        reportDiagnostic('SYNC_CANCELLED','warning','Sync stopped before coverage was verified. Full rebuilds restore the previous history.',{source:'sync',phase:job.phase});
       }
     }catch(e){
       job.lastError=redactText(e?.message||e);job.lastErrorAt=nowSec();diagnosticFromError(e,'sync');reportDiagnostic('SYNC_PAUSED','warning','History verification did not finish. Cached results may be incomplete.',{source:'sync',phase:job.phase});
@@ -2490,10 +2592,12 @@
     while(state.backgroundSyncing&&Date.now()<deadline)await sleep(50);
     if(state.backgroundSyncing){toast('Background sync is still finishing its current API request. Tap Sync again in a moment.');return false;}
     state.syncCancel=false;state.backgroundSyncProgress='';
-    const leftover=loadSyncJob();if(leftover?.background)discardStaleSyncJob(leftover);
+    const leftover=loadSyncJob();if(leftover?.background)await discardStaleSyncJob(leftover);
     return true;
   }
   async function syncAll(options={}) {
+    await historyRecoveryReady;
+    if(historyRecoveryFailed)throw new AnalyzerError('REBUILD_RECOVERY','Restore the recovery copy before syncing. Free browser storage and reload.',{source:'storage'});
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
@@ -2518,23 +2622,23 @@
     if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings \u2192 API Key to sync real history.');}return;}
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
+    if(load('fullResyncBackup',null)&&!job?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     if(background&&job&&!options?.job)return;
-    if(job?.background&&!background&&!options?.job){discardStaleSyncJob(job);job=null;}
-    if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
-    if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}
-    if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}
+    if(job?.background&&!background&&!options?.job){await discardStaleSyncJob(job);job=null;}
+    if(job?.cancelled){await discardStaleSyncJob(job);job=null;}
+    if(job&&!options?.job&&job.syncMode!==requestedMode){await discardStaleSyncJob(job);job=null;}
+    if(job&&!options?.job&&syncJobIsStale(job)){await discardStaleSyncJob(job);job=null;}
     if(!job)job=createResumableSyncJob(requestedMode,background);
     if(background)job.background=true;
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }
-  function resumePendingSync() {
+  async function resumePendingSync() {
     if(resumeBootStarted||state.syncing||state.backgroundSyncing)return;
     const job=loadSyncJob();if(!job)return;
-    if(job.background){discardStaleSyncJob(job);return;}
-    if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}
+    if(job.background||job.cancelled){await discardStaleSyncJob(job);return;}
     // Do not auto-resume checkpoints whose end time is already stale; the next manual Sync starts fresh.
-    if(syncJobIsStale(job)){discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
-    resumeBootStarted=true;syncAll({job,resume:true,mode:job.syncMode||'quick'});
+    if(syncJobIsStale(job)){await discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
+    resumeBootStarted=true;await syncAll({job,resume:true,mode:job.syncMode||'quick'});
   }
   function persistSyncCancellation() {
     const job=loadSyncJob();if(!job)return;job.cancelled=true;job.progress='Stopping after the current API request\u2026';saveSyncJob(job);
@@ -2558,23 +2662,33 @@
 
 
   // Source: bootstrap.js
-  try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
-  if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone){try{restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'storage'});}}
-  repairCashFlowAccountingRows();
-  if(state.transactions.length&&state.sync.accountingVersion!==VERSION){
-    state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
-    save('transactions',state.transactions);
-    reportDiagnostic('PARSER_UPDATED','warning','Cached history was parsed by an older version. Full Resync rechecks historical amounts and trade details.',{source:'migration'});
+  let historyRecoveryFinished=false;
+  async function initializeStoredHistory() {
+    try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
+    if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
+    repairCashFlowAccountingRows();
+    if(state.transactions.length&&state.sync.accountingVersion!==VERSION){
+      state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
+      save('transactions',state.transactions);
+      reportDiagnostic('PARSER_UPDATED','warning','Cached history was parsed by an older version. Full Resync rechecks historical amounts and trade details.',{source:'migration'});
+    }
+    for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
   }
-  for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
+  // Startup recovery and sync must share the same cross-tab write lock.
+  historyRecoveryReady=(typeof navigator!=='undefined'&&navigator.locks?.request?
+    navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
+      if(lock)await initializeStoredHistory();else reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. Startup recovery will not change its history.',{source:'sync'});
+    }):initializeStoredHistory())
+    .catch(()=>{historyRecoveryFailed=true;reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be restored. Free browser storage and reload. Sync is blocked to protect the recovery copy.',{source:'storage'});})
+    .finally(()=>{historyRecoveryFinished=true;});
   window.addEventListener('storage',event=>{if(!event.key?.startsWith(NS)||state.syncing||state.backgroundSyncing)return;for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','financialSnapshots','sync','notices'])state[key]=load(key,state[key]);resetAnalyticsCache();queueAnalyticsRender();});
-  const boot=()=>{if(document.body){mount();resumePendingSync();startBackgroundQuickSync();}else setTimeout(boot,250)}; boot();
-  setInterval(()=>{if(!document.getElementById('tta-fab')||!document.getElementById('tta-root'))mount();},5000);
+  const boot=async()=>{if(document.body){await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
+  setInterval(()=>{if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);
   function injectCss() {
     if (document.getElementById('tta-css')) return;
     const style = document.createElement('style');
     style.id = 'tta-css';
-    style.textContent = "#tta-root,#tta-fab{--tta-bg:#1b2a34;--tta-panel:#233641;--tta-card:#2a3e4a;--tta-soft:#344b58;--tta-line:#ffffff22;--tta-text:#f7fafc;--tta-muted:#cfdae2;--tta-faint:#aebfca;--tta-green:#79dfb3;--tta-red:#ff9da3;--tta-blue:#91cdf7;--tta-yellow:#f0cc78;--tta-shadow:0 12px 30px #08141c35;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif!important;letter-spacing:0;color:var(--tta-text)!important}\n/* Torn's global text rules must not override the analyzer's scoped theme. */\n#tta-root *{box-sizing:border-box;letter-spacing:0;color:inherit!important;font-family:inherit!important;-webkit-text-fill-color:currentColor!important}\n#tta-root{position:fixed;inset:0;z-index:2147482999;display:none;font-size:13px;line-height:1.5;background:#0e1921b8;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}\n#tta-root.show{display:block}\n#tta-root [hidden]{display:none!important}\n#tta-root button,#tta-root input,#tta-root select{font:inherit;color:inherit!important;margin:0;min-width:0}\n#tta-root button{cursor:pointer;touch-action:manipulation;line-height:1.3}\n#tta-root button:disabled{opacity:.5;cursor:default}\n#tta-root button:focus-visible,#tta-root input:focus-visible,#tta-root select:focus-visible,#tta-root summary:focus-visible,#tta-root [role=button]:focus-visible{outline:2px solid var(--tta-blue);outline-offset:3px}\n#tta-root button:hover:not(:disabled){filter:brightness(1.12)}\n#tta-root .tta-shell{height:100%;overflow:auto;overscroll-behavior:contain;padding-bottom:max(32px,env(safe-area-inset-bottom));background:linear-gradient(180deg,#1e303b,#172630)}\n#tta-root .tta-header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:7px;min-height:56px;padding:8px 14px;background:#21333edc;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px)}\n#tta-root .tta-brand{flex:1;min-width:0}\n#tta-root .tta-title{font-size:15px;font-weight:800;line-height:1.3;overflow-wrap:anywhere}\n#tta-root .tta-sub{font-size:11px;color:var(--tta-muted)!important;margin-top:2px;overflow-wrap:anywhere}\n#tta-root .tta-iconbtn,#tta-root .tta-back,#tta-root .tta-pin,#tta-root .tta-hideitem,#tta-root .tta-clearsearch{display:inline-grid;place-items:center;width:40px;height:40px;min-width:40px;flex:0 0 40px;padding:0;border:1px solid var(--tta-line);border-radius:10px;background:#ffffff0e;color:var(--tta-text)!important;font-size:20px}\n#tta-root .tta-workspaces{display:flex;gap:6px;overflow:auto;border-bottom:1px solid var(--tta-line);background:#21333edc;padding:6px 14px}\n#tta-root .tta-workspaces button{flex:0 0 auto;border:1px solid var(--tta-line);border-radius:10px;padding:8px 12px;white-space:nowrap;background:#ffffff0e;color:var(--tta-muted)!important;min-height:36px;font-size:12px;font-weight:650}\n#tta-root .tta-workspaces button[aria-current=page]{background:linear-gradient(135deg,#7fe2b8,#91dcc4);border-color:transparent;color:#123128!important}\n#tta-root .tta-content{max-width:1180px;margin:0 auto;width:100%;padding:16px 20px}\n#tta-root .tta-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;border:1px solid transparent;border-radius:11px;padding:7px 11px;background:linear-gradient(135deg,#7fe2b8,#93cff7);color:#10242d!important;font-size:12px;font-weight:750;white-space:normal;text-align:center;box-shadow:0 7px 18px #0917202f}\n#tta-root .tta-btn.secondary{background:#ffffff0e;border-color:var(--tta-line);color:var(--tta-text)!important;box-shadow:none}\n#tta-root .tta-btn.danger{color:var(--tta-red)!important;border-color:#92505b;background:#361d23}\n#tta-root .tta-quality{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 14px;margin-bottom:12px;border-bottom:1px solid var(--tta-line);color:var(--tta-yellow)!important}\n#tta-root .tta-quality.error{color:var(--tta-red)!important}\n#tta-root .tta-quality.ok{color:var(--tta-muted)!important}\n#tta-root .tta-quality .tta-btn{min-height:32px;font-size:12px;padding:5px 10px}\n#tta-root .tta-period{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}\n#tta-root .tta-period>div{min-width:0}\n#tta-root .tta-period strong{display:block;font-size:16px;overflow-wrap:anywhere}\n#tta-root .tta-period small,#tta-root .tta-periodhint{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-syncactions,#tta-root .tta-settings-actions{display:flex;gap:8px;flex-wrap:wrap}\n#tta-root .tta-chips{display:flex;gap:4px;overflow:auto;padding:4px 0;margin-bottom:12px}\n#tta-root .tta-chip{min-height:34px;padding:7px 11px;background:#ffffff0e;color:var(--tta-muted)!important;border:1px solid var(--tta-line);border-radius:999px;white-space:nowrap;font-size:12px;font-weight:650}\n#tta-root .tta-chip.active{background:linear-gradient(135deg,#7fe2b8,#91dcc4);color:#123128!important;border-color:transparent}\n#tta-root .tta-seg{display:flex;gap:2px;border:1px solid var(--tta-line);border-radius:10px;background:#14252f;padding:2px;width:max-content;max-width:100%}\n#tta-root .tta-seg button{min-height:32px;border:0;background:transparent;color:var(--tta-muted)!important;padding:6px 10px;border-radius:7px;font-size:12px;font-weight:650}\n#tta-root .tta-seg button.active{color:var(--tta-text)!important;background:#ffffff14}\n#tta-root .tta-view-tabs{margin:16px 0}\n#tta-root .tta-summary,#tta-root .tta-cashhero,#tta-root .tta-bento-grid,#tta-root .tta-position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}\n#tta-root .tta-stat,#tta-root .tta-cashcard,#tta-root .tta-bento,#tta-root .tta-ministat{min-width:0;padding:12px;background:linear-gradient(145deg,#ffffff13,#ffffff08);border:1px solid var(--tta-line);border-radius:12px;text-align:center;overflow-wrap:anywhere;box-shadow:var(--tta-shadow),inset 0 1px #ffffff16}\n#tta-root .tta-bento{border-radius:15px;text-align:left}\n#tta-root .tta-bento-hero{background:linear-gradient(135deg,#ffffff19,#6ac19f10 58%,#73bce819)}\n#tta-root .tta-stat label,#tta-root .tta-cashcard small,#tta-root .tta-bento small,#tta-root .tta-ministat small{display:block;color:var(--tta-muted)!important;font-size:11px}\n#tta-root .tta-stat b,#tta-root .tta-cashcard b,#tta-root .tta-bento b,#tta-root .tta-ministat b{display:block;font-size:18px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:4px;overflow-wrap:anywhere}\n#tta-root .tta-stat.main b,#tta-root .tta-consolidated{font-size:26px}\n#tta-root .tta-bento p{color:var(--tta-muted)!important;font-size:12px;margin:8px 0 0}\n#tta-root .tta-equation{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;margin-top:8px}\n#tta-root .pos{color:var(--tta-green)!important}\n#tta-root .neg{color:var(--tta-red)!important}\n#tta-root .tta-transfer{color:var(--tta-blue)!important}\n#tta-root .tta-fin-section,#tta-root .tta-glass-section{padding:14px 0;margin:14px 0;border-top:1px solid var(--tta-line);background:transparent}\n#tta-root .tta-chartcard{padding:12px;margin:12px 0;border:1px solid var(--tta-line);border-radius:15px;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow),inset 0 1px #ffffff10}\n#tta-root .tta-charthead,#tta-root .tta-sectionhead,#tta-root .tta-sectionintro{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0}\n#tta-root h2{font-size:20px;line-height:1.3;margin:0}\n#tta-root h3{font-size:14px;line-height:1.4;margin:0}\n#tta-root .tta-charthead small,#tta-root .tta-sectionhead small,#tta-root .tta-sectionintro small,#tta-root .tta-sectionhint{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-chartinteractive{position:relative;padding-top:62px;min-width:0}\n#tta-root .tta-chartviewport{overflow-x:auto;overflow-y:hidden;max-width:100%;overscroll-behavior-x:contain}\n#tta-root .tta-svg{height:180px;width:100%;display:block}\n#tta-root .tta-chartinteractive.day .tta-svg{width:var(--tta-chart-width,100%);max-width:none}\n#tta-root .tta-axis{font-size:11px;fill:var(--tta-muted)!important;stroke:none}\n#tta-root .tta-grid{stroke:var(--tta-line);stroke-width:.7}\n#tta-root .tta-zero{stroke:var(--tta-muted);stroke-width:1}\n#tta-root .tta-bar-pos{fill:var(--tta-green)}\n#tta-root .tta-bar-neg{fill:var(--tta-red)}\n#tta-root .tta-profitbar{cursor:pointer}\n#tta-root .tta-profitbar:hover,#tta-root .tta-profitbar.active{opacity:.7}\n#tta-root .tta-charttooltip{display:none;position:absolute;top:4px;z-index:3;padding:8px 10px;background:#14252ff2;border:1px solid #ffffff35;border-radius:10px;min-width:150px;max-width:220px;transform:translateX(-50%);pointer-events:none;font-size:12px;box-shadow:var(--tta-shadow)}\n#tta-root .tta-charttooltip.show{display:block}\n#tta-root .tta-charttooltip strong,#tta-root .tta-charttooltip small,#tta-root .tta-charttooltip span{display:block}\n#tta-root .tta-charttooltip strong{font-size:14px}\n#tta-root .tta-cash-chartframe{display:flex;min-width:0}\n#tta-root .tta-cash-axis-wrap{width:56px;flex:0 0 56px}\n#tta-root .tta-cash-axis-svg{height:214px;width:56px}\n#tta-root .tta-cash-chartframe>.tta-chartviewport{flex:1;min-width:0}\n#tta-root .tta-cash-svg{height:214px}\n#tta-root .tta-cashline{fill:none;stroke-width:2;pointer-events:none}\n#tta-root .tta-cashline.in{stroke:var(--tta-green)}\n#tta-root .tta-cashline.out{stroke:var(--tta-red)}\n#tta-root .tta-cashline.net{stroke:var(--tta-blue)}\n#tta-root .tta-cashpoint{fill:transparent;cursor:pointer}\n#tta-root .tta-cashpoint:hover,#tta-root .tta-cashpoint.active{fill:#ffffff0c}\n#tta-root .tta-cashlegend,#tta-root .tta-flowlegend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin:8px 0}\n#tta-root .tta-cashlegend .in,#tta-root .tta-flowlegend .in{color:var(--tta-green)!important}\n#tta-root .tta-cashlegend .out,#tta-root .tta-flowlegend .out{color:var(--tta-red)!important}\n#tta-root .tta-cashlegend .net,#tta-root .tta-flowlegend .transfer{color:var(--tta-blue)!important}\n#tta-root .tta-empty{padding:24px 12px;min-height:100px;display:grid;place-content:center;text-align:center;color:var(--tta-muted)!important}\n#tta-root .tta-listtools,#tta-root .tta-sales-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,.4fr);gap:8px;margin:12px 0}\n#tta-root .tta-history-search,#tta-root .tta-search input,#tta-root .tta-customdates input,#tta-root .tta-ledgerfilters select,#tta-root .tta-keyinputrow input,#tta-root .tta-nw-daypicker input{width:100%;min-height:42px;padding:9px 12px;background:var(--tta-panel);border:1px solid var(--tta-line);border-radius:11px;color:var(--tta-text)!important}\n#tta-root input::placeholder{color:var(--tta-faint)!important;-webkit-text-fill-color:var(--tta-faint)!important;opacity:1!important}\n#tta-root option{background:var(--tta-panel)!important;color:var(--tta-text)!important}\n#tta-root .tta-searchwrap{position:relative;min-width:0}\n#tta-root .tta-searchwrap input{padding-right:44px}\n#tta-root .tta-searchglyph{display:none}\n#tta-root .tta-clearsearch{position:absolute;right:2px;top:2px;border:0;height:38px;width:38px;min-width:38px}\n#tta-root .tta-listmeta,#tta-root .tta-ledgermeta,#tta-root .tta-catalogmeta,#tta-root .tta-morehint{font-size:12px;color:var(--tta-faint)!important;margin:8px 0}\n#tta-root .tta-item{border:1px solid var(--tta-line);border-radius:14px;margin:8px 0;overflow:hidden;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow),inset 0 1px #ffffff10;content-visibility:auto;contain-intrinsic-size:auto 170px}\n#tta-root .tta-item.expanded{content-visibility:visible}\n#tta-root .tta-itemtop{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px;cursor:pointer}\n#tta-root .tta-itemname{font-size:13px;font-weight:750;overflow-wrap:anywhere}\n#tta-root .tta-itemcopy{min-width:0}\n#tta-root .tta-source{font-size:12px;color:var(--tta-muted)!important;margin-top:3px}\n#tta-root .tta-thumbwrap{position:relative;width:48px;height:48px;display:grid;place-items:center;background:#152832;border:1px solid var(--tta-line);border-radius:10px}\n#tta-root .tta-thumb{width:42px;height:42px;object-fit:contain}\n#tta-root .tta-thumbfallback{display:none;position:absolute;inset:0;place-items:center;color:var(--tta-muted)!important}\n#tta-root .tta-itemfacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}\n#tta-root .tta-factpill{font-size:11px;color:var(--tta-faint)!important;padding:3px 7px;border:1px solid var(--tta-line);border-radius:999px;background:#ffffff08}\n#tta-root .tta-factpill.market{color:var(--tta-green)!important;border-color:#79dfb345;background:#79dfb312}\n#tta-root .tta-profitbox{text-align:right;min-width:88px}\n#tta-root .tta-profit{font-size:14px;font-weight:750}\n#tta-root .tta-cardactions{display:flex;justify-content:flex-end;gap:6px;margin-bottom:6px}\n#tta-root .tta-pin,#tta-root .tta-hideitem{width:32px;min-width:32px;height:32px;font-size:16px}\n#tta-root .tta-pin.active{color:var(--tta-yellow)!important}\n#tta-root .tta-chevron{font-size:12px;color:var(--tta-faint)!important}\n#tta-root .tta-metrics,#tta-root .tta-minirow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--tta-line)}\n#tta-root .tta-metrics{gap:1px;background:var(--tta-line)}\n#tta-root .tta-minirow{border:0;margin-bottom:10px}\n#tta-root .tta-minirow .tta-ministat{background:transparent;border:0;box-shadow:none}\n#tta-root .tta-metric{padding:8px 12px;min-width:0;background:var(--tta-panel);text-align:center}\n#tta-root .tta-metric small{display:block;font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-metric b{font-size:14px;overflow-wrap:anywhere}\n#tta-root .tta-accordion{display:none;padding:12px;border-top:1px solid var(--tta-line);background:#172a3480}\n#tta-root .tta-item.expanded .tta-accordion{display:block}\n#tta-root .tta-ministat b{font-size:16px}\n#tta-root .tta-note,#tta-root .tta-snapshot-note,#tta-root .tta-keynote,#tta-root .tta-nw-disclaimer{font-size:12px;line-height:1.6;color:var(--tta-muted)!important;margin-top:12px;overflow-wrap:anywhere}\n#tta-root .tta-banner{border:1px solid #91cdf745;border-left:3px solid var(--tta-blue);border-radius:12px;padding:10px 12px;margin:12px 0;background:linear-gradient(145deg,#91cdf715,#79dfb30b);font-size:13px;overflow-wrap:anywhere}\n#tta-root .tta-status-banner{display:flex;gap:8px}\n#tta-root .tta-status-dot{display:none}\n#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;overflow:auto;overscroll-behavior-x:contain;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}\n#tta-root table{border-collapse:collapse;width:100%;font-size:13px}\n#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left}\n#tta-root table :where(thead,tbody,tfoot,tr,td){background:transparent!important}\n#tta-root th{font-size:12px;color:var(--tta-muted)!important;background:var(--tta-panel)!important}\n#tta-root td small,#tta-root .tta-flowmeta{display:block;font-size:12px;color:var(--tta-faint)!important;margin-top:3px}\n#tta-root td strong,#tta-root .tta-flowtitle{display:block;font-weight:600}\n#tta-root .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}\n#tta-root .tta-flowtable{min-width:620px}\n#tta-root .tta-ledgertable{min-width:1040px}\n#tta-root .tta-ledgertable th button{border:0;background:transparent;font-weight:600;color:inherit!important;padding:0}\n#tta-root .tta-ledgertable th button.active{color:var(--tta-green)!important}\n#tta-root .tta-statuspill,#tta-root .tta-flowbadge{font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-statuspill.sold,#tta-root .tta-flowbadge.in{color:var(--tta-green)!important}\n#tta-root .tta-flowbadge.out{color:var(--tta-red)!important}\n#tta-root .tta-ledgerfilters{display:grid;grid-template-columns:2fr repeat(3,minmax(0,1fr));gap:8px}\n#tta-root .tta-ledgersummary,#tta-root .tta-fin-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}\n#tta-root .tta-ledgermeta{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}\n#tta-root .tta-ledgermore{margin:12px 0}\n#tta-root .tta-customdates,#tta-root .tta-insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}\n#tta-root .tta-fin-row{display:flex;justify-content:space-between;align-items:start;gap:16px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-fin-row span{min-width:0;overflow-wrap:anywhere}\n#tta-root .tta-fin-row b{text-align:right;max-width:55%;overflow-wrap:anywhere;font-weight:600}\n#tta-root .tta-breakrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-breakrow span{overflow-wrap:anywhere}\n#tta-root .tta-analytics-row{margin:14px 0}\n#tta-root .tta-analytics-label{display:flex;justify-content:space-between;gap:12px}\n#tta-root .tta-analytics-row small,#tta-root .tta-allocation-row small{font-size:12px;color:var(--tta-faint)!important}\n#tta-root .tta-analytics-track,#tta-root .tta-goal-track{height:6px;margin:6px 0;background:var(--tta-soft);overflow:hidden;border-radius:2px}\n#tta-root .tta-analytics-track span,#tta-root .tta-goal-track span{display:block;height:100%;background:var(--tta-green)}\n#tta-root .tta-goal-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin:16px 0}\n#tta-root .tta-goal-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}\n#tta-root .tta-goal{border:1px solid var(--tta-line);border-radius:13px;padding:14px;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow)}\n#tta-root .tta-goal-head{display:flex;justify-content:space-between;gap:8px}\n#tta-root .tta-goal-head small,#tta-root .tta-goal>small{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-goal-values{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}\n#tta-root .tta-unmapped,#tta-root .tta-hiddenrow{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-unmapped small{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-nw-chart svg{width:100%;height:180px}\n#tta-root .tta-nw-line{fill:none;stroke:var(--tta-blue);stroke-width:2}\n#tta-root .tta-nw-point{fill:var(--tta-green)}\n#tta-root .tta-nw-chart-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px}\n#tta-root .tta-allocation-row{display:grid;grid-template-columns:minmax(0,1fr) 1fr auto;gap:12px;align-items:center;margin:10px 0}\n#tta-root .tta-allocation-row>div:first-child{display:flex;justify-content:space-between;gap:8px}\n#tta-root .tta-nw-daypicker{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:16px 0}\n#tta-root .tta-nw-daypicker label{display:grid;gap:4px}\n#tta-root .tta-nw-dayrange{flex:1;color:var(--tta-faint)!important;font-size:12px;min-width:180px}\n#tta-root .tta-nw-daily-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}\n#tta-root .tta-nw-delta small,#tta-root .tta-nw-company-delta small,#tta-root .tta-nw-delta span,#tta-root .tta-nw-company-delta span{display:block;color:var(--tta-muted)!important;font-size:12px}\n#tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{display:block;font-size:20px;margin:6px 0;overflow-wrap:anywhere}\n#tta-root .tta-nw-change{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-nw-change-copy strong{display:block;font-size:14px;overflow-wrap:anywhere}\n#tta-root .tta-nw-change-copy small{display:block;color:var(--tta-faint)!important;font-size:12px;margin-top:4px}\n#tta-root .tta-nw-change-value{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}\n#tta-root .tta-help-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:20px 0}\n#tta-root .tta-help-card{border-top:1px solid var(--tta-line);padding-top:16px}\n#tta-root .tta-help-card p,#tta-root .tta-help-intro p{color:var(--tta-muted)!important;line-height:1.7;margin:10px 0}\n#tta-root .tta-help-card .icon{display:none}\n#tta-root .tta-keycard{border-bottom:1px solid var(--tta-line);padding-bottom:20px;margin-bottom:20px}\n#tta-root .tta-keyhead{display:flex;justify-content:space-between;gap:12px;margin:12px 0}\n#tta-root .tta-keystatus{color:var(--tta-muted)!important;font-size:12px}\n#tta-root .tta-keyinputrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px}\n#tta-root .tta-settings label{display:block;font-weight:600;margin:18px 0 6px}\n#tta-root .tta-backup-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}\n#tta-root .tta-diagnostic{border-bottom:1px solid var(--tta-line);padding:12px 0;color:var(--tta-yellow)!important}\n#tta-root .tta-diagnostic.error{color:var(--tta-red)!important}\n#tta-root .tta-diagnostic.info{color:var(--tta-muted)!important}\n#tta-root summary{cursor:pointer;overflow-wrap:anywhere}\n#tta-root .tta-diagnostic code{font-size:12px;color:var(--tta-faint)!important;margin-right:8px}\n#tta-root pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-loading{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:#172630ed;padding:16px}\n#tta-root .tta-loading.show{display:grid}\n#tta-root .tta-loadingcard{max-width:460px;width:100%;border:1px solid var(--tta-line);padding:24px;border-radius:16px;background:linear-gradient(145deg,#2a3e4a,#233641);text-align:center;box-shadow:var(--tta-shadow),inset 0 1px #ffffff16}\n#tta-root .tta-loadingtitle{font-size:20px;font-weight:650;margin:12px 0}\n#tta-root .tta-loadingdetail{color:var(--tta-muted)!important;min-height:50px;overflow-wrap:anywhere}\n#tta-root .tta-loadinghint{font-size:12px;color:var(--tta-faint)!important;margin-top:16px}\n#tta-root .tta-loadingactions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:16px}\n#tta-root .tta-openloader{display:grid;place-items:center;height:100%}\n#tta-root .tta-openloader strong,#tta-root .tta-openloader small{display:block;margin-top:12px}\n#tta-root .tta-spinner,#tta-fab .tta-fabspinner{display:inline-block;width:20px;height:20px;border:2px solid var(--tta-line);border-top-color:var(--tta-green);border-radius:50%;animation:tta-spin 1s linear infinite}\n#tta-root .tta-spinner.xl{width:32px;height:32px}\n#tta-root .tta-toast{display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:30;border:1px solid #ffffff35;background:var(--tta-card);padding:12px 16px;max-width:90%;border-radius:12px;overflow-wrap:anywhere;box-shadow:var(--tta-shadow)}\n#tta-root .tta-toast.show{display:block}\n#tta-root .tta-demo{color:var(--tta-yellow)!important;margin-left:8px;font-size:12px}\n#tta-fab{position:fixed;right:12px;bottom:86px;z-index:2147483000;width:42px;height:42px;min-width:42px;padding:7px;border:1px solid #91cdf75c;border-radius:14px;background:linear-gradient(145deg,#355665e8,#27434fe8 58%,#233b47ed);display:grid;place-items:center;touch-action:none;user-select:none;cursor:grab;box-shadow:0 10px 24px #07151e5c,inset 0 1px #ffffff27;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}\n#tta-fab svg{width:26px;height:26px}\n#tta-fab .tta-fab-panel{fill:#ffffff0b;stroke:#ffffff2f}\n#tta-fab .tta-fab-grid{fill:none;stroke:var(--tta-line);stroke-width:.6}\n#tta-fab .tta-fab-line{fill:none;stroke:var(--tta-green);stroke-width:2}\n#tta-fab .tta-fab-dot,#tta-fab .tta-fab-mark{fill:var(--tta-blue)}\n#tta-fab.dragging{cursor:grabbing}\n#tta-fab.snapping{transition:left .2s ease}\n@keyframes tta-spin{to{transform:rotate(360deg)}}\n@media(max-width:700px){\n  #tta-root .tta-content{padding:14px 12px}\n  #tta-root .tta-header{padding:10px 12px;gap:6px}\n  #tta-root .tta-title{font-size:15px}\n  #tta-root .tta-workspaces{padding:4px 8px}\n  #tta-root .tta-period{align-items:start;flex-direction:column;gap:10px}\n  #tta-root .tta-summary,#tta-root .tta-cashhero,#tta-root .tta-bento-grid{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-stat.main,#tta-root .tta-cashcard.main,#tta-root .tta-bento-hero{grid-column:1/-1}\n  #tta-root .tta-position-grid,#tta-root .tta-insight-grid,#tta-root .tta-nw-daily-metrics,#tta-root .tta-goal-list,#tta-root .tta-help-grid{grid-template-columns:1fr}\n  #tta-root .tta-ledgerfilters,#tta-root .tta-goal-form{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-ledgersearch{grid-column:1/-1}\n  #tta-root .tta-fin-grid,#tta-root .tta-ledgersummary{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-keyinputrow{grid-template-columns:1fr 1fr}\n  #tta-root .tta-keyinputrow input{grid-column:1/-1}\n  #tta-root .tta-stat,#tta-root .tta-bento,#tta-root .tta-cashcard{padding:12px 8px}\n  #tta-root .tta-nw-change{grid-template-columns:24px minmax(0,1fr)}\n  #tta-root .tta-nw-change-value{grid-column:2}\n  #tta-root .tta-allocation-row{grid-template-columns:1fr auto}\n  #tta-root .tta-allocation-row .tta-analytics-track{grid-column:1/-1}\n}\n@media(max-width:420px){\n  #tta-root .tta-listtools,#tta-root .tta-sales-filters{grid-template-columns:1fr}\n  #tta-root .tta-itemtop{grid-template-columns:40px minmax(0,1fr);gap:10px}\n  #tta-root .tta-thumbwrap{width:40px;height:40px}\n  #tta-root .tta-thumb{width:36px;height:36px}\n  #tta-root .tta-profitbox{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:10px;text-align:left}\n  #tta-root .tta-cardactions{margin:0}\n  #tta-root .tta-metrics,#tta-root .tta-minirow{gap:0}\n  #tta-root .tta-ministat{padding:10px 6px}\n  #tta-root .tta-ministat b{font-size:14px}\n  #tta-root .tta-breakrow{grid-template-columns:minmax(0,1fr) auto}\n  #tta-root .tta-breakrow .secondary-value{grid-column:2}\n  #tta-root .tta-charthead{align-items:start}\n  #tta-root .tta-customdates,#tta-root .tta-goal-form,#tta-root .tta-keyinputrow,#tta-root .tta-backup-actions{grid-template-columns:1fr}\n  #tta-root .tta-keyinputrow input{grid-column:auto}\n}\n@media(prefers-reduced-motion:reduce){#tta-root *,#tta-fab{animation-duration:3s!important;transition:none!important}}\n";
+    style.textContent = "#tta-root,#tta-fab{--tta-bg:#1b2a34;--tta-panel:#233641;--tta-card:#2a3e4a;--tta-soft:#344b58;--tta-line:#ffffff22;--tta-text:#f7fafc;--tta-muted:#cfdae2;--tta-faint:#aebfca;--tta-green:#79dfb3;--tta-red:#ff9da3;--tta-blue:#91cdf7;--tta-yellow:#f0cc78;--tta-shadow:0 12px 30px #08141c35;box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,sans-serif!important;letter-spacing:0;color:var(--tta-text)!important}\n/* Torn's global text rules must not override the analyzer's scoped theme. */\n#tta-root *{box-sizing:border-box;letter-spacing:0;color:inherit!important;font-family:inherit!important;-webkit-text-fill-color:currentColor!important}\n#tta-root{position:fixed;inset:0;z-index:2147482999;display:none;font-size:13px;line-height:1.5;background:#0e1921b8;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}\n#tta-root.show{display:block}\n#tta-root [hidden]{display:none!important}\n#tta-root button,#tta-root input,#tta-root select{font:inherit;color:inherit!important;margin:0;min-width:0}\n#tta-root button{cursor:pointer;touch-action:manipulation;line-height:1.3}\n#tta-root button:disabled{opacity:.5;cursor:default}\n#tta-root button:focus-visible,#tta-root input:focus-visible,#tta-root select:focus-visible,#tta-root summary:focus-visible,#tta-root [role=button]:focus-visible{outline:2px solid var(--tta-blue);outline-offset:3px}\n#tta-root button:hover:not(:disabled){filter:brightness(1.12)}\n#tta-root .tta-shell{height:100%;overflow:auto;overscroll-behavior:contain;padding-bottom:max(32px,env(safe-area-inset-bottom));background:linear-gradient(180deg,#1e303b,#172630)}\n#tta-root .tta-header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:7px;min-height:56px;padding:8px 14px;background:#21333edc;border-bottom:1px solid var(--tta-line);backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px)}\n#tta-root .tta-brand{flex:1;min-width:0}\n#tta-root .tta-title{font-size:15px;font-weight:800;line-height:1.3;overflow-wrap:anywhere}\n#tta-root .tta-sub{font-size:11px;color:var(--tta-muted)!important;margin-top:2px;overflow-wrap:anywhere}\n#tta-root .tta-iconbtn,#tta-root .tta-back,#tta-root .tta-pin,#tta-root .tta-hideitem,#tta-root .tta-clearsearch{display:inline-grid;place-items:center;width:40px;height:40px;min-width:40px;flex:0 0 40px;padding:0;border:1px solid var(--tta-line);border-radius:10px;background:#ffffff0e;color:var(--tta-text)!important;font-size:20px}\n#tta-root .tta-workspaces{display:flex;gap:6px;overflow:auto;border-bottom:1px solid var(--tta-line);background:#21333edc;padding:6px 14px}\n#tta-root .tta-workspaces button{flex:0 0 auto;border:1px solid var(--tta-line);border-radius:10px;padding:8px 12px;white-space:nowrap;background:#ffffff0e;color:var(--tta-muted)!important;min-height:36px;font-size:12px;font-weight:650}\n#tta-root .tta-workspaces button[aria-current=page]{background:linear-gradient(135deg,#7fe2b8,#91dcc4);border-color:transparent;color:#123128!important}\n#tta-root .tta-content{max-width:1180px;margin:0 auto;width:100%;padding:16px 20px}\n#tta-root .tta-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;border:1px solid transparent;border-radius:11px;padding:7px 11px;background:linear-gradient(135deg,#7fe2b8,#93cff7);color:#10242d!important;font-size:12px;font-weight:750;white-space:normal;text-align:center;box-shadow:0 7px 18px #0917202f}\n#tta-root .tta-btn.secondary{background:#ffffff0e;border-color:var(--tta-line);color:var(--tta-text)!important;box-shadow:none}\n#tta-root .tta-btn.danger{color:var(--tta-red)!important;border-color:#92505b;background:#361d23}\n#tta-root .tta-quality{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 14px;margin-bottom:12px;border-bottom:1px solid var(--tta-line);color:var(--tta-yellow)!important}\n#tta-root .tta-quality.error{color:var(--tta-red)!important}\n#tta-root .tta-quality.ok{color:var(--tta-muted)!important}\n#tta-root .tta-quality .tta-btn{min-height:32px;font-size:12px;padding:5px 10px}\n#tta-root .tta-period{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}\n#tta-root .tta-period>div{min-width:0}\n#tta-root .tta-period strong{display:block;font-size:16px;overflow-wrap:anywhere}\n#tta-root .tta-period small,#tta-root .tta-periodhint{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-syncactions,#tta-root .tta-settings-actions{display:flex;gap:8px;flex-wrap:wrap}\n#tta-root .tta-chips{display:flex;gap:4px;overflow:auto;padding:4px 0;margin-bottom:12px}\n#tta-root .tta-chip{min-height:34px;padding:7px 11px;background:#ffffff0e;color:var(--tta-muted)!important;border:1px solid var(--tta-line);border-radius:999px;white-space:nowrap;font-size:12px;font-weight:650}\n#tta-root .tta-chip.active{background:linear-gradient(135deg,#7fe2b8,#91dcc4);color:#123128!important;border-color:transparent}\n#tta-root .tta-seg{display:flex;gap:2px;border:1px solid var(--tta-line);border-radius:10px;background:#14252f;padding:2px;width:max-content;max-width:100%}\n#tta-root .tta-seg button{min-height:32px;border:0;background:transparent;color:var(--tta-muted)!important;padding:6px 10px;border-radius:7px;font-size:12px;font-weight:650}\n#tta-root .tta-seg button.active{color:var(--tta-text)!important;background:#ffffff14}\n#tta-root .tta-view-tabs{margin:16px 0}\n#tta-root .tta-summary,#tta-root .tta-cashhero,#tta-root .tta-bento-grid,#tta-root .tta-position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}\n#tta-root .tta-stat,#tta-root .tta-cashcard,#tta-root .tta-bento,#tta-root .tta-ministat{min-width:0;padding:12px;background:linear-gradient(145deg,#ffffff13,#ffffff08);border:1px solid var(--tta-line);border-radius:12px;text-align:center;overflow-wrap:anywhere;box-shadow:var(--tta-shadow),inset 0 1px #ffffff16}\n#tta-root .tta-bento{border-radius:15px;text-align:left}\n#tta-root .tta-bento-hero{background:linear-gradient(135deg,#ffffff19,#6ac19f10 58%,#73bce819)}\n#tta-root .tta-stat label,#tta-root .tta-cashcard small,#tta-root .tta-bento small,#tta-root .tta-ministat small{display:block;color:var(--tta-muted)!important;font-size:11px}\n#tta-root .tta-stat b,#tta-root .tta-cashcard b,#tta-root .tta-bento b,#tta-root .tta-ministat b{display:block;font-size:18px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:4px;overflow-wrap:anywhere}\n#tta-root .tta-stat.main b,#tta-root .tta-consolidated{font-size:26px}\n#tta-root .tta-bento p{color:var(--tta-muted)!important;font-size:12px;margin:8px 0 0}\n#tta-root .tta-equation{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;margin-top:8px}\n#tta-root .pos{color:var(--tta-green)!important}\n#tta-root .neg{color:var(--tta-red)!important}\n#tta-root .tta-transfer{color:var(--tta-blue)!important}\n#tta-root .tta-fin-section,#tta-root .tta-glass-section{padding:14px 0;margin:14px 0;border-top:1px solid var(--tta-line);background:transparent}\n#tta-root .tta-chartcard{padding:12px;margin:12px 0;border:1px solid var(--tta-line);border-radius:15px;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow),inset 0 1px #ffffff10}\n#tta-root .tta-charthead,#tta-root .tta-sectionhead,#tta-root .tta-sectionintro{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0}\n#tta-root h2{font-size:20px;line-height:1.3;margin:0}\n#tta-root h3{font-size:14px;line-height:1.4;margin:0}\n#tta-root .tta-charthead small,#tta-root .tta-sectionhead small,#tta-root .tta-sectionintro small,#tta-root .tta-sectionhint{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-chartinteractive{position:relative;padding-top:62px;min-width:0}\n#tta-root .tta-chartviewport{overflow-x:auto;overflow-y:hidden;max-width:100%;overscroll-behavior-x:contain}\n#tta-root .tta-svg{height:180px;width:100%;display:block}\n#tta-root .tta-chartinteractive.day .tta-svg{width:var(--tta-chart-width,100%);max-width:none}\n#tta-root .tta-axis{font-size:11px;fill:var(--tta-muted)!important;stroke:none}\n#tta-root .tta-grid{stroke:var(--tta-line);stroke-width:.7}\n#tta-root .tta-zero{stroke:var(--tta-muted);stroke-width:1}\n#tta-root .tta-bar-pos{fill:var(--tta-green)}\n#tta-root .tta-bar-neg{fill:var(--tta-red)}\n#tta-root .tta-profitbar{cursor:pointer}\n#tta-root .tta-profitbar:hover,#tta-root .tta-profitbar.active{opacity:.7}\n#tta-root .tta-charttooltip{display:none;position:absolute;top:4px;z-index:3;padding:8px 10px;background:#14252ff2;border:1px solid #ffffff35;border-radius:10px;min-width:150px;max-width:220px;transform:translateX(-50%);pointer-events:none;font-size:12px;box-shadow:var(--tta-shadow)}\n#tta-root .tta-charttooltip.show{display:block}\n#tta-root .tta-charttooltip strong,#tta-root .tta-charttooltip small,#tta-root .tta-charttooltip span{display:block}\n#tta-root .tta-charttooltip strong{font-size:14px}\n#tta-root .tta-cash-chartframe{display:flex;min-width:0}\n#tta-root .tta-cash-axis-wrap{width:56px;flex:0 0 56px}\n#tta-root .tta-cash-axis-svg{height:214px;width:56px}\n#tta-root .tta-cash-chartframe>.tta-chartviewport{flex:1;min-width:0}\n#tta-root .tta-cash-svg{height:214px}\n#tta-root .tta-cashline{fill:none;stroke-width:2;pointer-events:none}\n#tta-root .tta-cashline.in{stroke:var(--tta-green)}\n#tta-root .tta-cashline.out{stroke:var(--tta-red)}\n#tta-root .tta-cashline.net{stroke:var(--tta-blue)}\n#tta-root .tta-cashpoint{fill:transparent;cursor:pointer}\n#tta-root .tta-cashpoint:hover,#tta-root .tta-cashpoint.active{fill:#ffffff0c}\n#tta-root .tta-cashlegend,#tta-root .tta-flowlegend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin:8px 0}\n#tta-root .tta-cashlegend .in,#tta-root .tta-flowlegend .in{color:var(--tta-green)!important}\n#tta-root .tta-cashlegend .out,#tta-root .tta-flowlegend .out{color:var(--tta-red)!important}\n#tta-root .tta-cashlegend .net,#tta-root .tta-flowlegend .transfer{color:var(--tta-blue)!important}\n#tta-root .tta-empty{padding:24px 12px;min-height:100px;display:grid;place-content:center;text-align:center;color:var(--tta-muted)!important}\n#tta-root .tta-listtools,#tta-root .tta-sales-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,.4fr);gap:8px;margin:12px 0}\n#tta-root .tta-history-search,#tta-root .tta-search input,#tta-root .tta-customdates input,#tta-root .tta-ledgerfilters select,#tta-root .tta-keyinputrow input,#tta-root .tta-nw-daypicker input{width:100%;min-height:42px;padding:9px 12px;background:var(--tta-panel);border:1px solid var(--tta-line);border-radius:11px;color:var(--tta-text)!important}\n#tta-root input::placeholder{color:var(--tta-faint)!important;-webkit-text-fill-color:var(--tta-faint)!important;opacity:1!important}\n#tta-root option{background:var(--tta-panel)!important;color:var(--tta-text)!important}\n#tta-root .tta-searchwrap{position:relative;min-width:0}\n#tta-root .tta-searchwrap input{padding-right:44px}\n#tta-root .tta-searchglyph{display:none}\n#tta-root .tta-clearsearch{position:absolute;right:2px;top:2px;border:0;height:38px;width:38px;min-width:38px}\n#tta-root .tta-listmeta,#tta-root .tta-ledgermeta,#tta-root .tta-catalogmeta,#tta-root .tta-morehint{font-size:12px;color:var(--tta-faint)!important;margin:8px 0}\n#tta-root .tta-item{border:1px solid var(--tta-line);border-radius:14px;margin:8px 0;overflow:hidden;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow),inset 0 1px #ffffff10;content-visibility:auto;contain-intrinsic-size:auto 170px}\n#tta-root .tta-item.expanded{content-visibility:visible}\n#tta-root .tta-itemtop{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px;cursor:pointer}\n#tta-root .tta-itemname{font-size:13px;font-weight:750;overflow-wrap:anywhere}\n#tta-root .tta-itemcopy{min-width:0}\n#tta-root .tta-source{font-size:12px;color:var(--tta-muted)!important;margin-top:3px}\n#tta-root .tta-thumbwrap{position:relative;width:48px;height:48px;display:grid;place-items:center;background:#152832;border:1px solid var(--tta-line);border-radius:10px}\n#tta-root .tta-thumb{width:42px;height:42px;object-fit:contain}\n#tta-root .tta-thumbfallback{display:none;position:absolute;inset:0;place-items:center;color:var(--tta-muted)!important}\n#tta-root .tta-itemfacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}\n#tta-root .tta-factpill{font-size:11px;color:var(--tta-faint)!important;padding:3px 7px;border:1px solid var(--tta-line);border-radius:999px;background:#ffffff08}\n#tta-root .tta-factpill.market{color:var(--tta-green)!important;border-color:#79dfb345;background:#79dfb312}\n#tta-root .tta-profitbox{text-align:right;min-width:88px}\n#tta-root .tta-profit{font-size:14px;font-weight:750}\n#tta-root .tta-cardactions{display:flex;justify-content:flex-end;gap:6px;margin-bottom:6px}\n#tta-root .tta-pin,#tta-root .tta-hideitem{width:32px;min-width:32px;height:32px;font-size:16px}\n#tta-root .tta-pin.active{color:var(--tta-yellow)!important}\n#tta-root .tta-chevron{font-size:12px;color:var(--tta-faint)!important}\n#tta-root .tta-metrics,#tta-root .tta-minirow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--tta-line)}\n#tta-root .tta-metrics{gap:1px;background:var(--tta-line)}\n#tta-root .tta-minirow{border:0;margin-bottom:10px}\n#tta-root .tta-minirow .tta-ministat{background:transparent;border:0;box-shadow:none}\n#tta-root .tta-metric{padding:8px 12px;min-width:0;background:var(--tta-panel);text-align:center}\n#tta-root .tta-metric small{display:block;font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-metric b{font-size:14px;overflow-wrap:anywhere}\n#tta-root .tta-accordion{display:none;padding:12px;border-top:1px solid var(--tta-line);background:#172a3480}\n#tta-root .tta-item.expanded .tta-accordion{display:block}\n#tta-root .tta-ministat b{font-size:16px}\n#tta-root .tta-note,#tta-root .tta-snapshot-note,#tta-root .tta-keynote,#tta-root .tta-nw-disclaimer{font-size:12px;line-height:1.6;color:var(--tta-muted)!important;margin-top:12px;overflow-wrap:anywhere}\n#tta-root .tta-banner{border:1px solid #91cdf745;border-left:3px solid var(--tta-blue);border-radius:12px;padding:10px 12px;margin:12px 0;background:linear-gradient(145deg,#91cdf715,#79dfb30b);font-size:13px;overflow-wrap:anywhere}\n#tta-root .tta-status-banner{display:flex;gap:8px}\n#tta-root .tta-status-dot{display:none}\n#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;overflow:auto;overscroll-behavior-x:contain;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}\n#tta-root table{border-collapse:collapse;width:100%;font-size:13px}\n#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left}\n#tta-root table :where(thead,tbody,tfoot,tr,td){background:transparent!important}\n#tta-root th{font-size:12px;color:var(--tta-muted)!important;background:var(--tta-panel)!important}\n#tta-root td small,#tta-root .tta-flowmeta{display:block;font-size:12px;color:var(--tta-faint)!important;margin-top:3px}\n#tta-root td strong,#tta-root .tta-flowtitle{display:block;font-weight:600}\n#tta-root .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}\n#tta-root .tta-flowtable{min-width:620px}\n#tta-root .tta-ledgertable{min-width:1040px}\n#tta-root .tta-ledgertable th button{border:0;background:transparent;font-weight:600;color:inherit!important;padding:0}\n#tta-root .tta-ledgertable th button.active{color:var(--tta-green)!important}\n#tta-root .tta-statuspill,#tta-root .tta-flowbadge{font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-statuspill.sold,#tta-root .tta-flowbadge.in{color:var(--tta-green)!important}\n#tta-root .tta-flowbadge.out{color:var(--tta-red)!important}\n#tta-root .tta-ledgerfilters{display:grid;grid-template-columns:2fr repeat(3,minmax(0,1fr));gap:8px}\n#tta-root .tta-ledgersummary,#tta-root .tta-fin-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}\n#tta-root .tta-ledgermeta{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}\n#tta-root .tta-ledgermore{margin:12px 0}\n#tta-root .tta-customdates,#tta-root .tta-insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}\n#tta-root .tta-fin-row{display:flex;justify-content:space-between;align-items:start;gap:16px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-fin-row span{min-width:0;overflow-wrap:anywhere}\n#tta-root .tta-fin-row b{text-align:right;max-width:55%;overflow-wrap:anywhere;font-weight:600}\n#tta-root .tta-breakrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-breakrow span{overflow-wrap:anywhere}\n#tta-root .tta-analytics-row{margin:14px 0}\n#tta-root .tta-analytics-label{display:flex;justify-content:space-between;gap:12px}\n#tta-root .tta-analytics-row small,#tta-root .tta-allocation-row small{font-size:12px;color:var(--tta-faint)!important}\n#tta-root .tta-analytics-track,#tta-root .tta-goal-track{height:6px;margin:6px 0;background:var(--tta-soft);overflow:hidden;border-radius:2px}\n#tta-root .tta-analytics-track span,#tta-root .tta-goal-track span{display:block;height:100%;background:var(--tta-green)}\n#tta-root .tta-goal-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin:16px 0}\n#tta-root .tta-goal-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}\n#tta-root .tta-goal{border:1px solid var(--tta-line);border-radius:13px;padding:14px;background:linear-gradient(145deg,#ffffff10,#ffffff07);box-shadow:var(--tta-shadow)}\n#tta-root .tta-goal-head{display:flex;justify-content:space-between;gap:8px}\n#tta-root .tta-goal-head small,#tta-root .tta-goal>small{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-goal-values{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}\n#tta-root .tta-unmapped,#tta-root .tta-hiddenrow{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-unmapped small{display:block;color:var(--tta-faint)!important;font-size:12px}\n#tta-root .tta-nw-chart svg{width:100%;height:180px}\n#tta-root .tta-nw-line{fill:none;stroke:var(--tta-blue);stroke-width:2}\n#tta-root .tta-nw-point{fill:var(--tta-green)}\n#tta-root .tta-nw-chart-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px}\n#tta-root .tta-allocation-row{display:grid;grid-template-columns:minmax(0,1fr) 1fr auto;gap:12px;align-items:center;margin:10px 0}\n#tta-root .tta-allocation-row>div:first-child{display:flex;justify-content:space-between;gap:8px}\n#tta-root .tta-nw-daypicker{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:16px 0}\n#tta-root .tta-nw-daypicker label{display:grid;gap:4px}\n#tta-root .tta-nw-dayrange{flex:1;color:var(--tta-faint)!important;font-size:12px;min-width:180px}\n#tta-root .tta-nw-daily-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}\n#tta-root .tta-nw-delta small,#tta-root .tta-nw-company-delta small,#tta-root .tta-nw-delta span,#tta-root .tta-nw-company-delta span{display:block;color:var(--tta-muted)!important;font-size:12px}\n#tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{display:block;font-size:20px;margin:6px 0;overflow-wrap:anywhere}\n#tta-root .tta-nw-change{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--tta-line)}\n#tta-root .tta-nw-change-copy strong{display:block;font-size:14px;overflow-wrap:anywhere}\n#tta-root .tta-nw-change-copy small{display:block;color:var(--tta-faint)!important;font-size:12px;margin-top:4px}\n#tta-root .tta-nw-change-value{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}\n#tta-root .tta-help-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:20px 0}\n#tta-root .tta-help-card{border-top:1px solid var(--tta-line);padding-top:16px}\n#tta-root .tta-help-card p,#tta-root .tta-help-intro p{color:var(--tta-muted)!important;line-height:1.7;margin:10px 0}\n#tta-root .tta-help-card .icon{display:none}\n#tta-root .tta-keycard{border-bottom:1px solid var(--tta-line);padding-bottom:20px;margin-bottom:20px}\n#tta-root .tta-keyhead{display:flex;justify-content:space-between;gap:12px;margin:12px 0}\n#tta-root .tta-keystatus{color:var(--tta-muted)!important;font-size:12px}\n#tta-root .tta-keyinputrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px}\n#tta-root .tta-settings label{display:block;font-weight:600;margin:18px 0 6px}\n#tta-root .tta-backup-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}\n#tta-root .tta-diagnostic{border-bottom:1px solid var(--tta-line);padding:12px 0;color:var(--tta-yellow)!important}\n#tta-root .tta-diagnostic.error{color:var(--tta-red)!important}\n#tta-root .tta-diagnostic.info{color:var(--tta-muted)!important}\n#tta-root summary{cursor:pointer;overflow-wrap:anywhere}\n#tta-root .tta-diagnostic code{font-size:12px;color:var(--tta-faint)!important;margin-right:8px}\n#tta-root pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tta-muted)!important}\n#tta-root .tta-loading{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:#172630ed;padding:16px}\n#tta-root .tta-loading.show{display:grid}\n#tta-root .tta-loadingcard{max-width:460px;width:100%;border:1px solid var(--tta-line);padding:24px;border-radius:16px;background:linear-gradient(145deg,#2a3e4a,#233641);text-align:center;box-shadow:var(--tta-shadow),inset 0 1px #ffffff16}\n#tta-root .tta-loadingtitle{font-size:20px;font-weight:650;margin:12px 0}\n#tta-root .tta-loadingdetail{color:var(--tta-muted)!important;min-height:50px;overflow-wrap:anywhere}\n#tta-root .tta-loadinghint{font-size:12px;color:var(--tta-faint)!important;margin-top:16px}\n#tta-root .tta-loadingactions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:16px}\n#tta-root .tta-openloader{display:grid;place-items:center;height:100%}\n#tta-root .tta-openloader strong,#tta-root .tta-openloader small{display:block;margin-top:12px}\n#tta-root .tta-spinner,#tta-fab .tta-fabspinner{display:inline-block;width:20px;height:20px;border:2px solid var(--tta-line);border-top-color:var(--tta-green);border-radius:50%;animation:tta-spin 1s linear infinite}\n#tta-root .tta-spinner.xl{width:32px;height:32px}\n#tta-root .tta-toast{display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:30;border:1px solid #ffffff35;background:var(--tta-card);padding:12px 16px;max-width:90%;border-radius:12px;overflow-wrap:anywhere;box-shadow:var(--tta-shadow)}\n#tta-root .tta-toast.show{display:block}\n#tta-root .tta-demo{color:var(--tta-yellow)!important;margin-left:8px;font-size:12px}\n#tta-fab{position:fixed;right:12px;bottom:86px;z-index:2147483000;width:42px;height:42px;min-width:42px;padding:7px;border:1px solid #91cdf75c;border-radius:14px;background:linear-gradient(145deg,#355665e8,#27434fe8 58%,#233b47ed);display:grid;place-items:center;touch-action:none;user-select:none;cursor:grab;box-shadow:0 10px 24px #07151e5c,inset 0 1px #ffffff27;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}\n#tta-fab svg{width:26px;height:26px}\n#tta-fab .tta-fab-panel{fill:#ffffff0b;stroke:#ffffff2f}\n#tta-fab .tta-fab-grid{fill:none;stroke:var(--tta-line);stroke-width:.6}\n#tta-fab .tta-fab-line{fill:none;stroke:var(--tta-green);stroke-width:2}\n#tta-fab .tta-fab-dot,#tta-fab .tta-fab-mark{fill:var(--tta-blue)}\n#tta-fab.dragging{cursor:grabbing}\n#tta-fab.snapping{transition:left .2s ease}\n@keyframes tta-spin{to{transform:rotate(360deg)}}\n@media(max-width:700px){\n  #tta-root .tta-content{padding:14px 12px}\n  #tta-root .tta-header{padding:10px 12px;gap:6px}\n  #tta-root .tta-title{font-size:15px}\n  #tta-root .tta-workspaces{padding:4px 8px}\n  #tta-root .tta-period{align-items:start;flex-direction:column;gap:10px}\n  #tta-root .tta-summary,#tta-root .tta-cashhero,#tta-root .tta-bento-grid{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-stat.main,#tta-root .tta-cashcard.main,#tta-root .tta-bento-hero{grid-column:1/-1}\n  #tta-root .tta-position-grid,#tta-root .tta-insight-grid,#tta-root .tta-nw-daily-metrics,#tta-root .tta-goal-list,#tta-root .tta-help-grid{grid-template-columns:1fr}\n  #tta-root .tta-ledgerfilters,#tta-root .tta-goal-form{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-ledgersearch{grid-column:1/-1}\n  #tta-root .tta-fin-grid,#tta-root .tta-ledgersummary{grid-template-columns:repeat(2,minmax(0,1fr))}\n  #tta-root .tta-keyinputrow{grid-template-columns:1fr 1fr}\n  #tta-root .tta-keyinputrow input{grid-column:1/-1}\n  #tta-root .tta-stat,#tta-root .tta-bento,#tta-root .tta-cashcard{padding:12px 8px}\n  #tta-root .tta-nw-change{grid-template-columns:24px minmax(0,1fr)}\n  #tta-root .tta-nw-change-value{grid-column:2}\n  #tta-root .tta-allocation-row{grid-template-columns:1fr auto}\n  #tta-root .tta-allocation-row .tta-analytics-track{grid-column:1/-1}\n}\n@media(max-width:420px){\n  #tta-root .tta-listtools,#tta-root .tta-sales-filters{grid-template-columns:1fr}\n  #tta-root .tta-itemtop{grid-template-columns:40px minmax(0,1fr);gap:10px}\n  #tta-root .tta-thumbwrap{width:40px;height:40px}\n  #tta-root .tta-thumb{width:36px;height:36px}\n  #tta-root .tta-profitbox{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:10px;text-align:left}\n  #tta-root .tta-cardactions{margin:0}\n  #tta-root .tta-metrics,#tta-root .tta-minirow{gap:0}\n  #tta-root .tta-ministat{padding:10px 6px}\n  #tta-root .tta-ministat b{font-size:14px}\n  #tta-root .tta-breakrow{grid-template-columns:minmax(0,1fr) auto}\n  #tta-root .tta-breakrow .secondary-value{grid-column:2}\n  #tta-root .tta-charthead{align-items:start}\n  #tta-root .tta-customdates,#tta-root .tta-goal-form,#tta-root .tta-keyinputrow,#tta-root .tta-backup-actions{grid-template-columns:1fr}\n  #tta-root .tta-keyinputrow input{grid-column:auto}\n}\n@media(prefers-reduced-motion:reduce){#tta-root *,#tta-fab{animation-duration:3s!important;transition:none!important}}\n/* Keep navigation responsive while a cached view is being prepared. */\n#tta-root .tta-transition{position:absolute;inset:var(--tta-transition-top,106px) 0 0;z-index:12;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;background:var(--tta-bg);color:var(--tta-text)!important;pointer-events:none;font-size:14px;text-align:center}\n#tta-root .tta-transition[hidden]{display:none!important}\n#tta-root .tta-transition .tta-spinner{flex-shrink:0;width:28px;height:28px}\n";
     document.head.appendChild(style);
   }
 
