@@ -1,0 +1,1 @@
+Verify the public Worker is serving v0.3.8 trade pagination recovery.
