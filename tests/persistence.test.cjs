@@ -26,11 +26,11 @@ test('manually tracked items survive before their first history row',()=>{
 test('CSV formula-like text is inert while numbers remain numeric',()=>{
   const {app}=harness();assert.equal(app.csvCell('=danger()'),"'=danger()");assert.equal(app.csvCell('-danger'),"'-danger");assert.equal(app.csvCell(-20),'-20');
 });
-test('failed full-history reset rolls back before changing visible state',()=>{
-  const {app,context,storage}=harness({stored:{transactions:[row],sync:{lastSync:200}}});const write=context.localStorage.setItem;let failed=false;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:cashFlows'&&!failed){failed=true;throw new Error('Storage full');}write(key,value);};assert.throws(()=>app.resetHistoryForFullResync(),/could not start/);assert.equal(app.state.transactions[0].qty,5);assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(app.state.sync.lastSync,200);
+test('failed full-history reset rolls back before changing visible state',async()=>{
+  const {app,context,storage}=harness({stored:{transactions:[row],sync:{lastSync:200}}});const write=context.localStorage.setItem;let failed=false;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:cashFlows'&&!failed){failed=true;throw new Error('Storage full');}write(key,value);};await assert.rejects(app.resetHistoryForFullResync(),/could not start/);assert.equal(app.state.transactions[0].qty,5);assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(app.state.sync.lastSync,200);
 });
-test('failed final sync persistence cannot advance in-memory success watermark',()=>{
-  const {app,context}=harness({stored:{transactions:[row],sync:{lastSync:200}}});const write=context.localStorage.setItem;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:sync')throw new Error('Storage full');write(key,value);};assert.throws(()=>app.finishResumableSync({id:'failure',completedSources:{log:true,trade:true},period:{from:0,to:300},tctNow:300,diagnostics:{}}),/could not be saved/);assert.equal(app.state.sync.lastSync,200);
+test('failed final sync persistence cannot advance in-memory success watermark',async()=>{
+  const {app,context}=harness({stored:{transactions:[row],sync:{lastSync:200}}});const write=context.localStorage.setItem;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:sync')throw new Error('Storage full');write(key,value);};await assert.rejects(app.finishResumableSync({id:'failure',completedSources:{log:true,trade:true},period:{from:0,to:300},tctNow:300,diagnostics:{}}),/could not be saved/);assert.equal(app.state.sync.lastSync,200);
 });
 test('standalone snapshot refresh rejects an injected/saved key for another account',async()=>{
   const {app,calls}=harness({stored:{apiKey:'fixture0123456789',sync:{accountId:1}},responses:{'/key/info':{info:{access:{level:4},user:{id:2}}}}});await assert.rejects(app.refreshFinancialSnapshot(),/different account/);assert.equal(calls.some(url=>url.pathname==='/v2/user/networth'),false);
@@ -43,4 +43,13 @@ test('corrected log projections remove obsolete generic cash rows',()=>{
 });
 test('same-second FIFO ordering remains deterministic and is explicitly marked inferred',()=>{
   const {app}=harness();const result=app.computeFifo([row,{...row,id:'sale',side:'sell',qty:2,total:80}],item);assert.equal(result.orderingInferred,true);assert.equal(app.computeFifo([{...row,nanostamp:'100000000001'},{...row,id:'sale',side:'sell',qty:2,total:80,nanostamp:'100000000002'}],item).orderingInferred,false);
+});
+test('backup quota failures leave existing history untouched with an actionable error',async()=>{
+  const {app,context,storage}=harness({stored:{transactions:[row],sync:{lastSync:200}}});const write=context.localStorage.setItem;
+  context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:fullResyncBackup')throw {code:22,name:'QuotaExceededError'};write(key,value);};
+  await assert.rejects(app.resetHistoryForFullResync(),e=>e.code==='STORAGE_QUOTA');assert.equal(app.state.sync.lastSync,200);assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);
+});
+test('cancelled full rebuild checkpoints restore before they are discarded',async()=>{
+  const {app,storage}=harness({stored:{transactions:[row],sync:{lastSync:200}}});await app.resetHistoryForFullResync();
+  app.state.transactions=[{...row,id:'partial',qty:9}];await app.discardStaleSyncJob({id:'cancelled',fullResetDone:true,cancelled:true});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,200);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
 });

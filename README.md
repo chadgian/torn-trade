@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.2.** The classic blue-green glass theme is retained, with foreground colors isolated from Torn's page styles to keep category/event text, controls, and charts readable. Rebuilt accounting, sync, diagnostics, and update/download metadata are preserved.
+**Source version: 0.3.3.** The classic blue-green glass theme and readable text are retained. Page and filter transitions show loading status; full rebuild recovery copies use IndexedDB where available to avoid duplicating history in localStorage. Precise log cursors, trade-list continuation, bounded stalled-page retries and failed-attempt diagnostics improve resync reliability without claiming incomplete coverage is complete.
 
 ## Features
 
@@ -43,6 +43,8 @@ Single-item cash trades use actual cash. Multi-item/mixed trades retain the prev
 - Recent/modified trades are reverified. Incomplete details remain pending after leaving the recent scan window.
 - Exact Torn links/nanostamps are retained. Missing/repeated cursors cannot silently establish complete coverage.
 - Full Resync loads all API-available history. Previous history is recoverable on cancellation; older parsed caches remain flagged until a successful full rebuild.
+- Rebuilds commit a recovery copy before clearing history. IndexedDB avoids the old double-history localStorage quota failure; browsers without it retain the legacy backup path and refuse to clear history when the backup cannot fit. Long rebuilds retain their frozen scan endpoint across reloads; Quick Sync subsequently repairs freshness.
+- Diagnostic exports separate the last successful scan from the pending/failed attempt. Permanently stalled cursors pause after three attempts without advancing coverage or skipping same-second events.
 - Web Locks coordinate Torn tabs when available. Otherwise the interface warns to keep one tab syncing.
 
 ## Data Quality And Bug Reports

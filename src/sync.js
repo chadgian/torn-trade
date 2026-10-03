@@ -1,9 +1,9 @@
-  function nextLogPageParams(data,currentParams) {
+  function nextLogPageParams(data,currentParams,key='log') {
     const next=data?._metadata?.links?.next;
     if(!next)return null;
     try {
       const u=new URL(next,API+'/user/log');
-      if(u.origin!==new URL(API).origin||!u.pathname.startsWith('/v2/user/'))throw new Error('Unexpected pagination source');
+      if(u.origin!==new URL(API).origin||u.pathname.replace(/\/$/,'')!==`/v2/user/${key}`)throw new Error('Unexpected pagination source');
       const params={...currentParams};delete params.nanostamp;
       for(const [k,v] of u.searchParams.entries()){
         if(['from','to','offset','limit','sort','cat','log','nanostamp'].includes(k))params[k]=v;
@@ -19,8 +19,13 @@
   }
   function nextHistoryPage(data,params,rows,seen,key='log') {
     if(!rows.length)return null;
-    let next=nextLogPageParams(data,params);
-    if(!next&&key==='log'&&data?._metadata?.nanostamp)next={...params,nanostamp:String(data._metadata.nanostamp)};
+    let next=nextLogPageParams(data,params,key);
+    const precise=key==='log'?data?._metadata?.nanostamp:null;
+    if(precise!=null&&String(precise)!==''){
+      if(!/^\d+$/.test(String(precise)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
+      // The link can retain an inclusive second; metadata advances within that second.
+      next={...(next||params),nanostamp:String(precise)};
+    }
     if(!next) {
       // A full page without a precise cursor may hide events in its final second.
       if(rows.length>=Number(params.limit||100))throw new AnalyzerError('PAGE_INCOMPLETE','A full history page has no continuation cursor. Coverage remains incomplete.',{source:key});
@@ -29,8 +34,9 @@
     if(params.log!=null)next.log=params.log;
     if(params.cat!=null)next.cat=params.cat;
     if(params.from!=null)next.from=params.from;
-    const signature=JSON.stringify(Object.entries(next).sort(([a],[b])=>a.localeCompare(b)));
-    if(seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. Coverage remains incomplete.',{source:key});
+    const signature=JSON.stringify(Object.entries(next).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
+    const current=JSON.stringify(Object.entries(params).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
+    if(signature===current||seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. Retry Sync; coverage has not been marked complete.',{source:key,from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length});
     seen.push(signature);return next;
   }
 
@@ -135,13 +141,13 @@
   function syncJobIsStale(job) {
     if(!job?.period)return false;
     const now=nowSec(),end=Number(job.period.to)||0,updated=Number(job.updatedAt)||0;
-    return (end>0&&end<now-STALE_SYNC_JOB_SEC)||(updated>0&&updated<now-6*3600);
+    // A long full rebuild keeps its frozen end time; freshness is repaired afterward.
+    return (job.syncMode!=='full'&&end>0&&end<now-STALE_SYNC_JOB_SEC)||(updated>0&&updated<now-6*3600);
   }
-  function discardStaleSyncJob(job) {
+  async function discardStaleSyncJob(job) {
     if(!job)return;
-    commitTradeVerifications(job);
-    abandonResumableMarkers(job);
-    restoreFullResyncBackup(job);
+    if(job.fullResetDone)await restoreFullResyncBackup(job);
+    else{commitTradeVerifications(job);abandonResumableMarkers(job);}
     clearSyncJob();
   }
   function syncJobCancelled(job){return !!(state.syncCancel||job?.cancelled);}
@@ -253,28 +259,34 @@
     checkpointSyncJob(job,job.progress);return job;
   }
 
-  function resetHistoryForFullResync() {
+  async function resetHistoryForFullResync() {
     const backup={sync:state.sync,syncCache:load('syncCache',null)};
     const historyKeys=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial'];
     for(const key of historyKeys)backup[key]=state[key];
-    localStorage.setItem(NS+'fullResyncBackup',JSON.stringify(backup));
+    try{await saveFullResyncBackup(backup);}catch(error){
+      if(error?.name==='QuotaExceededError'||error?.code===22)throw new AnalyzerError('STORAGE_QUOTA','The recovery copy could not fit in browser storage. Existing history was not changed. Export a backup and free browser storage before retrying.',{source:'storage',phase:'backup'});
+      throw new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','The recovery copy could not be saved. Existing history was not changed. Close other analyzer tabs and retry.',{source:'storage',phase:'backup'});
+    }
     const nextSync={...(state.sync||{}),lastSync:0,coverageFrom:0,coverageTo:0,firstSyncComplete:false,autoDiscoveryComplete:false};
     try{
       for(const key of historyKeys)localStorage.setItem(NS+key,'[]');
       localStorage.removeItem(NS+'syncCache');localStorage.setItem(NS+'sync',JSON.stringify(nextSync));
     }catch(error){
-      try{restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
+      try{await restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
       throw new AnalyzerError('STORAGE_WRITE','The rebuild could not start. Previous history was retained or scheduled for recovery.');
     }
     for(const key of historyKeys)state[key]=[];
     state.sync=nextSync;syncCacheMem=null;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
-  function restoreFullResyncBackup(job) {
+  async function restoreFullResyncBackup(job) {
     if(!job?.fullResetDone)return;
-    const backup=load('fullResyncBackup',null);if(!backup)return;
+    const backup=await readFullResyncBackup();if(!backup)return;
+    if(typeof indexedDB!=='undefined'&&load('fullResyncBackup',null)?.storage!=='indexeddb')await saveFullResyncBackup(backup);
+    // The durable backup remains intact if restoring any of these keys fails.
+    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])localStorage.removeItem(NS+key);
     for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','sync']){localStorage.setItem(NS+key,JSON.stringify(backup[key]));state[key]=backup[key];}
     if(backup.syncCache)localStorage.setItem(NS+'syncCache',JSON.stringify(backup.syncCache));else localStorage.removeItem(NS+'syncCache');
-    localStorage.removeItem(NS+'fullResyncBackup');syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();
+    await clearFullResyncBackup();syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();resolveDiagnostic('REBUILD_RECOVERY');
   }
   async function syncApiGet(path,params={}) {
     let last;
@@ -283,18 +295,31 @@
     }
     throw last;
   }
+  async function historyPage(path,params,seen,key='log') {
+    for(let attempt=0;attempt<3;attempt++){
+      const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];
+      try{
+        const next=nextHistoryPage(data,params,rows,cursors,key);
+        if(attempt)reportDiagnostic('PAGE_RETRY','info','A stalled history page recovered after a fresh request. No history was skipped.',{source:key,count:attempt});
+        return {rows,next,seen:cursors};
+      }catch(error){
+        if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code)||attempt===2)throw error;
+        setSyncProgress(`Checking a stalled history page \u00B7 retry ${attempt+2}/3`);await sleep(REQUEST_GAP_MS);
+      }
+    }
+  }
   function advanceResumableLogBatch(job) {
     const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];
   }
   async function runResumableLogPhase(job,mode) {
     const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[],totalBatches=filtered?Math.ceil(ids.length/MAX_LOG_IDS_PER_REQUEST):1;
-    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';}
+    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];}
     while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
       const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
       checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params=job.logPageParams||{limit:100,to:cursor};if(scanPeriod.from>0)params.from=scanPeriod.from;if(filtered)params.log=batchIds.join(',');
-      const data=await syncApiGet('/user/log',params),rows=pageRows(data,'log');
+      const {rows,next,seen}=await historyPage('/user/log',params,job.logPageSeen||[]);
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
@@ -316,7 +341,6 @@
       if(!timestamps.length||rows.some(r=>!(Number(r.timestamp)>0)||r.id==null))throw new AnalyzerError('LOG_SCHEMA','History contains invalid timestamps or event IDs.',{source:'User Logs'});
       const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
       job.diagnostics.oldestTimestamp=job.diagnostics.oldestTimestamp?Math.min(job.diagnostics.oldestTimestamp,oldest):oldest;
-      const seen=job.logPageSeen||[],next=nextHistoryPage(data,params,rows,seen);
       if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
       checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
@@ -329,11 +353,11 @@
     const verifyFrom=Number(job.logScanPeriod?.from)||0;
     const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
     if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
-    let cursor=verifyTo,page=0;const seen=job.abroadPageSeen||[];
+    let cursor=verifyTo,page=0;
     while(!syncJobCancelled(job)){
       page++;checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
       const params=job.abroadPageParams||{limit:100,log:'4201',from:verifyFrom,to:cursor};
-      const data=await syncApiGet('/user/log',params),rows=pageRows(data,'log');
+      const {rows,next,seen}=await historyPage('/user/log',params,job.abroadPageSeen||[]);
       job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+1;
       job.diagnostics.abroadVerifyRawRows=(Number(job.diagnostics.abroadVerifyRawRows)||0)+rows.length;
       if(!rows.length)break;
@@ -351,7 +375,7 @@
         parsedRows.push(...parsed);
       }
       checkpointTransactionRows(job,parsedRows);
-      const next=nextHistoryPage(data,params,rows,seen);if(!next)break;
+      if(!next)break;
       job.abroadPageParams=next;job.abroadPageSeen=seen;cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
     }
     job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
@@ -366,15 +390,13 @@
     if(!scanPeriod){job.phase='finalize';checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
     const found=new Map([...Object.values(ensureSyncCache().pendingTrades),...(job.tradeHeaders||[])].map(x=>[Number(x.id),x]));
     let params=job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to};if(scanPeriod.from>0&&!('from'in params))params.from=scanPeriod.from;
-    const seen=job.tradeListSeen||[];
     while(!syncJobCancelled(job)){
       const page=(Number(job.diagnostics.tradeListPages)||0)+1;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
-      const data=await syncApiGet('/user/trades',params),rows=pageRows(data,'trades');job.diagnostics.tradeListPages=page;
+      const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
-      const next=nextHistoryPage(data,params,rows,seen,'trades');
       if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
-      job.tradeListSeen=seen;job.tradeListParams=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
+      job.tradeListSeen=seen;job.tradeListParams=next;params=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
     }
     return false;
   }
@@ -447,7 +469,7 @@
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
-    if(job.syncMode==='full'&&!job.fullResetDone){resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'API access confirmed \u00B7 local discovered history cleared \u00B7 starting full rebuild\u2026');}
+    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
@@ -457,7 +479,7 @@
     if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
     else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
   }
-  function finishResumableSync(job) {
+  async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
@@ -469,7 +491,12 @@
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
-    localStorage.removeItem(NS+'fullResyncBackup');resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
+    if(job.syncMode==='full'){
+      await clearFullResyncBackup();
+      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE',22])resolveDiagnostic(code);
+      for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
+    }
+    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
     const repaired=Number(d.missingLogDays)||0;
     if(!freshCount)setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
@@ -490,7 +517,7 @@
     try{
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
-        else if(job.phase==='logs-filtered'){
+      else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
           if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
           else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
@@ -499,12 +526,14 @@
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
-        else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());finishResumableSync(job);break;}
+        else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());await finishResumableSync(job);break;}
         else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
       }
       if(syncJobCancelled(job)){
-        job.cancelled=true;commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();setSyncProgress(`Sync stopped \u00B7 verified trade details remain cached \u00B7 partial new rows kept safely.`);
-        restoreFullResyncBackup(job);reportDiagnostic('SYNC_CANCELLED','warning','Sync stopped before coverage was verified. Full rebuilds restore the previous history.',{source:'sync',phase:job.phase});
+        job.cancelled=true;
+        if(job.fullResetDone)await restoreFullResyncBackup(job);else{commitTradeVerifications(job);abandonResumableMarkers(job);}
+        clearSyncJob();setSyncProgress(job.fullResetDone?'Sync stopped \u00B7 previous history restored.':'Sync stopped \u00B7 partial new rows kept safely.');
+        reportDiagnostic('SYNC_CANCELLED','warning','Sync stopped before coverage was verified. Full rebuilds restore the previous history.',{source:'sync',phase:job.phase});
       }
     }catch(e){
       job.lastError=redactText(e?.message||e);job.lastErrorAt=nowSec();diagnosticFromError(e,'sync');reportDiagnostic('SYNC_PAUSED','warning','History verification did not finish. Cached results may be incomplete.',{source:'sync',phase:job.phase});
@@ -531,10 +560,12 @@
     while(state.backgroundSyncing&&Date.now()<deadline)await sleep(50);
     if(state.backgroundSyncing){toast('Background sync is still finishing its current API request. Tap Sync again in a moment.');return false;}
     state.syncCancel=false;state.backgroundSyncProgress='';
-    const leftover=loadSyncJob();if(leftover?.background)discardStaleSyncJob(leftover);
+    const leftover=loadSyncJob();if(leftover?.background)await discardStaleSyncJob(leftover);
     return true;
   }
   async function syncAll(options={}) {
+    await historyRecoveryReady;
+    if(historyRecoveryFailed)throw new AnalyzerError('REBUILD_RECOVERY','Restore the recovery copy before syncing. Free browser storage and reload.',{source:'storage'});
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
@@ -559,23 +590,23 @@
     if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings \u2192 API Key to sync real history.');}return;}
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
+    if(load('fullResyncBackup',null)&&!job?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     if(background&&job&&!options?.job)return;
-    if(job?.background&&!background&&!options?.job){discardStaleSyncJob(job);job=null;}
-    if(job?.cancelled){abandonResumableMarkers(job);clearSyncJob();job=null;}
-    if(job&&!options?.job&&job.syncMode!==requestedMode){discardStaleSyncJob(job);job=null;}
-    if(job&&!options?.job&&syncJobIsStale(job)){discardStaleSyncJob(job);job=null;}
+    if(job?.background&&!background&&!options?.job){await discardStaleSyncJob(job);job=null;}
+    if(job?.cancelled){await discardStaleSyncJob(job);job=null;}
+    if(job&&!options?.job&&job.syncMode!==requestedMode){await discardStaleSyncJob(job);job=null;}
+    if(job&&!options?.job&&syncJobIsStale(job)){await discardStaleSyncJob(job);job=null;}
     if(!job)job=createResumableSyncJob(requestedMode,background);
     if(background)job.background=true;
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }
-  function resumePendingSync() {
+  async function resumePendingSync() {
     if(resumeBootStarted||state.syncing||state.backgroundSyncing)return;
     const job=loadSyncJob();if(!job)return;
-    if(job.background){discardStaleSyncJob(job);return;}
-    if(job.cancelled){abandonResumableMarkers(job);clearSyncJob();return;}
+    if(job.background||job.cancelled){await discardStaleSyncJob(job);return;}
     // Do not auto-resume checkpoints whose end time is already stale; the next manual Sync starts fresh.
-    if(syncJobIsStale(job)){discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
-    resumeBootStarted=true;syncAll({job,resume:true,mode:job.syncMode||'quick'});
+    if(syncJobIsStale(job)){await discardStaleSyncJob(job);setSyncProgress('Expired old sync checkpoint cleared. Press Sync to verify current TCT and fill missing days.');return;}
+    resumeBootStarted=true;await syncAll({job,resume:true,mode:job.syncMode||'quick'});
   }
   function persistSyncCancellation() {
     const job=loadSyncJob();if(!job)return;job.cancelled=true;job.progress='Stopping after the current API request\u2026';saveSyncJob(job);

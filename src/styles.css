@@ -258,3 +258,7 @@
   #tta-root .tta-keyinputrow input{grid-column:auto}
 }
 @media(prefers-reduced-motion:reduce){#tta-root *,#tta-fab{animation-duration:3s!important;transition:none!important}}
+/* Keep navigation responsive while a cached view is being prepared. */
+#tta-root .tta-transition{position:absolute;inset:var(--tta-transition-top,106px) 0 0;z-index:12;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;background:var(--tta-bg);color:var(--tta-text)!important;pointer-events:none;font-size:14px;text-align:center}
+#tta-root .tta-transition[hidden]{display:none!important}
+#tta-root .tta-transition .tta-spinner{flex-shrink:0;width:28px;height:28px}

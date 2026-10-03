@@ -1,5 +1,50 @@
   const BACKUP_KEYS=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','sync','dateMode','customFrom','customTo','granularity','netWorthDate','netWorthTrackingStartedAt'];
   const IMPORT_CLEAR_KEYS=['syncJob','syncCache','fullResyncBackup'];
+  let historyRecoveryReady=Promise.resolve();
+  let historyRecoveryFailed=false;
+  function rebuildBackupStore(operation,value) {
+    return new Promise((resolve,reject)=>{
+      if(typeof indexedDB==='undefined'){reject(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','This browser cannot store a rebuild recovery copy.',{source:'storage'}));return;}
+      let db,settled=false,result;
+      const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timer);if(db)db.close();if(error)reject(error);else resolve(result);};
+      const timer=setTimeout(()=>finish(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','Recovery storage did not respond. Close other analyzer tabs and retry.',{source:'storage'})),10000);
+      const request=indexedDB.open('torn-analyzer-recovery',1);
+      request.onupgradeneeded=()=>request.result.createObjectStore('backups');
+      request.onerror=()=>finish(request.error);
+      request.onblocked=()=>finish(new AnalyzerError('REBUILD_BACKUP_UNAVAILABLE','Recovery storage is blocked by another tab. Close other analyzer tabs and retry.',{source:'storage'}));
+      request.onsuccess=()=>{
+        db=request.result;if(settled){db.close();return;}
+        try{
+          const tx=db.transaction('backups',operation==='get'?'readonly':'readwrite'),store=tx.objectStore('backups');
+          const task=operation==='put'?store.put(value,NS):operation==='delete'?store.delete(NS):store.get(NS);
+          task.onsuccess=()=>{result=task.result;};
+          tx.oncomplete=()=>finish();tx.onabort=()=>finish(tx.error||new Error('Recovery transaction aborted'));tx.onerror=()=>{};
+        }catch(error){finish(error);}
+      };
+    });
+  }
+  async function saveFullResyncBackup(backup) {
+    // Keep the large recovery copy outside localStorage's small per-origin quota.
+    if(typeof indexedDB!=='undefined'){
+      await rebuildBackupStore('put',backup);
+      localStorage.setItem(NS+'fullResyncBackup',JSON.stringify({storage:'indexeddb',schema:1}));
+    }else localStorage.setItem(NS+'fullResyncBackup',JSON.stringify(backup));
+  }
+  async function readFullResyncBackup() {
+    const marker=load('fullResyncBackup',null);
+    if(marker?.storage!=='indexeddb')return marker;
+    const backup=await rebuildBackupStore('get');
+    if(!backup?.sync)throw new AnalyzerError('REBUILD_RECOVERY','The rebuild recovery copy is missing. Do not reset or import history; export the remaining data and report this error.',{source:'storage'});
+    return backup;
+  }
+  async function clearFullResyncBackup() {
+    const marker=load('fullResyncBackup',null);
+    localStorage.removeItem(NS+'fullResyncBackup');
+    if(marker?.storage==='indexeddb'){
+      try{await rebuildBackupStore('delete');resolveDiagnostic('REBUILD_CLEANUP');}
+      catch(_){reportDiagnostic('REBUILD_CLEANUP','info','Sync finished, but the old recovery copy could not be removed. It will be replaced by the next rebuild.',{source:'storage'});}
+    }
+  }
   function validateBackup(payload) {
     const data=payload?.data;
     if(payload?.schema!==1||payload?.app!=='Torn Cash Flow Analyzer'||!data)throw new AnalyzerError('IMPORT_FORMAT','This is not a supported analyzer backup.');
