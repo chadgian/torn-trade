@@ -23,7 +23,7 @@
   }
   function navigate(view,options={}) {
     for(const key of ['searchTimer','ledgerSearchTimer','legacySearchTimer'])clearTimeout(perfCache[key]);
-    return withTransition('Opening '+({cash:'Cash Flow',trade:'Trade Analysis',networth:'Net Worth',ledger:'Acquisition Ledger',diagnostics:'Data Quality',dashboard:'Dashboard',settings:'Settings',help:'Help',insights:'Insights'}[view]||'view'),()=>{
+    return withTransition('Opening '+({cash:'Cash Flow',trade:'Trade Analysis',networth:'Net Worth',ledger:'Acquisition Ledger',diagnostics:'Data Quality',dashboard:'Dashboard',settings:'Settings',help:'Help',updates:"What's New",insights:'Insights'}[view]||'view'),()=>{
       state.view=view;if(view==='ledger')state.ledgerLimit=200;state.search='';render({preserveScroll:false,...options});
     });
   }
@@ -72,7 +72,7 @@
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     const wasDemo=state.demo;state.demo=!hasApiKey()&&![state.transactions,state.cashFlows,state.playerTrades,state.financialSnapshots,state.tracked].some(rows=>rows.length);if(wasDemo!==state.demo)resetAnalyticsCache();
     if(state.demo&&!state.catalog.length)state.catalog=demoCatalog();
-    const html=state.view==='diagnostics'?diagnosticsHtml():state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='help'?helpHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='insights'?insightsHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml();
+    const html=state.view==='diagnostics'?diagnosticsHtml():state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='help'?helpHtml():state.view==='updates'?updatesHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='insights'?insightsHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml();
     const content=html.replace(/(<div class="tta-content[^"]*">)/,`$1${state.view==='diagnostics'?'':qualityHtml()}`);
     root.innerHTML=`<div class="tta-shell">${content}</div>${loadingHtml()}${transitionHtml()}<div id="tta-toast" role="status" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     state.renderPending=false;
@@ -146,8 +146,8 @@
       if(['resetData','importBackup','saveApiKey','clearApiKey'].includes(act)&&(state.syncing||state.backgroundSyncing)){toast('Stop the current sync before changing history or API keys.');return;}
       if(act==='close'){cancelTransition();state.open=false;if(!state.syncing)setBusy(false);render();}
       else if(act==='minimizeSync'){cancelTransition();state.open=false;render();}
-      else if(act==='back'){await navigate(state.view==='ledger'?'trade':'dashboard');}
-      else if(['dashboard','diagnostics','settings','help','insights','trade','networth'].includes(act)){await navigate(act);}
+      else if(act==='back'){await navigate(state.view==='ledger'?'trade':state.view==='updates'?'settings':'dashboard');}
+      else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}
       else if(act==='clearDiagnostics'){state.notices=[];save('notices',[]);render();}
       else if(act==='tradeTab'){await withTransition('Updating Trade Analysis',()=>{state.tradeTab=el.dataset.tab;render();});}
