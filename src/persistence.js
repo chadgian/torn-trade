@@ -59,22 +59,45 @@
     if(data.sync?.accountId&&state.sync.accountId&&Number(data.sync.accountId)!==Number(state.sync.accountId))throw new AnalyzerError('ACCOUNT_MISMATCH','The backup belongs to another account. Export and reset history before switching accounts.');
     return data;
   }
-  function restoreImportRecovery() {
+  async function restoreImportRecovery() {
     const recovery=load('importRecovery',null);if(!recovery)return false;
-    for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])if(Object.prototype.hasOwnProperty.call(recovery,key)){
-      if(recovery[key]===null)localStorage.removeItem(NS+key);else localStorage.setItem(NS+key,recovery[key]);
-      if(BACKUP_KEYS.includes(key))state[key]=load(key,state[key]);
-    }
-    localStorage.removeItem(NS+'importRecovery');resetAnalyticsCache();return true;
-  }
-  function applyBackup(payload) {
-    const data=validateBackup(payload),previous={};
-    for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])previous[key]=localStorage.getItem(NS+key);
-    // Save a write-ahead recovery journal before changing any history key.
-    localStorage.setItem(NS+'importRecovery',JSON.stringify(previous));
     try{
-      for(const key of BACKUP_KEYS)if(data[key]!==undefined)localStorage.setItem(NS+key,JSON.stringify(data[key]));
-      for(const key of IMPORT_CLEAR_KEYS)localStorage.removeItem(NS+key);
-      localStorage.removeItem(NS+'importRecovery');
-    }catch(error){try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Import recovery could not finish. Free browser storage and reload to restore the previous history.',{source:'import'});}throw new AnalyzerError('IMPORT_STORAGE','The backup could not be saved. Previous history was retained or scheduled for recovery.');}
+      for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])if(Object.prototype.hasOwnProperty.call(recovery,key)){
+        const raw=recovery[key];
+        if(raw===null)await removeStoredKey(key);
+        else{
+          const value=typeof raw==='string'?JSON.parse(raw):raw;
+          if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,value);else if(!save(key,value))throw new Error('Recovery write failed');
+          if(BACKUP_KEYS.includes(key)&&Object.prototype.hasOwnProperty.call(state,key))state[key]=value;
+        }
+      }
+      localStorage.removeItem(NS+'importRecovery');resetAnalyticsCache();return true;
+    }catch(error){
+      reportDiagnostic('IMPORT_RECOVERY','error','Previous import recovery could not finish. Existing durable history was left intact where possible.',{source:'import'});
+      throw error;
+    }
+  }
+  async function applyBackup(payload) {
+    const data=validateBackup(payload),previous={};
+    for(const key of BACKUP_KEYS)previous[key]=Object.prototype.hasOwnProperty.call(state,key)?state[key]:load(key,null);
+    for(const key of IMPORT_CLEAR_KEYS)previous[key]=load(key,null);
+    try{
+      for(const key of BACKUP_KEYS)if(data[key]!==undefined){
+        if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,data[key]);
+        else if(!save(key,data[key]))throw new Error('Backup write failed');
+        if(Object.prototype.hasOwnProperty.call(state,key))state[key]=data[key];
+      }
+      for(const key of IMPORT_CLEAR_KEYS)await removeStoredKey(key);
+      resetAnalyticsCache();return true;
+    }catch(error){
+      try{
+        for(const key of BACKUP_KEYS)if(previous[key]!==undefined&&previous[key]!==null){
+          if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,previous[key]);else save(key,previous[key]);
+          if(Object.prototype.hasOwnProperty.call(state,key))state[key]=previous[key];
+        }
+        for(const key of IMPORT_CLEAR_KEYS)if(previous[key]!=null)save(key,previous[key]);
+        resetAnalyticsCache();
+      }catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Import rollback could not finish. Reload and restore your exported backup before syncing.',{source:'import'});}
+      throw new AnalyzerError('IMPORT_STORAGE','The backup could not be saved. Previous history was restored where possible.',{source:'import'});
+    }
   }
