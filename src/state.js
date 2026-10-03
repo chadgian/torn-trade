@@ -1,4 +1,4 @@
-  const VERSION = '0.3.6';
+  const VERSION = '0.3.7';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -114,22 +114,6 @@
     state.netWorthTrackingStartedAt=firstStored;save('netWorthTrackingStartedAt',firstStored);
   }
 
-  function load(k, fallback) {
-    try {
-      const v = localStorage.getItem(NS + k);
-      if(v==null)return fallback;
-      const parsed=JSON.parse(v);
-      if(fallback!=null&&(parsed==null||Array.isArray(fallback)!==Array.isArray(parsed)||typeof fallback!==typeof parsed))throw new Error('Invalid saved type');
-      if(Array.isArray(parsed)&&['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','catalog','logTypes','notices'].includes(k)){
-        const rows=parsed.filter(row=>row&&typeof row==='object'&&!Array.isArray(row));if(rows.length!==parsed.length)storageIssues.push(k);return rows;
-      }
-      return parsed;
-    } catch (_) { storageIssues.push(k); return fallback; }
-  }
-  function save(k, v) {
-    try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; }
-    catch (_) { reportDiagnostic('STORAGE_WRITE', 'error', 'Local changes could not be saved. Free browser storage before syncing again.', {source:k}); return false; }
-  }
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
