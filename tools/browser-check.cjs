@@ -17,6 +17,18 @@ async function assertTablesFit(page,label,{stress=false}={}){
     return issues;
   }));assert.deepEqual(problems,[],label);
 }
+async function assertCompactTableLayout(page,selector,label){
+  const row=page.locator(`${selector} tbody tr`).first();
+  if(!await row.count())return;
+  const shape=await row.evaluate(el=>({
+    row:getComputedStyle(el).display,
+    visible:Array.from(el.children).filter(cell=>getComputedStyle(cell).display!=='none').map(cell=>getComputedStyle(cell).display)
+  }));
+  assert.equal(shape.row,'table-row',`${label} rows must stay table rows, not cards/grids`);
+  assert.ok(shape.visible.length>0,`${label} must keep visible table cells`);
+  assert.equal(shape.visible.every(display=>display==='table-cell'),true,`${label} visible cells must stay table cells`);
+}
+
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL||'chrome'});
   const errors=[];fs.mkdirSync(path.join(root,'test-results'),{recursive:true});
@@ -50,9 +62,10 @@ async function assertTablesFit(page,label,{stress=false}={}){
         await page.locator('[data-act="ledgerSort"][data-key="qty"]').press('Enter');await settled();
         assert.equal(await page.locator('[data-act="ledgerSort"][data-key="qty"]').evaluate(el=>el.classList.contains('active')),true);
         await assertTablesFit(page,`${width}px sorted ledger`);
+        await assertCompactTableLayout(page,'.tta-ledgertable',`${width}px acquisition ledger`);
       }
       await page.screenshot({path:path.join(root,'test-results',`${width}-${action}.png`),fullPage:false});
-      if(action==='cashflow')await page.locator('.tta-flowtable').screenshot({path:path.join(root,'test-results',`${width}-cashflow-events.png`)});
+      if(action==='cashflow'){await assertCompactTableLayout(page,'.tta-cashflow-table',`${width}px cash flow`);await page.locator('.tta-flowtable').screenshot({path:path.join(root,'test-results',`${width}-cashflow-events.png`)});}
       const overflow=await page.locator('.tta-shell').evaluate(el=>el.scrollWidth>el.clientWidth+1);assert.equal(overflow,false,`${width}px ${action} overflows`);
       const clippedNavigation=await page.locator('.tta-workspaces button').evaluateAll(buttons=>buttons.some(el=>el.scrollWidth>el.clientWidth+1));assert.equal(clippedNavigation,false,`${width}px navigation labels overlap`);
       await assertTablesFit(page,`${width}px ${action} long values`,{stress:true});
@@ -70,6 +83,7 @@ async function assertTablesFit(page,label,{stress=false}={}){
     await page.locator('[data-tab="sales"]').click();await settled();assert.equal(await page.locator('.tta-flowtable tbody tr').count(),2);
     await assertReadable(page,`${width}px latest sales`);
     await assertTablesFit(page,`${width}px latest sales`);
+    await assertCompactTableLayout(page,'.tta-sales-table',`${width}px latest sales`);
     assert.equal(await page.locator('.tta-chartcard').count(),0,'Acquisition chart should not crowd latest sales');
     assert.equal(await page.locator('.tta-summary').innerText().then(text=>text.includes('sale date')),true);
     await page.screenshot({path:path.join(root,'test-results',`${width}-sales.png`)});
@@ -82,5 +96,5 @@ async function assertTablesFit(page,label,{stress=false}={}){
     await page.close();
   }
   }finally{await browser.close();}
-  assert.deepEqual(errors,[]);console.log('All views, contrast, full-width labelled tables (including extreme text/amounts and empty states), ledger sorting, sales filters, keyboard expansion and focus verified at 320, 360, 390, 768, 1024 and 1440px.');
+  assert.deepEqual(errors,[]);console.log('All views, contrast, compact responsive table semantics (including extreme text/amounts and empty states), ledger sorting, sales filters, keyboard expansion and focus verified at 320, 360, 390, 768, 1024 and 1440px.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
