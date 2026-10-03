@@ -145,11 +145,7 @@
     }
     durableStorageState.migrated=migrated;durableStorageState.ready=true;
     try{const u=await durableBackend.usage();durableStorageState.used=u.used;durableStorageState.quota=u.quota;}catch(_){}
-    if(durableBackend.kind==='pda'){
-      storageDiagnostic('STORAGE_BACKEND','info',migrated?('Moved '+migrated+' data sets to Torn PDA native storage.'):'Using Torn PDA native per-script storage.',{source:'PDA_storage'});
-    }else if(durableBackend.kind==='indexeddb'){
-      storageDiagnostic('STORAGE_BACKEND','info',migrated?('Moved '+migrated+' data sets to browser IndexedDB.'):'Using browser IndexedDB for large analyzer history.',{source:'IndexedDB'});
-    }else{
+    if(durableBackend.kind==='localStorage'){
       storageDiagnostic('STORAGE_FALLBACK','warning','IndexedDB is unavailable, so large history is using limited browser localStorage.',{source:'localStorage'});
     }
     return durableStorageState;
