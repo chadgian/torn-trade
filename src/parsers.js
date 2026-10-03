@@ -8,7 +8,7 @@
       const data=await apiGet('/torn/items');
       if(!Array.isArray(data.items)||!data.items.length)throw new AnalyzerError('CATALOG_FORMAT','Torn returned an incomplete item catalog.');
       state.catalog=data.items.filter(x=>x&&Number(x.id)>0&&x.name).map(x=>({id:Number(x.id),name:String(x.name),image:x.image||'',type:x.type||'',marketPrice:Number(x.value?.market_price)||0})).sort((a,b)=>a.name.localeCompare(b.name)||a.id-b.id);
-      state.catalogVersion=CATALOG_SCHEMA_VERSION;state.catalogUpdatedAt=nowSec();save('catalog',state.catalog);save('catalogVersion',state.catalogVersion);save('catalogUpdatedAt',state.catalogUpdatedAt);perfCache.catalogRef=null;
+      state.catalogVersion=CATALOG_SCHEMA_VERSION;state.catalogUpdatedAt=nowSec();await saveDurable('catalog',state.catalog);save('catalogVersion',state.catalogVersion);save('catalogUpdatedAt',state.catalogUpdatedAt);perfCache.catalogRef=null;
       resetAnalyticsCache();resolveDiagnostic('CATALOG_STALE');resolveDiagnostic('CATALOG_FAILED');
     }catch(e){reportDiagnostic('CATALOG_FAILED','warning','Catalog refresh failed. Cached prices remain in use.',{source:'/torn/items'});return false;}
     return true;
@@ -31,7 +31,7 @@
     if(state.logTypes.length&&!force&&age>=0&&age<24*3600)return state.logTypes;
     const data=await apiGet('/torn/logtypes');
     if(!Array.isArray(data.logtypes)||!data.logtypes.length)throw new AnalyzerError('LOG_TYPES_FORMAT','Torn returned an incomplete log-type catalog.',{source:'/torn/logtypes'});
-    state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();save('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
+    state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();await saveDurable('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
   }
 
   function relevantLogTypes(all) {
