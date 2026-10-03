@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.3.** The classic blue-green glass theme and readable text are retained. Page and filter transitions show loading status; full rebuild recovery copies use IndexedDB where available to avoid duplicating history in localStorage. Precise log cursors, trade-list continuation, bounded stalled-page retries and failed-attempt diagnostics improve resync reliability without claiming incomplete coverage is complete.
+**Source version: 0.3.5.** The classic blue-green glass theme and readable text are retained. Transaction, sales and acquisition tables fit the page width; narrow screens use labelled rows with every field and sorting control preserved. Page and filter transitions show loading status; full rebuild recovery copies use IndexedDB where available to avoid duplicating history in localStorage. History pagination keeps the original date range fixed, checkpoints new boundary rows, and verifies a repeated inclusive nanosecond boundary before continuing. Dense, malformed, ignored or rate-limited boundaries still pause safely rather than claiming complete coverage. Legacy paused scans rewind within their existing recovery copy; previously completed history needs one verified Full Resync under the new pagination policy. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 

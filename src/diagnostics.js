@@ -1,10 +1,11 @@
-  const DIAGNOSTIC_CONTEXT = new Set(['source','itemId','tradeId','logId','timestamp','from','to','count','qty','status','apiCode','phase']);
+  const DIAGNOSTIC_CONTEXT = new Set(['source','itemId','tradeId','logId','timestamp','from','to','count','qty','status','apiCode','phase','cursor','nextCursor']);
   function safeDiagnosticContext(context={}) {
     const result={};
     for(const [key,value] of Object.entries(context)) {
       if(!DIAGNOSTIC_CONTEXT.has(key))continue;
       if(typeof value==='number'&&Number.isFinite(value))result[key]=value;
       else if(key==='source'||key==='phase')result[key]=redactText(String(value)).slice(0,100);
+      else if((key==='cursor'||key==='nextCursor')&&/^\d{1,30}$/.test(String(value)))result[key]=String(value);
     }
     return result;
   }
@@ -41,6 +42,7 @@
     if(!last)add('HISTORY_MISSING','History has not been checked yet. Quick Sync starts today; Full Resync loads older acquisitions.');
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
+    else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
     const requested=dateRange();
     if(state.sync?.coverageFrom!=null&&requested.from<Number(state.sync.coverageFrom))add('RANGE_NOT_COVERED','The selected period begins before the checked history.',{from:requested.from,to:state.sync.coverageFrom});
@@ -72,9 +74,9 @@
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
-    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated'])counts[key]=Number(d[key])||0;
+    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries'])counts[key]=Number(d[key])||0;
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
-    const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
+    const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
     return {app:'Torn Cash Flow Analyzer',version:VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,historyComplete:!!state.sync.firstSyncComplete,counts,pendingSync,notices:dataQualityNotices().map(n=>({code:n.code,severity:n.severity,message:redactText(n.message),context:safeDiagnosticContext(n.context)}))};
   }
