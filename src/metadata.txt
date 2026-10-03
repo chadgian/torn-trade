@@ -1,0 +1,12 @@
+// ==UserScript==
+// @name         Torn Cash Flow Analyzer
+// @namespace    obliviate.torn.trade.analyzer
+// @version      0.3.0
+// @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
+// @author       obliviate + ChatGPT
+// @match        https://www.torn.com/*
+// @run-at       document-end
+// @grant        none
+// @updateURL    https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js
+// @downloadURL  https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js
+// ==/UserScript==

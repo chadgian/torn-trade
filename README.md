@@ -1,238 +1,89 @@
 # Torn Cash Flow Analyzer
 
-A Torn PDA-friendly financial analytics userscript centered on cash flow, spending, earnings and net worth, with the original FIFO Trade Analyzer retained as a dedicated feature.
+A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Current version:** v0.2.49
+**Source version: 0.3.0.** This rebuild is a review branch, not a production deployment. Existing update/download metadata is preserved.
 
-## Install
+## Features
 
-### Torn PDA / userscript URL
+- TCT daily overview: money in, money out, net flow and financial position.
+- Searchable Cash Flow ledger, category filters, progressive loading and interactive charts.
+- Trade Analysis with a single FIFO engine, acquisition-attributed profit and actual sale-date quantities.
+- Latest Sales across city shops, item markets, bazaars and completed player trades, with source filters, trade IDs and excluded-unit indicators.
+- Acquisition History with source, cost, proceeds, status, transfers, consumption, sorting and filters.
+- Net Worth snapshots, daily changes, allocation, recorded portfolio and director company P/L.
+- Income/spending insights, goals and unrecognized financial events.
+- Catalog search, tracked items, pin/hide/restore and a draggable compact launcher.
+- Quick Sync, background refresh, resumable Full Resync, cancellation and recovery.
+- JSON backup/import, Cash Flow CSV, Net Worth CSV and redacted diagnostic reports.
+
+## Installation
+
+Install the generated [userscript](torn-trade-analyzer.user.js) in Torn PDA or a userscript manager. The main-branch raw URL remains:
 
 ```text
 https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.user.js
 ```
 
-Repository source:
+For PR testing, use the review branch's raw file rather than main. Existing metadata still points to the original Worker update/download endpoint; this change does not publish to that endpoint.
 
-```text
-https://github.com/chadgian/torn-trade/blob/main/torn-trade-analyzer.user.js
+Create or save a key in Settings, or use Torn PDA's injected key. Required selections are User Log, Trade, Trades, Money, Networth; Torn Items, Logtypes; and Company Profile, Employees for director accounting. Restricted log scopes are flagged.
+
+## Accounting And Freshness
+
+FIFO consumes the oldest recorded acquisitions for sales, outgoing gifts and item use. Profit/chart attribution remains on acquisition dates; Latest Sales is ordered by actual sale time in TCT. These are intentionally different views.
+
+Missing costs or proceeds are **not** treated as free inventory. Unmatched or unknown-value sold units are excluded from profit and surfaced in Data Quality. Explicit free/reward acquisitions still have a valid zero cost.
+
+Single-item cash trades use actual cash. Multi-item/mixed trades retain the previous market-value-plus-equal-cash-adjustment allocation, labeled as an estimate. Unsupported assets or missing mixed-trade prices make item profit unavailable. Cash Flow always uses actual player-trade cash, not allocated item values.
+
+- First Quick Sync starts at today's TCT midnight.
+- Manual Quick Sync rechecks at least 72 hours of logs and trades, including any gap since the last successful sync.
+- One-minute background checks use 15-minute log and one-hour trade repair windows, widening to 72 hours at least hourly.
+- Recent/modified trades are reverified. Incomplete details remain pending after leaving the recent scan window.
+- Exact Torn links/nanostamps are retained. Missing/repeated cursors cannot silently establish complete coverage.
+- Full Resync loads all API-available history. Previous history is recoverable on cancellation; older parsed caches remain flagged until a successful full rebuild.
+- Web Locks coordinate Torn tabs when available. Otherwise the interface warns to keep one tab syncing.
+
+## Data Quality And Bug Reports
+
+A compact quality strip summarizes issues. Details shows stable codes, severity, sanitized context, timestamps and report export. Errors and low-severity inference warnings are retained without repeating long messages in every view.
+
+Examples: `HISTORY_STALE`, `FIFO_UNMATCHED`, `ITEM_VALUE_MISSING`, `VALUATION_INFERRED`, `TRADE_DEFERRED`, `TRADE_SOURCE_MISMATCH`, `PAGE_INCOMPLETE`, `RATE_LIMIT`, `LOG_SCOPE` and `STORAGE_WRITE`.
+
+Attach an exported Data Quality report with the item/trade ID, expected quantity, source and approximate TCT time. Reports exclude keys, URLs, raw payloads and counterparty names. History backups contain gameplay data and should not be posted publicly.
+
+## Privacy And Limits
+
+Requests go to Torn's official API. Keys and caches remain in this browser/PDA storage; no third-party analytics are added. All scripts on the Torn origin can access local storage, so this is not encrypted secret storage.
+
+Recorded inventory is not authoritative live inventory. API visibility, permissions and delayed events constrain completeness. Estimates, stale catalogs and partial snapshots are labeled. Failed storage writes pause sync instead of claiming success. Snapshot retention remains 180 observations; unrecognized-event review remains bounded to 300 entries.
+
+No real key is needed for tests. Live Torn/PDA bridge behavior and representative full-account history still require manual validation before release.
+
+## Development
+
+Node.js 20 or newer; no build or unit-test dependencies.
+
+```sh
+npm run build
+npm run check
+npm test
+npm run preview
 ```
 
-The userscript contains `@updateURL` and `@downloadURL` metadata pointing to the raw file above so future versions can continue updating from this repository.
+Edit `src/`, not the generated userscript. Build checks normal syntax and PDA key substitution. Preview creates `.preview/index.html`; open it directly in a browser.
 
-## What it does
+Optional browser checks use an installed Playwright package and Chrome:
 
-Torn Cash Flow Analyzer builds a local financial ledger from Torn API data. Cash flow, spending, earnings and net worth are the primary system; the original FIFO Trade Analyzer remains available as a dedicated feature.
+```sh
+node tools/browser-check.cjs
+```
 
-### Main features
+`PLAYWRIGHT_MODULE` can point to an existing Playwright module; `BROWSER_CHANNEL` defaults to `chrome`. Screenshots go to ignored `test-results/`. Tests cover every view at 360, 390, 768 and 1440 px, sales filtering, focus, keyboard expansion, navigation labels and charts. Official API calls are blocked during preview tests.
 
-- Automatic acquisition and sale discovery from Torn logs.
-- Completed **Player Trade** support with detailed outgoing/incoming item quantities.
-- Incremental syncing: previously known records are skipped while live-period syncs also recheck the most recent 72 hours of User Logs so delayed travel/market logs can be recovered.
-- Persistent/resumable sync across Torn page reloads and navigation.
-- **FIFO accounting** for realized profit.
-- Profit is attributed to the **date the matched acquisition lot was originally acquired**, while Sold quantity remains on the actual sale date.
-- Multi-item Player Trade allocation using each item type's market value plus an equal share of the trade's overall cash surplus/deficit.
-- Acquisition History ledger with chronological acquisition lots, source, cost, FIFO-matched sale proceeds, realized profit, and Sold/Partial/Unsold status.
-- Searchable, sortable and filterable ledger.
-- Interactive Day / Week / Month profit charts with exact-value hover/tap tooltips.
-- Profit charts use Torn City Time (TCT/UTC) calendar buckets and keep every date/week/month in sequence, including zero-profit buckets, so checked days never visually disappear.
-- Scrollable Day charts so larger date ranges remain readable on mobile.
-- Item Market, Bazaar, Foreign Market, Torn Shop, player trades, crimes, finds, gifts/rewards and other recognized acquisition sources.
-- Local caching for faster analytics and reduced repeated API work.
-- Designed for Torn PDA / mobile use.
+See [architecture and validation](docs/ARCHITECTURE.md) and [historical release notes](docs/LEGACY_CHANGELOG.md).
 
-## Profit calculation
+## Use
 
-The analyzer uses **FIFO (First In, First Out)**.
-
-Example:
-
-1. You acquire 100 units at $10,000 each.
-2. Later you sell 40 units at $13,000 each.
-3. Those 40 sold units are matched against the oldest recorded acquisition lot.
-4. Realized profit for those units is calculated from their matched acquisition cost and actual sale proceeds.
-
-The realized profit is displayed under the acquisition date of the FIFO lot, not the later sale date. The actual Sold quantity and sale event still remain associated with the real sale timestamp.
-
-## Player Trade allocation
-
-When a completed Player Trade contains multiple item types, Torn does not necessarily provide a direct per-item cash price. The analyzer therefore:
-
-1. Calculates the current market-value subtotal for each item type.
-2. Determines the overall cash surplus/deficit of the trade.
-3. Distributes that adjustment equally between the different item types.
-4. Uses the resulting allocated totals for FIFO acquisition/sale accounting.
-
-This is an accounting estimate for mixed trades, not a claim that Torn itself assigned that exact per-item price.
-
-## Acquisition History
-
-The Acquisition History page treats each acquisition event as its own FIFO lot and can show:
-
-- Date and time acquired
-- Item and quantity
-- Acquisition source/method
-- Total acquisition cost and unit cost
-- FIFO-matched sold quantity
-- Matched sale proceeds
-- Realized profit
-- Sold / Partial / Unsold status
-- Sale source and latest matched sale time
-
-The table supports search, filters, sorting, and progressive loading for large histories.
-
-## Sync behavior
-
-Sync is designed to avoid repeating work unnecessarily:
-
-- Existing normalized transaction IDs are skipped.
-- Previously verified Player Trade IDs can skip repeated detailed-trade requests.
-- After historical coverage is established, routine live-period syncs still recheck the most recent **72 hours of User Logs** and **6 hours of Player Trades**. This deliberately catches late-visible Torn logs while deterministic transaction IDs prevent duplicate accounting.
-- A pending sync can resume after Torn navigation/page reload.
-
-For the first sync after a major parser/accounting change, a larger date range or **All** may still be useful to establish complete local history.
-
-## API and privacy
-
-Your analyzer data stays on your device in local browser/Torn PDA storage.
-
-The userscript communicates with Torn's official API to retrieve the data required for analysis. It does not send your Torn API key, transaction history, or analyzer data to this GitHub repository or to a third-party analytics service.
-
-Do **not** post your Torn API key in issues, forum posts, screenshots, or bug reports.
-
-## Limitations
-
-- Profit accuracy depends on having the acquisition history needed for FIFO matching. A sale whose original acquisition predates your cached history can have unmatched units.
-- Current inventory shown by the analyzer is based on recorded transaction history; it is not intended to be a live authoritative Torn inventory count.
-- Mixed Player Trade per-item values are allocated estimates as described above.
-- Torn log structures/API behavior can change, so unusual or newly introduced transaction types may require parser updates.
-
-## Reporting bugs
-
-When reporting a missing or incorrect acquisition/sale, useful information includes:
-
-- Item name / Torn item ID
-- Approximate transaction date/time
-- How it was acquired or sold (Item Market, Bazaar, Foreign Market, Player Trade, crime, gift, etc.)
-- Expected quantity versus quantity shown
-- Analyzer version
-- Relevant diagnostics from Settings
-
-Please **never include your API key**.
-
-## License / use
-
-This repository contains a community userscript intended for personal Torn gameplay analytics. Review the source before installing and use it at your own discretion.
-
-
-## v0.1.22 freshness fix
-
-- Live-period Sync now rechecks the most recent 72 hours of User Logs instead of only a five-minute overlap.
-- This is intended to recover delayed Foreign Market/travel purchases that may appear after a previous sync already advanced coverage.
-- Player Trades use a six-hour recent recheck window; already verified trade details remain skipped.
-- Foreign Market acquisition rows and quantities detected in the latest scan are shown in Settings diagnostics.
-- Item-log parsing accepts additional item/cash field aliases and nested purchase/travel structures for resilience against API schema variation.
-
-
-## v0.1.23 live-date / stale checkpoint fix
-
-- Manual Sync no longer resumes an old saved checkpoint indefinitely. A stale or date-range-mismatched checkpoint is retired safely, while rows already downloaded remain cached.
-- Fresh sync setup asks Torn's `/user/timestamp` endpoint for current server time and refreshes the live scan window before requesting logs/trades.
-- Old checkpoints are not automatically resumed on page load once their end time is stale.
-- Profit charts now append the current selected Day/Week/Month bucket at `$0` when necessary, so an up-to-date sync does not visually look two days old simply because there was no acquisition-attributed profit today.
-- The existing 72-hour User Log recheck remains enabled for delayed overseas/travel acquisition logs.
-
-
-## v0.1.24 TCT day-gap sync
-
-- Sync now gets the current Torn server timestamp first and treats that as the authoritative Torn City Time (TCT) target.
-- Finite selected periods are tracked by TCT calendar-day coverage, independent of the phone/browser timezone.
-- A day can be marked scanned even when it contains zero item transactions, so an empty day is no longer confused with an unchecked day.
-- Every Sync identifies uncovered TCT day ranges in the selected period, starts from the earliest missing segment, and fills those gaps through the current TCT target.
-- The current TCT day is refreshed through the current server time, and the recent safety window remains in place for delayed Torn logs.
-- Deterministic transaction IDs still prevent duplicate accounting when covered days are rechecked.
-
-
-## v0.1.25 continuous TCT timeline
-
-- Day/Week/Month profit charts now use TCT (UTC) boundaries instead of the device timezone.
-- Every bucket between the selected period start and the latest successfully synced TCT time is generated, even when profit is $0.
-- This prevents dates from disappearing simply because there was no realized acquisition-attributed profit on that day.
-- Sync coverage remains separate from activity: a checked-empty TCT day is still a checked day.
-
-
-## v0.1.26 abroad acquisition verification
-
-- User Log filtering is split into batches of at most 10 log IDs.
-- Every Sync performs an independent `4201` (Item abroad Buy) verification pass, so Foreign Market acquisitions do not depend on a larger mixed-log filter batch.
-- The dedicated verification uses the selected finite period; for All History it checks the latest 30 days to keep routine API usage bounded.
-- Settings diagnostics show raw 4201 rows, parsed rows/items, the latest raw Abroad Buy timestamp, and the latest parsed acquisition timestamp.
-- Existing transaction IDs remain duplicate-safe, so the dedicated verification can recover missing purchases without double-counting rows already stored.
-
-
-## v0.1.27 period presets and compact launcher
-
-- Dashboard period presets are now **7 days, 14 days, 30 days, All, and Custom**.
-- The former **1 month** preset was removed; saved users on that preset are migrated to **30 days**.
-- The draggable floating launcher is now a compact 40x40 icon-only button so it covers less of the Torn interface.
-- While sync is running, the compact launcher shows only the spinner and remains tappable to reopen sync progress.
-
-
-## v0.1.28 launcher icon
-
-- Replaced the floating launcher emoji with a custom inline SVG terminal/data-pulse icon.
-- The icon uses the analyzer's green/blue cyber palette and remains a compact 40×40 draggable button.
-- During sync, the launcher still switches to the compact spinner-only state.
-
-
-## v0.2.0 — Cash Flow Analyzer
-
-The project is now centered on financial analysis rather than only trading.
-
-- **Today overview (TCT):** earned, spent, net cash flow, and internal transfers.
-- **Cash Flow ledger:** recognized incoming/outgoing money movements with categories and searchable history.
-- **Transfers:** bank/vault/faction/company transfers are recorded but excluded from earnings/spending totals.
-- **Trade Analysis:** the original FIFO acquisition/sale/profit system remains as a separate feature.
-- **Net Worth:** current Torn-reported money, item holdings, assets and points from `/user/networth`, plus `/user/money` snapshots.
-- **Analyzer portfolio:** acquisition cost, remaining FIFO basis, current analyzer-recorded market value, unrealized gain/loss, realized profit, and acquisition-source breakdown.
-- **Player Trades:** cash-flow uses actual cash exchanged; allocated item values remain confined to trade accounting.
-
-Torn currently marks API v2 `/user/networth` as unstable. The analyzer therefore labels Torn-reported snapshots separately from locally calculated accounting history.
-
-
-## v0.2.1 — Quick Sync and Full Resync
-
-Syncing is now split into two explicit modes:
-
-- **Quick Sync** is the normal everyday action. It ignores the selected analytics period and scans only from the last successful Torn City Time sync through the current TCT. If no successful sync exists yet, it starts at the beginning of the current TCT day.
-- **Full Resync** clears locally discovered transaction/cash-flow history and sync coverage, then rebuilds from the beginning of available history. It preserves analyzer settings such as API configuration, pins, hidden items and display preferences.
-- Saved sync jobs remember which mode they belong to, so a Quick Sync cannot accidentally resume an old Full Resync and vice versa.
-
-
-## v0.2.11 — Clean Bento runtime rebuild
-
-- Rebuilt from the proven v0.2.1 launcher/runtime instead of layering additional launcher watchdogs.
-- Reapplies the Bento/glass dashboard and current-TCT daily cash-flow view as presentation-only changes.
-- Restores the original floating launcher mount, drag, click and visibility code verbatim from v0.2.1.
-- Prevents page-wide horizontal scrolling while keeping financial navigation and wide ledgers independently scrollable.
-- Consolidated cash flow today is money in minus money out for the current TCT day; internal transfers remain separate.
-- Source validation includes the original baseline, current production source, rebuilt source and a Torn-PDA-style API-key substituted source.
-
-
-## v0.2.12 — Torn PDA parser compatibility
-
-- Fixes a startup failure reported by Torn PDA as `Uncaught SyntaxError: Unexpected identifier 's'`.
-- Removes the Bento dashboard's nested pluralization template expression and precomputes the movement labels with plain statements.
-- Simplifies newly introduced dashboard strings while preserving the v0.2.11 Bento layout and current-TCT calculations.
-- Keeps the proven v0.2.1 floating-launcher runtime unchanged byte-for-byte.
-- No accounting, sync, FIFO, acquisition-history or net-worth calculation changes.
-
-
-## v0.2.13 — Mugging direction and director company profit
-
-- Corrects mugging accounting: Torn log 8155 (Attack Mug) is money in for the mugger; 8156 (Attack Mug Receive) is money out for the victim.
-- Repairs already cached mugging cash-flow rows automatically after updating.
-- Company deposits and withdrawals are excluded from cash-flow rows.
-- If the API-key owner is the company director, each sync adds/updates one current-TCT-day Company Profit / Loss row calculated as daily company income minus employee wages minus advertisement budget.
-- The daily company row is updated rather than duplicated when syncing again on the same TCT day.
+A community userscript for personal Torn gameplay analytics. Review the source before installing and use it at your discretion.
