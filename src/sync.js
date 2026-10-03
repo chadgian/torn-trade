@@ -22,9 +22,10 @@
     let next=nextLogPageParams(data,params,key);
     const precise=key==='log'?data?._metadata?.nanostamp:null;
     if(precise!=null&&String(precise)!==''){
-      if(!/^\d+$/.test(String(precise)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
+      if(!/^\d{1,30}$/.test(String(precise))||(typeof precise==='number'&&!Number.isSafeInteger(precise)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
+      if(/^\d{1,30}$/.test(String(params.nanostamp||''))&&BigInt(precise)>BigInt(params.nanostamp))throw new AnalyzerError('PAGE_SOURCE_MISMATCH','Torn moved the precise history cursor forward. Coverage remains incomplete.',{source:key,cursor:String(params.nanostamp),nextCursor:String(precise)});
       // The link can retain an inclusive second; metadata advances within that second.
-      next={...(next||params),nanostamp:String(precise)};
+      next={...params,nanostamp:String(precise)};
     }
     if(!next) {
       // A full page without a precise cursor may hide events in its final second.
@@ -33,10 +34,11 @@
     }
     if(params.log!=null)next.log=params.log;
     if(params.cat!=null)next.cat=params.cat;
-    if(params.from!=null)next.from=params.from;
+    // Links are cursors, not permission to narrow the original scan window.
+    next.from=params.from??0;
     const signature=JSON.stringify(Object.entries(next).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
     const current=JSON.stringify(Object.entries(params).map(([k,v])=>[k,String(v)]).sort(([a],[b])=>a.localeCompare(b)));
-    if(signature===current||seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. Retry Sync; coverage has not been marked complete.',{source:key,from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length});
+    if(signature===current||seen.includes(signature))throw new AnalyzerError('PAGE_REPEATED','Torn repeated a history cursor. The boundary could not yet be verified; coverage remains incomplete.',{source:key,from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length,cursor:String(params.nanostamp||''),nextCursor:String(next.nanostamp||'')});
     seen.push(signature);return next;
   }
 
@@ -190,7 +192,7 @@
   }
   function checkpointSyncJob(job,progress='') {
     if(progress){job.progressRaw=String(progress);job.progress=decorateSyncProgress(job,job.progressRaw);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}
-    if(!saveSyncJob(job))throw new Error('Unable to save the resumable sync checkpoint. Free some browser storage and try again.');
+    if(!saveSyncJob(job))throw new AnalyzerError('STORAGE_WRITE','Unable to save the resumable sync checkpoint. Free some browser storage and try again.',{source:'syncJob',phase:job.phase});
   }
   function stripSyncRunMarkers() {
     let changed=false;
@@ -295,32 +297,66 @@
     }
     throw last;
   }
-  async function historyPage(path,params,seen,key='log') {
+  function logBoundaryCursor(data,params,rows) {
+    const cursor=String(data?._metadata?.nanostamp||'');
+    if(!/^\d{1,30}$/.test(cursor)||cursor!==String(params.nanostamp||'')||BigInt(cursor)<=0n)return null;
+    const second=Number(BigInt(cursor)/1000000000n);
+    return rows.every(row=>Number(row.timestamp)===second)?cursor:null;
+  }
+  async function historyPage(path,params,seen,key='log',previousIds=[]) {
+    params={...params,from:params.from??0};
+    let requests=0;
     for(let attempt=0;attempt<3;attempt++){
-      const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];
+      const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];requests++;
       try{
         const next=nextHistoryPage(data,params,rows,cursors,key);
         if(attempt)reportDiagnostic('PAGE_RETRY','info','A stalled history page recovered after a fresh request. No history was skipped.',{source:key,count:attempt});
-        return {rows,next,seen:cursors};
+        return {rows,next,seen:cursors,requests};
       }catch(error){
-        if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code)||attempt===2)throw error;
+        if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code))throw error;
+        if(state.syncCancel)return {rows:[],next:null,seen:[...seen],requests};
+        if(attempt===2){
+          const boundary=key==='log'&&error.code==='PAGE_REPEATED'?logBoundaryCursor(data,params,rows):null;
+          if(!boundary)throw error;
+          const known=new Set(previousIds.map(String));
+          // First checkpoint any new boundary records. Only previously saved IDs
+          // can be excluded by the subsequent one-nanosecond verification probe.
+          if(rows.some(row=>!known.has(String(row.id))))return {rows,next:{...params},seen:[...seen],requests};
+          // A full/99-row page may still hide records at the exact same boundary.
+          if(rows.length>=Math.max(1,Number(params.limit||100)-1))throw error;
+          const probe={...params,nanostamp:(BigInt(boundary)-1n).toString()};
+          setSyncProgress('Verifying the repeated history boundary');
+          const checked=await syncApiGet(path,probe),older=pageRows(checked,key);requests++;
+          const repeatedIds=new Set(rows.map(row=>String(row.id)));
+          if(older.some(row=>repeatedIds.has(String(row.id))||Number(row.timestamp)>Number(rows[0].timestamp)||Number(row.timestamp)<Number(params.from)||Number(row.timestamp)>Number(params.to))){
+            throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn did not honor the precise boundary check. No history was skipped and coverage remains incomplete.',{...error.context,phase:'boundary-probe'});
+          }
+          let next;
+          try{next=nextHistoryPage(checked,probe,older,cursors,key);}catch(probeError){
+            if(probeError.code!=='PAGE_REPEATED'||!logBoundaryCursor(checked,probe,older))throw probeError;
+            next={...probe};
+          }
+          reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',older.length?'A repeated inclusive boundary was verified; older logs are still being loaded.':'A repeated inclusive boundary was verified empty; this history batch is complete.',{source:key,count:older.length,cursor:boundary,nextCursor:probe.nanostamp});
+          return {rows:older,next,seen:cursors,requests,boundaryRecovered:true};
+        }
         setSyncProgress(`Checking a stalled history page \u00B7 retry ${attempt+2}/3`);await sleep(REQUEST_GAP_MS);
       }
     }
   }
   function advanceResumableLogBatch(job) {
-    const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];
+    const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];
   }
   async function runResumableLogPhase(job,mode) {
     const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[],totalBatches=filtered?Math.ceil(ids.length/MAX_LOG_IDS_PER_REQUEST):1;
-    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];}
+    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];}
     while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
       const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
       checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
-      const params=job.logPageParams||{limit:100,to:cursor};if(scanPeriod.from>0)params.from=scanPeriod.from;if(filtered)params.log=batchIds.join(',');
-      const {rows,next,seen}=await historyPage('/user/log',params,job.logPageSeen||[]);
-      job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+1;
+      const params={...(job.logPageParams||{limit:100,to:cursor}),from:scanPeriod.from};if(filtered)params.log=batchIds.join(',');
+      const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
+      job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+requests;
+      if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
@@ -341,7 +377,7 @@
       if(!timestamps.length||rows.some(r=>!(Number(r.timestamp)>0)||r.id==null))throw new AnalyzerError('LOG_SCHEMA','History contains invalid timestamps or event IDs.',{source:'User Logs'});
       const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
       job.diagnostics.oldestTimestamp=job.diagnostics.oldestTimestamp?Math.min(job.diagnostics.oldestTimestamp,oldest):oldest;
-      if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
+      if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logLastPageIds=rows.map(row=>String(row.id));job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
       checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
@@ -356,9 +392,10 @@
     let cursor=verifyTo,page=0;
     while(!syncJobCancelled(job)){
       page++;checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
-      const params=job.abroadPageParams||{limit:100,log:'4201',from:verifyFrom,to:cursor};
-      const {rows,next,seen}=await historyPage('/user/log',params,job.abroadPageSeen||[]);
-      job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+1;
+      const params={...(job.abroadPageParams||{limit:100,log:'4201',to:cursor}),from:verifyFrom};
+      const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.abroadPageSeen||[],'log',job.abroadLastPageIds||[]);
+      job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+requests;
+      if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
       job.diagnostics.abroadVerifyRawRows=(Number(job.diagnostics.abroadVerifyRawRows)||0)+rows.length;
       if(!rows.length)break;
       const parsedRows=[];
@@ -376,7 +413,7 @@
       }
       checkpointTransactionRows(job,parsedRows);
       if(!next)break;
-      job.abroadPageParams=next;job.abroadPageSeen=seen;cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
+      job.abroadPageParams=next;job.abroadPageSeen=seen;job.abroadLastPageIds=rows.map(row=>String(row.id));cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
     }
     job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
   }
@@ -389,7 +426,7 @@
     const scanPeriod=job.tradeScanPeriod;
     if(!scanPeriod){job.phase='finalize';checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
     const found=new Map([...Object.values(ensureSyncCache().pendingTrades),...(job.tradeHeaders||[])].map(x=>[Number(x.id),x]));
-    let params=job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to};if(scanPeriod.from>0&&!('from'in params))params.from=scanPeriod.from;
+    let params={...(job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to}),from:scanPeriod.from};
     while(!syncJobCancelled(job)){
       const page=(Number(job.diagnostics.tradeListPages)||0)+1;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
       const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
@@ -464,6 +501,7 @@
     job.logCursorTo=serverNow;job.tradeListParams=null;
   }
   async function prepareResumableSync(job) {
+    job.paginationVersion=HISTORY_PAGINATION_VERSION;
     await refreshLiveSyncBounds(job);
     await ensureCatalog();setBusyDetail(job.syncMode==='full'?'Verifying API access for full-history rebuild\u2026':'Verifying API access for quick last-sync update\u2026');
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
@@ -485,7 +523,7 @@
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
     if(job.repairWindow)nextSync.lastRepairSync=serverNow;
-    if(job.syncMode==='full')nextSync.accountingVersion=ACCOUNTING_VERSION;
+    if(job.syncMode==='full'){nextSync.accountingVersion=ACCOUNTING_VERSION;nextSync.historyPaginationVersion=HISTORY_PAGINATION_VERSION;}
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
@@ -493,8 +531,8 @@
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){
       await clearFullResyncBackup();
-      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE',22])resolveDiagnostic(code);
-      for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
+      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE','PAGE_BOUNDARY_UNVERIFIED','HISTORY_COVERAGE_RECHECK',22])resolveDiagnostic(code);
+      for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','syncJob','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
     }
     resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
     const repaired=Number(d.missingLogDays)||0;
@@ -502,12 +540,28 @@
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
+  function migrateHistoryPagination(job) {
+    if(job.paginationVersion===HISTORY_PAGINATION_VERSION)return false;
+    job.paginationVersion=HISTORY_PAGINATION_VERSION;
+    if(job.phase==='setup')return false;
+    // Rewind legacy cursors inside the existing rebuild; its durable recovery
+    // copy and already checkpointed rows stay intact. Upserts deduplicate them.
+    job.phase=job.fullResetDone&&job.logTypeIds?.length?'logs-filtered':'setup';
+    job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;
+    job.logPage=0;job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];job.logPreviousSignature='';
+    job.abroadPageParams=null;job.abroadPageSeen=[];job.abroadLastPageIds=[];
+    job.tradeListParams=null;job.tradeListSeen=[];job.tradeHeaders=[];job.tradeDetailIndex=0;job.completedSources={};
+    job.lastError='';job.lastErrorCode='';job.lastErrorContext={};
+    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds?.length||0,Math.ceil((job.logTypeIds?.length||0)/MAX_LOG_IDS_PER_REQUEST));
+    reportDiagnostic('CURSOR_CHECKPOINT_UPDATED','info','The saved scan was rewound to verify the original date range with updated cursor handling. Cached rows and the recovery copy were retained.',{source:'sync'});
+    checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
+  }
   async function runResumableSync(job,resumed=false,options={}) {
     const background=!!(options?.background||job?.background);
     if(state.syncing||state.backgroundSyncing)return;
     if(background)state.backgroundSyncing=true;else state.syncing=true;
     state.syncCancel=false;if(!background)updateFabState();
-    if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload \u00B7 /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;checkpointSyncJob(job,`Resumed after page reload \u00B7 ${prior}`);}
+    if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload \u00B7 /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;job.progress=`Resumed after page reload \u00B7 ${prior}`;setSyncProgress(job.progress);}
     else setSyncProgress(job.progress||`Preparing historical scan for ${job.periodText}\u2026`);
     if(!background){
       setBusy(true,resumed?'Resuming financial sync':(job.syncMode==='full'?'Full history resync':'Quick financial sync'),state.syncProgress,true);
@@ -515,9 +569,11 @@
       if(state.open)await nextPaint();
     }
     try{
+      if(resumed)checkpointSyncJob(job,job.progress);
+      migrateHistoryPagination(job);
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
-      else if(job.phase==='logs-filtered'){
+        else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
           if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
           else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
@@ -536,12 +592,12 @@
         reportDiagnostic('SYNC_CANCELLED','warning','Sync stopped before coverage was verified. Full rebuilds restore the previous history.',{source:'sync',phase:job.phase});
       }
     }catch(e){
-      job.lastError=redactText(e?.message||e);job.lastErrorAt=nowSec();diagnosticFromError(e,'sync');reportDiagnostic('SYNC_PAUSED','warning','History verification did not finish. Cached results may be incomplete.',{source:'sync',phase:job.phase});
-      if(background){
+      job.lastError=redactText(e?.message||e);job.lastErrorCode=typeof e?.code==='string'?e.code:'ACTION_FAILED';job.lastErrorContext=safeDiagnosticContext(e?.context||{});job.lastErrorAt=nowSec();diagnosticFromError(e,'sync');reportDiagnostic('SYNC_PAUSED','warning','History verification did not finish. Cached results may be incomplete.',{source:'sync',phase:job.phase});
+      if(background&&!job.fullResetDone){
         try{commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();}catch(_){}
         state.backgroundSyncProgress=`Background Quick Sync skipped \u00B7 ${job.lastError}`;
       }else{
-        try{checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){setSyncProgress(`Sync stopped: ${saveError.message}`);clearSyncJob();abandonResumableMarkers(job);}
+        try{checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){diagnosticFromError(saveError,'checkpoint');setSyncProgress(`Sync stopped: ${saveError.message}`);if(!job.fullResetDone){clearSyncJob();try{abandonResumableMarkers(job);}catch(markerError){diagnosticFromError(markerError,'storage');}}}
       }
     }
     finally{

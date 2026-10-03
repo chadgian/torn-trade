@@ -88,7 +88,7 @@ test('stalled pages retry without mutating committed cursors or skipping same-se
 });
 test('permanently stalled cursors remain errors rather than false completed coverage',async()=>{
   const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:[log('sale',4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20})],_metadata:{nanostamp:'100000000003'}}}});
-  await assert.rejects(app.historyPage('/user/log',{to:100,nanostamp:'100000000003'},[]),e=>e.code==='PAGE_REPEATED');assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+  await assert.rejects(app.historyPage('/user/log',{to:100,nanostamp:'100000000003'},[],'log',['sale']),e=>e.code==='PAGE_BOUNDARY_UNVERIFIED');assert.equal(calls.length,4);assert.equal(app.state.sync.lastSync,0);
 });
 test('history pagination rejects a different endpoint on the same API origin',()=>{
   const {app}=harness();assert.throws(()=>app.nextHistoryPage({_metadata:{links:{next:'https://api.torn.com/v2/user/trades?to=100'}}},{to:100},[{id:1}],[]),e=>e.code==='PAGE_SOURCE_MISMATCH');
@@ -118,4 +118,136 @@ test('failed full rebuild retains recovery and switching to quick sync restores 
   const {app,storage}=harness({stored:{apiKey:key,catalog:[item],transactions:[original],sync:{lastSync:now-500,firstSyncComplete:true}},responses});
   await app.syncAll({mode:'full'});assert.equal(storage.has('tta:v1:fullResyncBackup'),true);assert.equal(app.diagnosticReport().pendingSync.paused,true);
   await app.syncAll({mode:'quick'});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,now-500);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
+});
+
+const boundarySale=(id,second=100)=>log(id,4210,'Item shop sell',second,{item:206,quantity:1,cost_total:20});
+const boundaryJob=()=>({id:'boundary',period:{from:0,to:110},logScanPeriod:{from:0,to:110},logTypeIds:[4210],logMode:'filtered',diagnostics:{parsedRows:0,matchedRows:0}});
+
+test('continuation links never narrow full or quick scan lower bounds',()=>{
+  const {app}=harness();
+  for(const from of [0,50]){
+    const next=app.nextHistoryPage({_metadata:{nanostamp:'100000000003',links:{next:'https://api.torn.com/v2/user/log?from=100&to=100&log=999'}}},{from,to:110,log:'4210'},[boundarySale('a')],[]);
+    assert.equal(next.from,from);assert.equal(next.to,110);assert.equal(next.log,'4210');
+  }
+});
+
+test('inclusive one-row terminal boundary is verified without losing its sale',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>url.searchParams.get('nanostamp')==='100000000002'?{log:[]}:{log:[boundarySale('last')],_metadata:{nanostamp:'100000000003',links:{next:'https://api.torn.com/v2/user/log?from=100&to=110'}}}}});
+  const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');
+  assert.equal(app.state.transactions.length,1);assert.equal(job.completedSources.log,true);assert.equal(job.diagnostics.boundaryRecoveries,1);
+  assert.equal(calls.length,5);assert.equal(calls.every(u=>u.searchParams.get('from')==='0'&&u.searchParams.get('to')==='110'),true);
+  assert.equal(calls.at(-1).searchParams.get('nanostamp'),'100000000002');
+});
+
+test('boundary probes retain consecutive nanosecond records in the same second',async()=>{
+  const {app}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    const cursor=url.searchParams.get('nanostamp');
+    if(cursor==='100000000001')return {log:[]};
+    if(cursor==='100000000002')return {log:[boundarySale('older')],_metadata:{nanostamp:cursor}};
+    return {log:[boundarySale('last')],_metadata:{nanostamp:'100000000003'}};
+  }}});
+  const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');
+  assert.equal(app.state.transactions.length,2);assert.equal(app.state.transactions.reduce((n,r)=>n+r.total,0),40);assert.equal(job.completedSources.log,true);assert.equal(job.diagnostics.boundaryRecoveries,2);
+});
+
+test('fresh stalled boundary records are checkpointed before exclusion',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:[boundarySale('new')],_metadata:{nanostamp:'100000000003'}}}});
+  const params={from:0,to:110,nanostamp:'100000000003'};
+  const result=await app.historyPage('/user/log',params,[],'log',['old']);
+  assert.equal(result.rows[0].id,'new');assert.equal(result.next.nanostamp,params.nanostamp);assert.equal(calls.length,3);
+});
+
+test('full and 99-row repeated boundaries remain incomplete, never probed away',async()=>{
+  for(const count of [99,100]){
+    const rows=Array.from({length:count},(_,i)=>boundarySale('sale-'+i));
+    const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:rows,_metadata:{nanostamp:'100000000003'}}}});
+    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100,nanostamp:'100000000003'},[],'log',rows.map(r=>r.id)),e=>e.code==='PAGE_REPEATED');
+    assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+  }
+});
+
+test('unverified, out-of-range and malformed probes do not advance coverage',async()=>{
+  for(const probe of [{log:[boundarySale('newer',101)]},{log:[boundarySale('outside',40)]},{wrong:[]},{error:{code:5}}]){
+    const {app}=harness({stored:{apiKey:key,sync:{lastSync:77}},responses:{'/user/log':url=>url.searchParams.get('nanostamp')==='100000000002'?probe:{log:[boundarySale('last')],_metadata:{nanostamp:'100000000003'}}}});
+    await assert.rejects(app.historyPage('/user/log',{from:50,to:110,nanostamp:'100000000003'},[],'log',['last']));
+    assert.equal(app.state.sync.lastSync,77);
+  }
+});
+
+test('unsafe numeric and oversized precise cursors are rejected',()=>{
+  const {app}=harness();
+  for(const nanostamp of [1791018262000000000,'1'.repeat(31),'https://secret.example'])assert.throws(()=>app.nextHistoryPage({_metadata:{nanostamp}},{from:0,to:110},[boundarySale('last')],[]),e=>e.code==='API_SCHEMA');
+  assert.throws(()=>app.nextHistoryPage({_metadata:{nanostamp:'100000000004'}},{from:0,to:110,nanostamp:'100000000003'},[boundarySale('last')],[]),e=>e.code==='PAGE_SOURCE_MISMATCH');
+});
+
+test('diagnostic cursors retain exact precision but never arbitrary strings',()=>{
+  const {app}=harness();app.reportDiagnostic('CURSOR','warning','Boundary',{cursor:'1791018262000000001',nextCursor:'https://secret.example?key='+key});
+  const report=JSON.stringify(app.diagnosticReport());assert.equal(report.includes('1791018262000000001'),true);assert.equal(report.includes('secret.example'),false);assert.equal(report.includes(key),false);
+});
+
+test('old verified history requires a full recheck, not just a quick sync',async()=>{
+  const {app}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:now-100,firstSyncComplete:true,accountingVersion:'0.3.3'}},responses:baseResponses()});
+  assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
+  await app.syncAll({mode:'quick'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
+  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,2);
+});
+
+test('reported 215-row legacy checkpoint rewinds and completes with recovery preserved',async()=>{
+  const responses=baseResponses();let checkedBackup=false;
+  const first=Array.from({length:100},(_,i)=>boundarySale('sale-'+i,102));
+  const second=Array.from({length:99},(_,i)=>boundarySale('sale-'+(100+i),101));
+  const third=Array.from({length:16},(_,i)=>boundarySale('sale-'+(199+i),100));
+  let instance;
+  responses['/user/log']=url=>{
+    if(url.searchParams.get('log')!=='4210')return {log:[]};
+    assert.equal(url.searchParams.get('from'),'0');checkedBackup=instance.storage.has('tta:v1:fullResyncBackup');
+    const cursor=url.searchParams.get('nanostamp');
+    if(!cursor)return {log:first,_metadata:{nanostamp:'102000000001'}};
+    if(cursor==='102000000001')return {log:second,_metadata:{nanostamp:'101000000001'}};
+    if(cursor==='101000000001')return {log:third,_metadata:{nanostamp:'100000000003'}};
+    if(cursor==='100000000003')return {log:[third.at(-1)],_metadata:{nanostamp:cursor}};
+    return {log:[]};
+  };
+  const job={schema:3,id:'legacy',active:true,syncMode:'full',phase:'logs-filtered',fullResetDone:true,period:{from:0,to:now},logScanPeriod:{from:0,to:now},tradeScanPeriod:{from:0,to:now},tctNow:now,userId:1,logTypeIds:[4210],logMode:'filtered',logPageParams:{from:100,to:now,nanostamp:'100000000003'},logPageSeen:[],updatedAt:now,diagnostics:{rawRows:215,pages:5},lastError:'Old cursor'};
+  instance=harness({stored:{apiKey:key,catalog:[item],syncJob:job,fullResyncBackup:{transactions:[],sync:{lastSync:0}},transactions:[{id:'sale-0:206',itemId:206,side:'sell',qty:1,total:20,timestamp:102}]},responses});
+  instance.app.reportDiagnostic(22,'error','Old quota',{source:'sync'});instance.app.reportDiagnostic('PAGE_REPEATED','error','Old boundary',{source:'log'});
+  await instance.app.runResumableSync(job,true);
+  assert.equal(checkedBackup,true);assert.equal(instance.app.state.sync.firstSyncComplete,true);assert.equal(instance.app.state.sync.lastSync,now);
+  assert.equal(instance.app.state.transactions.filter(r=>r.timestamp>=100&&r.timestamp<=102).length,215);
+  assert.equal(instance.storage.has('tta:v1:fullResyncBackup'),false);assert.equal(instance.app.state.notices.some(n=>n.code===22||n.code==='PAGE_REPEATED'),false);
+});
+
+test('resume checkpoint failures release loading state and preserve full rebuild recovery',async()=>{
+  const job={schema:3,id:'resume',active:true,syncMode:'full',phase:'logs-filtered',fullResetDone:true,period:{from:0,to:now},updatedAt:now,progress:'Paused'};
+  const {app,context,storage}=harness({stored:{apiKey:key,syncJob:job,fullResyncBackup:{sync:{lastSync:77}}}});
+  const before=storage.get('tta:v1:syncJob');const save=context.localStorage.setItem;
+  context.localStorage.setItem=(k,v)=>{if(k==='tta:v1:syncJob')throw new Error('Disk full');save(k,v);};
+  await app.runResumableSync(job,true);
+  assert.equal(app.state.syncing,false);assert.equal(app.state.backgroundSyncing,false);assert.equal(storage.get('tta:v1:syncJob'),before);assert.equal(storage.has('tta:v1:fullResyncBackup'),true);
+});
+
+test('saved boundary IDs survive reload before an exclusive probe',async()=>{
+  const job={...boundaryJob(),schema:3,active:true,syncMode:'full',paginationVersion:2,phase:'logs-filtered',fullResetDone:true,logPageParams:{from:0,to:110,nanostamp:'100000000003'},logLastPageIds:['last'],logPageSeen:[],logPage:1};
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item],syncJob:job,transactions:[{id:'last:206',itemId:206,side:'sell',qty:1,total:20,timestamp:100}],fullResyncBackup:{sync:{lastSync:77}}},responses:{'/user/log':url=>url.searchParams.get('nanostamp')==='100000000002'?{log:[]}:{log:[boundarySale('last')],_metadata:{nanostamp:'100000000003'}}}});
+  await app.runResumableLogPhase(JSON.parse(JSON.stringify(job)),'filtered');assert.equal(calls.length,4);assert.equal(app.state.transactions.length,1);
+});
+
+test('ignored boundary probe preserves paused full checkpoint, recovery and success date',async()=>{
+  const responses=baseResponses();responses['/user/log']=url=>url.searchParams.get('log')?.split(',').includes('4210')?{log:[boundarySale('last')],_metadata:{nanostamp:'100000000003'}}:{log:[]};
+  const {app,storage}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:77,firstSyncComplete:true},transactions:[{id:'original',itemId:206,side:'buy',qty:5,total:100,timestamp:50}]},responses});
+  await app.syncAll({mode:'full'});
+  assert.equal(app.state.sync.lastSync,0); // Full rebuild clears live coverage, original remains in recovery.
+  assert.equal(JSON.parse(storage.get('tta:v1:fullResyncBackup')).sync.lastSync,77);
+  const report=app.diagnosticReport();assert.equal(report.pendingSync.paused,true);assert.equal(report.pendingSync.lastErrorCode,'PAGE_BOUNDARY_UNVERIFIED');assert.equal(report.pendingSync.recoveryAvailable,true);
+  assert.equal(app.state.syncing,false);assert.equal(app.state.backgroundSyncing,false);
+});
+
+test('separate log filters keep independent boundary identities and complete both batches',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    if(url.searchParams.get('nanostamp')==='100000000002')return {log:[]};
+    return {log:[boundarySale(url.searchParams.get('log')==='4210'?'second-filter':'first-filter')],_metadata:{nanostamp:'100000000003'}};
+  }}});
+  const job={...boundaryJob(),logTypeIds:[1,2,3,4,5,6,7,8,9,10,4210]};await app.runResumableLogPhase(job,'filtered');
+  assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);assert.equal(job.diagnostics.boundaryRecoveries,2);
+  assert.equal(calls.filter(u=>u.searchParams.get('log')==='4210').length,5);
 });

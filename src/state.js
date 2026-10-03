@@ -1,6 +1,7 @@
-  const VERSION = '0.3.4';
+  const VERSION = '0.3.5';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
+  const HISTORY_PAGINATION_VERSION = 2;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
