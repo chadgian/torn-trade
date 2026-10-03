@@ -128,9 +128,9 @@
 #tta-root .tta-banner{border:1px solid #91cdf745;border-left:3px solid var(--tta-blue);border-radius:12px;padding:10px 12px;margin:12px 0;background:linear-gradient(145deg,#91cdf715,#79dfb30b);font-size:13px;overflow-wrap:anywhere}
 #tta-root .tta-status-banner{display:flex;gap:8px}
 #tta-root .tta-status-dot{display:none}
-#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;min-width:0;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}
+#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;min-width:0;overflow:hidden;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}
 #tta-root table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:13px}
-#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left;overflow-wrap:anywhere;min-width:0}
+#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left;overflow-wrap:anywhere;word-break:normal;min-width:0}
 #tta-root table :where(thead,tbody,tfoot,tr,td){background:transparent!important}
 #tta-root th{font-size:12px;color:var(--tta-muted)!important;background:var(--tta-panel)!important}
 #tta-root td small,#tta-root .tta-flowmeta{display:block;font-size:12px;color:var(--tta-faint)!important;margin-top:3px}
@@ -140,26 +140,70 @@
 #tta-root .tta-flowtable,#tta-root .tta-ledgertable{min-width:0;max-width:100%}
 #tta-root .tta-ledgertable th button{border:0;background:transparent;font-weight:600;color:inherit!important;padding:0}
 #tta-root .tta-ledgertable th button.active{color:var(--tta-green)!important}
-#tta-root .tta-ledgertable th button{max-width:100%;overflow-wrap:anywhere;white-space:normal;min-height:36px;text-align:left}
+#tta-root .tta-ledgertable th button{max-width:100%;overflow-wrap:anywhere;white-space:normal;min-height:30px;text-align:left}
+#tta-root .tta-ledger-compact-meta,#tta-root .tta-ledger-mobile-status,#tta-root .tta-ledger-hidden-sale,#tta-root .tta-sales-compact-source,#tta-root .tta-cash-compact-flow{display:none!important}
+#tta-root .tta-cashflow-table :is(th,td):nth-child(1){width:44%}
+#tta-root .tta-cashflow-table :is(th,td):nth-child(2){width:15%}
+#tta-root .tta-cashflow-table :is(th,td):nth-child(3){width:23%}
+#tta-root .tta-cashflow-table :is(th,td):nth-child(4){width:18%}
+#tta-root .tta-sales-table :is(th,td):nth-child(1){width:30%}
+#tta-root .tta-sales-table :is(th,td):nth-child(2){width:24%}
+#tta-root .tta-sales-table :is(th,td):nth-child(3){width:10%}
+#tta-root .tta-sales-table :is(th,td):nth-child(4),#tta-root .tta-sales-table :is(th,td):nth-child(5){width:18%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(1){width:12%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(2){width:17%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(3){width:7%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(4){width:15%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(5){width:12%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(6){width:8%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(7){width:10%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(8){width:9%}
+#tta-root .tta-ledgertable :is(th,td):nth-child(9){width:10%}
 @media(max-width:1100px){
-  #tta-root .tta-ledgertable,#tta-root .tta-ledgertable thead,#tta-root .tta-ledgertable tbody{display:block}
-  #tta-root .tta-ledgertable tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--tta-line)}
-  #tta-root .tta-ledgertable th,#tta-root .tta-ledgertable td{display:block;border-bottom:0;text-align:left;padding:10px 12px}
-  #tta-root .tta-ledgertable td::before{content:attr(data-label);display:block;font-size:12px;font-weight:400;color:var(--tta-muted);margin-bottom:4px}
-  #tta-root .tta-ledgertable .tta-ledgeritem{order:-1;grid-column:1/-1}
-  #tta-root .tta-ledgertable .tta-ledgerstatus,#tta-root .tta-ledgertable td[colspan]{grid-column:1/-1}
-  #tta-root .tta-ledgertable td[colspan]::before{content:none}
+  #tta-root .tta-compact-table{font-size:11px}
+  #tta-root .tta-compact-table th,#tta-root .tta-compact-table td{padding:7px 6px}
+  #tta-root .tta-compact-table th{font-size:10px}
+  #tta-root .tta-compact-table td small,#tta-root .tta-compact-table .tta-flowmeta{font-size:10px;line-height:1.25}
+  #tta-root .tta-ledgertable th:nth-child(1),#tta-root .tta-ledgertable td:not([colspan]):nth-child(1),
+  #tta-root .tta-ledgertable th:nth-child(4),#tta-root .tta-ledgertable td:not([colspan]):nth-child(4),
+  #tta-root .tta-ledgertable th:nth-child(6),#tta-root .tta-ledgertable td:not([colspan]):nth-child(6),
+  #tta-root .tta-ledgertable th:nth-child(7),#tta-root .tta-ledgertable td:not([colspan]):nth-child(7){display:none}
+  #tta-root .tta-ledger-compact-meta,#tta-root .tta-ledger-hidden-sale{display:block!important}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(2){width:32%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(3){width:10%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(5){width:19%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(8){width:18%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(9){width:21%}
 }
 @media(max-width:720px){
-  #tta-root .tta-flowtable,#tta-root .tta-flowtable tbody{display:block}
-  #tta-root .tta-flowtable thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%)}
-  #tta-root .tta-flowtable tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:1px solid var(--tta-line)}
-  #tta-root .tta-flowtable td{display:block;border-bottom:0;text-align:left;padding:10px 12px}
-  #tta-root .tta-flowtable td:first-child,#tta-root .tta-flowtable td[colspan]{grid-column:1/-1}
-  #tta-root .tta-flowtable td::before{content:attr(data-label);display:block;font-size:12px;font-weight:400;color:var(--tta-muted);margin-bottom:4px}
-  #tta-root .tta-flowtable td[colspan]::before{content:none}
-  #tta-root .tta-ledgertable tbody tr{grid-template-columns:repeat(2,minmax(0,1fr))}
-  #tta-root .tta-ledgertable .tta-ledgermethod{grid-column:1/-1}
+  #tta-root .tta-compact-table{font-size:10.5px}
+  #tta-root .tta-compact-table th,#tta-root .tta-compact-table td{padding:6px 5px}
+  #tta-root .tta-sales-table th:nth-child(2),#tta-root .tta-sales-table td:not([colspan]):nth-child(2){display:none}
+  #tta-root .tta-sales-compact-source{display:block!important}
+  #tta-root .tta-sales-table :is(th,td):nth-child(1){width:43%}
+  #tta-root .tta-sales-table :is(th,td):nth-child(3){width:11%}
+  #tta-root .tta-sales-table :is(th,td):nth-child(4),#tta-root .tta-sales-table :is(th,td):nth-child(5){width:23%}
+}
+@media(max-width:480px){
+  #tta-root .tta-compact-table{font-size:10px}
+  #tta-root .tta-compact-table th,#tta-root .tta-compact-table td{padding:5px 4px}
+  #tta-root .tta-compact-table th{font-size:9px;line-height:1.15}
+  #tta-root .tta-cashflow-table th:nth-child(2),#tta-root .tta-cashflow-table td:not([colspan]):nth-child(2){display:none}
+  #tta-root .tta-cash-compact-flow{display:inline-block!important;margin-top:3px}
+  #tta-root .tta-cashflow-table :is(th,td):nth-child(1){width:49%}
+  #tta-root .tta-cashflow-table :is(th,td):nth-child(3){width:28%}
+  #tta-root .tta-cashflow-table :is(th,td):nth-child(4){width:23%}
+  #tta-root .tta-ledgertable th:nth-child(9),#tta-root .tta-ledgertable td:not([colspan]):nth-child(9){display:none}
+  #tta-root .tta-ledger-mobile-status{display:block!important}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(2){width:44%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(3){width:10%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(5){width:23%}
+  #tta-root .tta-ledgertable :is(th,td):nth-child(8){width:23%}
+}
+@media(max-width:360px){
+  #tta-root .tta-compact-table{font-size:9.5px}
+  #tta-root .tta-compact-table th,#tta-root .tta-compact-table td{padding:4px 3px}
+  #tta-root .tta-compact-table td small,#tta-root .tta-compact-table .tta-flowmeta{font-size:9px}
 }
 #tta-root .tta-statuspill,#tta-root .tta-flowbadge{font-size:12px;color:var(--tta-muted)!important}
 #tta-root .tta-statuspill.sold,#tta-root .tta-flowbadge.in{color:var(--tta-green)!important}
