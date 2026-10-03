@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.1.** This revision restores the classic blue-green glass theme while retaining the rebuilt accounting, sync, and diagnostics. Existing update/download metadata is preserved; production publication is separate from this review branch.
+**Source version: 0.3.2.** The classic blue-green glass theme is retained, with foreground colors isolated from Torn's page styles to keep category/event text, controls, and charts readable. Rebuilt accounting, sync, diagnostics, and update/download metadata are preserved.
 
 ## Features
 
