@@ -77,7 +77,7 @@
     root.innerHTML=`<div class="tta-shell">${content}</div>${loadingHtml()}${transitionHtml()}<div id="tta-toast" role="status" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     state.renderPending=false;
     root.dataset.view=state.view;root.setAttribute('aria-busy',state.busy?.active||transitionTitle?'true':'false');bind();
-    if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);
+    if(preserveScroll){const shell=root.querySelector('.tta-shell');if(shell)shell.scrollTop=previousScroll;}positionDailyChartsToLatest(root);const activeWorkspace=root.querySelector('.tta-workspaces [aria-current="page"]');if(activeWorkspace)requestAnimationFrame(()=>activeWorkspace.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'}));
     if(focusId&&previousView===state.view){const next=document.getElementById(focusId);if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange&&next.type!=='date')next.setSelectionRange(...selection);}}
     if(transitionTitle)updateTransitionDom();
   }
