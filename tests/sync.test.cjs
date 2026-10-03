@@ -1,0 +1,65 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {harness,item,log,trade,entry}=require('./harness.cjs');
+const now=Math.floor(Date.now()/1000),key='fixture0123456789';
+const baseResponses=()=>({'/user/timestamp':{timestamp:now},'/key/info':{info:{access:{level:4},user:{id:1},selections:{user:['log']}}},'/torn/items':{items:[{...item,value:{market_price:150}}]},'/torn/logtypes':{logtypes:[{id:4210,title:'Item shop sell'}]},'/user/log':{log:[],_metadata:{links:{next:null}}},'/user/trades':{trades:[],_metadata:{links:{next:null}}},'/user/networth':{networth:{total:5000,timestamp:now}},'/user/money':{money:{wallet:100}},'/company/profile':{profile:null}});
+test('precise pagination retains nanostamp and strips secrets from links',()=>{
+  const {app}=harness();const seen=[],params={to:100,from:50,limit:100,log:'4210'};
+  const next=app.nextHistoryPage({_metadata:{links:{next:'https://api.torn.com/v2/user/log?to=90&nanostamp=90000000001&key=secret&log=999'}}},params,[{id:1}],seen);
+  assert.equal(next.nanostamp,'90000000001');assert.equal(next.log,'4210');assert.equal(next.from,50);assert.equal('key'in next,false);
+  assert.throws(()=>app.nextHistoryPage({_metadata:{links:{next:'https://api.torn.com/v2/user/log?to=90&nanostamp=90000000001'}}},params,[{id:1}],seen),/repeated/);
+});
+test('full pages without a cursor and foreign pagination sources never imply full coverage',()=>{
+  const {app}=harness();assert.throws(()=>app.nextHistoryPage({}, {limit:100},Array.from({length:100},(_,id)=>({id})),[]),/no continuation/);
+  assert.throws(()=>app.nextLogPageParams({_metadata:{links:{next:'https://elsewhere.example/path?key=secret'}}},{}),/invalid pagination/);
+  const job={id:'incomplete',tctNow:now,period:{from:0,to:now},diagnostics:{}};assert.throws(()=>app.finishResumableSync(job),/did not finish/);assert.equal(app.state.sync.lastSync,0);
+});
+test('quick sync recovers delayed city-shop sales and updates visible accounting',async()=>{
+  const responses=baseResponses(),raw=log('shop-sale',4210,'Item shop sell',now-3600,{item:206,quantity:3,cost_total:600});responses['/user/log']=url=>({log:url.searchParams.get('log').split(',').includes('4210')?[raw]:[],_metadata:{links:{next:null}}});
+  const {app}=harness({stored:{apiKey:key,catalog:[item],transactions:[{id:'buy',itemId:206,side:'buy',qty:10,total:1000,timestamp:now-86400,source:'Torn Shop'}],sync:{lastSync:now-60,firstSyncComplete:false}},responses});app.fifoAnalytics(206);await app.syncAll({background:true});assert.equal(app.state.sync.lastSync,now);assert.equal(app.fifoAnalytics(206).remainingQty,7);assert.equal(app.acquisitionLedgerRows()[0].lastSaleSource,'Torn Shop');assert.equal(app.state.renderPending,true);assert.equal(app.state.sync.firstSyncComplete,false);
+});
+test('deferred trade details are retried outside the overlap window',async()=>{
+  const responses=baseResponses();const h={id:20,completed_at:now-10*86400};responses['/user/20/trade']={trade:trade(20,h.completed_at,[])};
+  const {app}=harness({stored:{apiKey:key,catalog:[item]},responses});const job={id:'a',tradeHeaders:[h],tradeDetailIndex:0,userId:1,diagnostics:{},active:true};await app.runResumableTradeDetails(job);assert.equal(app.ensureSyncCache().pendingTrades[20].id,20);assert.equal(app.isTradeVerified(job,h),false);
+  responses['/user/20/trade']={trade:trade(20,h.completed_at,[entry(1,'Item',206,2),entry(2,'Money',0,500)])};
+  const next={id:'b',tradeScanPeriod:{from:now-60,to:now},tradeHeaders:[],tradeDetailIndex:0,diagnostics:{},userId:1,active:true};await app.runResumableTradeList(next);assert.equal(next.tradeHeaders[0].id,20);await app.runResumableTradeDetails(next);assert.equal(app.state.transactions[0].total,500);assert.equal(next.verifiedTradeIds[0],20);
+});
+test('authoritative trade corrections remove obsolete rows and replace existing values',async()=>{
+  const responses=baseResponses(),h={id:21,completed_at:now-100};responses['/user/21/trade']={trade:trade(21,h.completed_at,[entry(1,'Item',206,2),entry(2,'Money',0,500)])};
+  const old=[{id:'trade:21:1:sell:206',tradeId:21,itemId:206,qty:1,total:200,side:'sell',timestamp:now-100,source:'Player Trade'},{id:'trade:21:1:sell:258',tradeId:21,itemId:258,qty:1,total:50,side:'sell',timestamp:now-100,source:'Player Trade'}];
+  const {app}=harness({stored:{apiKey:key,catalog:[item],transactions:old},responses});await app.runResumableTradeDetails({id:'correct',tradeHeaders:[h],tradeDetailIndex:0,userId:1,diagnostics:{}});assert.equal(app.state.transactions.length,1);assert.equal(app.state.transactions[0].qty,2);assert.equal(app.state.transactions[0].total,500);
+});
+test('trade detail source mismatch fails without verifying or adding rows',async()=>{
+  const responses=baseResponses();responses['/user/22/trade']={trade:trade(23,now,[entry(1,'Item',206,1)])};const {app}=harness({stored:{apiKey:key},responses});const job={id:'mismatch',tradeHeaders:[{id:22,completed_at:now}],tradeDetailIndex:0,userId:1,diagnostics:{}};await assert.rejects(app.runResumableTradeDetails(job),/do not match/);assert.equal(app.state.transactions.length,0);
+});
+test('legacy transaction existence is not evidence of trade detail verification',()=>{
+  const {app}=harness({stored:{transactions:[{id:'old',itemId:206,source:'Player Trade',tradeId:8,timestamp:now-864000}],syncCache:{schema:5,verifiedTrades:{8:now-864000}}}});assert.equal(app.isTradeVerified({}, {id:8,completed_at:now-864000}),false);
+});
+test('history schema errors keep the last successful sync unchanged',async()=>{
+  const responses=baseResponses();responses['/user/log']={wrong:[]};const {app}=harness({stored:{apiKey:key,sync:{lastSync:now-500}},responses});await app.syncAll({background:true});assert.equal(app.state.sync.lastSync,now-500);assert.equal(app.state.notices.some(x=>x.code==='SYNC_PAUSED'),true);assert.equal(app.state.backgroundSyncing,false);
+});
+test('full resync can restore previous rows and coverage after cancellation',()=>{
+  const original=[{id:'safe',itemId:206,side:'buy',qty:1,total:50,timestamp:100}],{app}=harness({stored:{transactions:original,sync:{lastSync:200,firstSyncComplete:true}}});app.resetHistoryForFullResync();assert.equal(app.state.transactions.length,0);app.restoreFullResyncBackup({fullResetDone:true});assert.equal(app.state.transactions[0].id,'safe');assert.equal(app.state.sync.lastSync,200);
+});
+test('diagnostics whitelist context and redact API keys and URLs',()=>{
+  const {app}=harness({stored:{apiKey:key}});app.reportDiagnostic('TEST','warning',`Failed https://api.torn.com/?key=${key} key=${key}`,{source:'/user/log',raw:{key},url:`https://x/?key=${key}`,itemId:206});const report=JSON.stringify(app.diagnosticReport());assert.equal(report.includes(key),false);assert.equal(report.includes('https://'),false);assert.equal(report.includes('"raw"'),false);assert.equal(JSON.stringify(app.backupPayload()).includes(key),false);
+});
+test('API rate limits expose only code and context, never provider text or secrets',async()=>{
+  const {app}=harness({stored:{apiKey:key},responses:{'/test':{error:{code:5,error:`secret ${key}`}}}});await assert.rejects(app.apiGet('/test'),e=>e.code==='RATE_LIMIT'&&e.retryable);assert.equal(app.state.notices[0].context.apiCode,5);assert.equal(JSON.stringify(app.state.notices).includes(key),false);
+});
+test('permanent key errors are not retried',async()=>{
+  const responses=baseResponses();responses['/user/log']={error:{code:2,error:'Incorrect Key'}};const {app,calls}=harness({stored:{apiKey:key},responses});await app.syncAll({background:true});assert.equal(calls.filter(x=>x.pathname==='/v2/user/log').length,1);
+});
+test('a dense same-second city-shop page continues with nanostamp without losing sales',async()=>{
+  const first=Array.from({length:100},(_,i)=>log('sale-'+i,4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20}));
+  const second=Array.from({length:50},(_,i)=>log('sale-'+(100+i),4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20}));
+  const responses={'/user/log':url=>url.searchParams.has('nanostamp')?{log:second}:{log:first,_metadata:{links:{next:'https://api.torn.com/v2/user/log?to=100&nanostamp=100000000123'}}}};
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses});const job={id:'dense',period:{from:90,to:110},logScanPeriod:{from:90,to:110},logTypeIds:[4210],logMode:'filtered',diagnostics:{parsedRows:0,matchedRows:0}};
+  await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,150);assert.equal(calls[1].searchParams.get('nanostamp'),'100000000123');assert.equal(job.completedSources.log,true);
+});
+test('another-tab sync lock prevents writes and unnecessary API calls',async()=>{
+  const {app,context,calls,storage}=harness({stored:{apiKey:key}});context.navigator={locks:{request:async(name,options,callback)=>callback(null)}};await app.syncAll({background:true});assert.equal(calls.length,0);assert.equal(storage.has('tta:v1:syncJob'),false);assert.equal(app.state.notices[0].code,'SYNC_OTHER_TAB');
+});
+test('Torn PDA native HTTP responses follow the same safe API parser',async()=>{
+  const {app,context,calls}=harness({stored:{apiKey:key}});context.window.PDA_httpGet=async()=>({status:200,responseText:JSON.stringify({value:123})});assert.equal((await app.apiGet('/test')).value,123);assert.equal(calls.length,0);
+});

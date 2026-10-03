@@ -1,0 +1,13 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..'),now=Math.floor(Date.now()/1000);
+const {harness,item,trade,entry}=require('../tests/harness.cjs');
+const {app}=harness({stored:{catalog:[item,{id:258,name:'Jaguar Plushie',type:'Plushie',marketPrice:15000,image:'https://www.torn.com/images/items/258/large.png'}]}});
+const transactions=app.parsePlayerTrade(trade(105,now-240,[entry(1,'Item',206,3),entry(2,'Money',0,2460000)]),1);
+transactions.unshift({id:'sample-buy',timestamp:now-86400,itemId:206,side:'buy',qty:10,total:7500000,netTotal:7500000,source:'Foreign Market',title:'Item abroad buy',free:false});
+transactions.push({id:'shop-sale',timestamp:now-120,itemId:206,side:'sell',qty:2,total:1550000,netTotal:1550000,source:'Torn Shop',title:'Item shop sell',free:false});
+const seed={catalog:[{...item,marketPrice:830000,image:'https://www.torn.com/images/items/206/large.png'}],catalogVersion:2,catalogUpdatedAt:now,transactions,cashFlows:[{id:'wage',timestamp:now-3600,direction:'in',amount:250000,category:'Wages / Job',source:'Torn Log',title:'Company employee pay'}],sync:{lastSync:now,firstSyncComplete:false,autoDiscoveryComplete:true,coverageFrom:now-86400,diagnostics:{}},financialSnapshots:[{timestamp:now,networth:{timestamp:now,total:45000000,items:{inventory:12500000},money:{wallet:2500000},assets:{bank:30000000},points:0},money:{wallet:2500000}}]};
+fs.mkdirSync(path.join(root,'.preview'),{recursive:true});
+const html=`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Torn Analyzer Preview</title><body style="margin:0;background:#121315;color:#f3f4f5;font:16px system-ui"><p style="padding:24px">Local sample-data preview. Open the analyzer using the floating button.</p><script>const seed=${JSON.stringify(seed)};for(const [key,value] of Object.entries(seed))localStorage.setItem('tta:v1:'+key,JSON.stringify(value));</script><script src="../torn-trade-analyzer.user.js"></script></body></html>`;
+fs.writeFileSync(path.join(root,'.preview/index.html'),html);
+console.log(path.join(root,'.preview/index.html'));
