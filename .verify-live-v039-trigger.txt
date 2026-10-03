@@ -1,1 +1,0 @@
-Verify the public Worker is serving v0.3.9 compact responsive tables.
