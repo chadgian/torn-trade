@@ -1,0 +1,30 @@
+name: Verify live Torn Cash Flow Analyzer v0.3.9
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.verify-live-v039-trigger.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify live Worker endpoint
+        run: |
+          set -euo pipefail
+          url="https://torn-trade.obliviate.workers.dev/torn-trade-analyzer.user.js?verify=$(date +%s)"
+          curl -fLsS --retry 3 --retry-delay 2 "$url" -o /tmp/live.user.js
+          grep -Fq '// @version      0.3.9' /tmp/live.user.js
+          grep -Fq "const VERSION = '0.3.9';" /tmp/live.user.js
+          grep -Fq 'tta-compact-table' /tmp/live.user.js
+          grep -Fq 'tta-ledger-compact-meta' /tmp/live.user.js
+          if grep -Fq '.tta-ledgertable tr{display:grid' /tmp/live.user.js; then
+            echo "Old card/grid ledger layout still present"
+            exit 1
+          fi
+          echo "Live Worker is serving v0.3.9 compact responsive tables."
