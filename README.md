@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.6.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.3.7.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 
@@ -28,6 +28,16 @@ https://raw.githubusercontent.com/chadgian/torn-trade/main/torn-trade-analyzer.u
 For PR testing, use the review branch's raw file rather than main. Existing metadata still points to the original Worker update/download endpoint; this change does not publish to that endpoint.
 
 Create or save a key in Settings, or use Torn PDA's injected key. Required selections are User Log, Trade, Trades, Money, Networth; Torn Items, Logtypes; and Company Profile, Employees for director accounting. Restricted log scopes are flagged.
+
+## Storage Backends
+
+Large analyzer datasets no longer depend on the browser's small shared `localStorage` quota.
+
+- **Torn PDA:** automatically uses `PDA_storage`, Torn PDA's native per-script SQLite-backed storage. Existing history is migrated from `localStorage`, verified, and only then removed from the old store. Torn PDA can expose its per-script storage-limit control for the analyzer.
+- **Other modern browsers/userscript managers:** uses IndexedDB for large history and caches.
+- **Fallback:** if neither native Torn PDA storage nor IndexedDB is available, the analyzer keeps working with `localStorage` and shows a Data Quality warning about the limited backend.
+- Small synchronous preferences and resumable-sync metadata stay in `localStorage`; large transaction, trade, cash-flow, snapshot, catalog and log-type datasets use the durable backend.
+- Data Quality shows the active history backend and the available usage/quota information. A successful sync watermark is not advanced until queued durable writes have finished.
 
 ## Accounting And Freshness
 

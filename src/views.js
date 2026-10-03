@@ -159,7 +159,7 @@
     try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(_){reportDiagnostic('NETWORTH_UNAVAILABLE','warning','Net-worth snapshot could not be refreshed.',{source:'/user/networth'});}
     try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(_){reportDiagnostic('MONEY_UNAVAILABLE','warning','Current money snapshot could not be refreshed.',{source:'/user/money'});}
     if(!snap.networth&&!snap.money)return null;
-    const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);if(!save('financialSnapshots',next))throw new AnalyzerError('STORAGE_WRITE','The financial snapshot could not be saved.');state.financialSnapshots=next;return snap;
+    const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);await saveDurable('financialSnapshots',next);state.financialSnapshots=next;return snap;
   }
   async function refreshCompanyDailyAdjustment(userId,serverNow=nowSec()) {
     const me=Number(userId)||0;if(!(me>0))return null;
@@ -326,10 +326,10 @@
       const file=input.files?.[0];if(!file){input.remove();return;}
       const reader=new FileReader();
       reader.onerror=()=>{reportDiagnostic('IMPORT_READ','error','The backup file could not be read.',{source:'import'});input.remove();render();};
-      reader.onload=()=>{
+      reader.onload=async()=>{
         try{
           if(state.syncing||state.backgroundSyncing)throw new AnalyzerError('IMPORT_SYNC_ACTIVE','A sync started while choosing the backup. Stop it before importing.');
-          applyBackup(JSON.parse(String(reader.result||'')));
+          await applyBackup(JSON.parse(String(reader.result||'')));
           toast('Backup imported. Reloading analyzer...');setTimeout(()=>location.reload(),450);
         }catch(error){diagnosticFromError(error,'import');render();toast('Import failed. Existing history retained; see Data Quality.');}
         finally{input.remove();}

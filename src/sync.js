@@ -206,8 +206,9 @@
   function decorateSyncProgress(job,progress) {
     const text=String(progress||''),m=fullResyncProgressMetrics(job);if(!m)return text;const pc=Math.max(0,Math.min(99,Math.round(m.percent))),eta=m.etaNote||(m.etaMs!=null?`~${formatEtaDuration(m.etaMs)} left`:'estimating time left');return `${pc}% \u00B7 ${eta} \u00B7 ${text}`;
   }
-  function checkpointSyncJob(job,progress='') {
+  async function checkpointSyncJob(job,progress='') {
     if(progress){job.progressRaw=String(progress);job.progress=decorateSyncProgress(job,job.progressRaw);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}
+    await flushDurableStorage();
     if(!saveSyncJob(job))throw new AnalyzerError('STORAGE_WRITE','Unable to save the resumable sync checkpoint. Free some browser storage and try again.',{source:'syncJob',phase:job.phase});
   }
   function stripSyncRunMarkers() {
@@ -216,7 +217,7 @@
       if(!t||!Object.prototype.hasOwnProperty.call(t,'syncRunId'))return t;
       const x={...t};delete x.syncRunId;changed=true;return x;
     });
-    if(changed){localStorage.setItem(NS+'transactions',JSON.stringify(state.transactions));resetAnalyticsCache();}
+    if(changed){save('transactions',state.transactions);resetAnalyticsCache();}
     resumableTxMap=null;resumableTxJob='';
   }
   function checkpointTransactionRows(job,rows) {
@@ -237,7 +238,7 @@
     }
     if(job.diagnostics&&updated)job.diagnostics.transactionRowsUpdated=(Number(job.diagnostics.transactionRowsUpdated)||0)+updated;
     if(!changed)return 0;
-    const next=[...resumableTxMap.values()];localStorage.setItem(NS+'transactions',JSON.stringify(next));state.transactions=next;resetAnalyticsCache();state.renderPending=true;return added;
+    const next=[...resumableTxMap.values()];save('transactions',next);state.transactions=next;resetAnalyticsCache();state.renderPending=true;return added;
   }
   function finalizeResumableTransactions(job) {
     let freshCount=0;const next=[];
@@ -247,12 +248,12 @@
       if(Object.prototype.hasOwnProperty.call(row,'syncRunId')){const x={...row};delete x.syncRunId;next.push(x);}else next.push(row);
     }
     next.sort((a,b)=>(Number(a.timestamp)||0)-(Number(b.timestamp)||0)||String(a.id).localeCompare(String(b.id)));
-    localStorage.setItem(NS+'transactions',JSON.stringify(next));state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();return freshCount;
+    save('transactions',next);state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();return freshCount;
   }
   function replaceTradeTransactions(job,tradeId,rows) {
     const next=state.transactions.filter(row=>Number(row.tradeId)!==Number(tradeId));
     for(const row of rows)next.push({...row,syncRunId:job.id});
-    localStorage.setItem(NS+'transactions',JSON.stringify(next));
+    save('transactions',next);
     state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();state.renderPending=true;
   }
   function abandonResumableMarkers(job) {
@@ -261,20 +262,20 @@
       if(row?.syncRunId!==job?.id)return row;
       const x={...row};delete x.syncRunId;changed=true;return x;
     });
-    if(changed)localStorage.setItem(NS+'transactions',JSON.stringify(state.transactions));
+    if(changed)save('transactions',state.transactions);
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
     return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
-  function createResumableSyncJob(syncMode='quick',background=false) {
+  async function createResumableSyncJob(syncMode='quick',background=false) {
     stripSyncRunMarkers();
     const mode=syncMode==='full'?'full':'quick',now=nowSec(),last=Number(state.sync?.lastSync)||0;
     const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
     const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} \u2013 ${tctDateTimeStr(now)} TCT`;
     const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
     const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
-    checkpointSyncJob(job,job.progress);return job;
+    await checkpointSyncJob(job,job.progress);return job;
   }
 
   async function resetHistoryForFullResync() {
@@ -287,7 +288,7 @@
     }
     const nextSync={...(state.sync||{}),lastSync:0,coverageFrom:0,coverageTo:0,firstSyncComplete:false,autoDiscoveryComplete:false};
     try{
-      for(const key of historyKeys)localStorage.setItem(NS+key,'[]');
+      for(const key of historyKeys)await saveDurable(key,[]);
       localStorage.removeItem(NS+'syncCache');localStorage.setItem(NS+'sync',JSON.stringify(nextSync));
     }catch(error){
       try{await restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
@@ -301,8 +302,9 @@
     const backup=await readFullResyncBackup();if(!backup)return;
     if(typeof indexedDB!=='undefined'&&load('fullResyncBackup',null)?.storage!=='indexeddb')await saveFullResyncBackup(backup);
     // The durable backup remains intact if restoring any of these keys fails.
-    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])localStorage.removeItem(NS+key);
-    for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','sync']){localStorage.setItem(NS+key,JSON.stringify(backup[key]));state[key]=backup[key];}
+    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial'])await removeStoredKey(key);
+    for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial']){await saveDurable(key,backup[key]||[]);state[key]=backup[key]||[];}
+    localStorage.setItem(NS+'sync',JSON.stringify(backup.sync));state.sync=backup.sync;
     if(backup.syncCache)localStorage.setItem(NS+'syncCache',JSON.stringify(backup.syncCache));else localStorage.removeItem(NS+'syncCache');
     await clearFullResyncBackup();syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();resolveDiagnostic('REBUILD_RECOVERY');
   }
@@ -383,12 +385,12 @@
     while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
       const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
-      checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
+      await checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params={...(job.logPageParams||{limit:100,to:cursor}),from:scanPeriod.from};if(filtered)params.log=batchIds.join(',');
       const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+requests;
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
-      if(!rows.length){advanceResumableLogBatch(job);checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
+      if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
@@ -409,7 +411,7 @@
       const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
       job.diagnostics.oldestTimestamp=job.diagnostics.oldestTimestamp?Math.min(job.diagnostics.oldestTimestamp,oldest):oldest;
       if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logLastPageIds=rows.map(row=>String(row.id));job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
-      checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
+      await checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
     if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');}
@@ -419,10 +421,10 @@
     const serverNow=Number(job.tctNow)||nowSec();
     const verifyFrom=Number(job.logScanPeriod?.from)||0;
     const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
-    if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
+    if(!(verifyTo>=verifyFrom)){job.phase='trades-list';await checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
     let cursor=verifyTo,page=0;
     while(!syncJobCancelled(job)){
-      page++;checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
+      page++;await checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
       const params={...(job.abroadPageParams||{limit:100,log:'4201',to:cursor}),from:verifyFrom};
       const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.abroadPageSeen||[],'log',job.abroadLastPageIds||[]);
       job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+requests;
@@ -444,9 +446,9 @@
       }
       checkpointTransactionRows(job,parsedRows);
       if(!next)break;
-      job.abroadPageParams=next;job.abroadPageSeen=seen;job.abroadLastPageIds=rows.map(row=>String(row.id));cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
+      job.abroadPageParams=next;job.abroadPageSeen=seen;job.abroadLastPageIds=rows.map(row=>String(row.id));cursor=Number(next.to)||cursor;await checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
     }
-    job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
+    job.phase='trades-list';await checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
   }
 
   function compactTradeHeader(row) {
@@ -455,16 +457,16 @@
   }
   async function runResumableTradeList(job) {
     const scanPeriod=job.tradeScanPeriod;
-    if(!scanPeriod){job.phase='finalize';checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
+    if(!scanPeriod){job.phase='finalize';await checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
     const found=new Map([...Object.values(ensureSyncCache().pendingTrades),...(job.tradeHeaders||[])].map(x=>[Number(x.id),x]));
     let params={...(job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to}),from:scanPeriod.from};
     while(!syncJobCancelled(job)){
-      const page=(Number(job.diagnostics.tradeListPages)||0)+1;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
+      const page=(Number(job.diagnostics.tradeListPages)||0)+1;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
       const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
-      if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
-      job.tradeListSeen=seen;job.tradeListParams=next;params=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
+      if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;await checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
+      job.tradeListSeen=seen;job.tradeListParams=next;params=next;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
     }
     return false;
   }
@@ -474,9 +476,9 @@
       const i=Number(job.tradeDetailIndex)||0,h=headers[i];
       if(isTradeVerified(job,h)){
         job.diagnostics.tradeDetailsSkipped=(Number(job.diagnostics.tradeDetailsSkipped)||0)+1;job.tradeDetailIndex=i+1;
-        checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 already verified, skipped`);continue;
+        await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 already verified, skipped`);continue;
       }
-      checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 fetching missing detailed trade #${Number(h.id)}`);
+      await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 fetching missing detailed trade #${Number(h.id)}`);
       const data=await syncApiGet(`/user/${Number(h.id)}/trade`);job.diagnostics.tradeDetails=(Number(job.diagnostics.tradeDetails)||0)+1;
       const trade=data?.trade,detailEntries=Array.isArray(trade?.items)?trade.items:[];
       const participants=[Number(trade?.user?.id),Number(trade?.trader?.id)];
@@ -494,7 +496,7 @@
         reportDiagnostic('TRADE_DEFERRED','warning','Completed trade details are incomplete. This trade will be retried even after it leaves the recent scan window.',{tradeId:Number(h.id),timestamp:Number(h.completed_at),source:'Player Trade'});
         job.diagnostics.tradeDetailsDeferred=(Number(job.diagnostics.tradeDetailsDeferred)||0)+1;job.tradeDetailIndex=i+1;
         const why=!detailReady?'detail payload not ready':'item rows incomplete';
-        checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 ${why}; deferred for the next sync`);
+        await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 ${why}; deferred for the next sync`);
         if(job.tradeDetailIndex<headers.length&&!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
         continue;
       }
@@ -509,10 +511,10 @@
         job.diagnostics.tradeSoldQty=(Number(job.diagnostics.tradeSoldQty)||0)+soldRows.reduce((n,x)=>n+(Number(x.qty)||0),0);
         job.diagnostics.tradeBoughtQty=(Number(job.diagnostics.tradeBoughtQty)||0)+boughtRows.reduce((n,x)=>n+(Number(x.qty)||0),0);
       }
-      markTradeVerified(job,h.id,Math.max(Number(h.modified_at)||0,Number(h.completed_at)||0,Number(h.timestamp)||0));job.tradeDetailIndex=i+1;checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
+      markTradeVerified(job,h.id,Math.max(Number(h.modified_at)||0,Number(h.completed_at)||0,Number(h.timestamp)||0));job.tradeDetailIndex=i+1;await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
       if(job.tradeDetailIndex<headers.length&&!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
-    if(!syncJobCancelled(job)){job.phase='finalize';checkpointSyncJob(job,'Finalizing cached history and FIFO inputs\u2026');return true;}return false;
+    if(!syncJobCancelled(job)){job.phase='finalize';await checkpointSyncJob(job,'Finalizing cached history and FIFO inputs\u2026');return true;}return false;
   }
   async function refreshLiveSyncBounds(job) {
     let serverNow=nowSec();
@@ -538,15 +540,15 @@
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
-    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
+    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
     job.diagnostics.recentLogRecheckHours=(job.period.to-job.logScanPeriod.from)/3600;job.diagnostics.recentTradeRecheckHours=(job.period.to-job.tradeScanPeriod.from)/3600;
-    if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
-    else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
+    if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';await checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
+    else{job.phase='trades-list';await checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
   }
   async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
@@ -558,6 +560,7 @@
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
+    await flushDurableStorage();
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){
@@ -572,7 +575,7 @@
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
-  function migrateHistoryPagination(job) {
+  async function migrateHistoryPagination(job) {
     if(job.paginationVersion===HISTORY_PAGINATION_VERSION)return false;
     job.paginationVersion=HISTORY_PAGINATION_VERSION;
     if(job.phase==='setup')return false;
@@ -586,7 +589,7 @@
     job.lastError='';job.lastErrorCode='';job.lastErrorContext={};
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds?.length||0,Math.ceil((job.logTypeIds?.length||0)/MAX_LOG_IDS_PER_REQUEST));
     reportDiagnostic('CURSOR_CHECKPOINT_UPDATED','info','The saved scan was rewound to verify the original date range with updated cursor handling. Cached rows and the recovery copy were retained.',{source:'sync'});
-    checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
+    await checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
   }
   async function runResumableSync(job,resumed=false,options={}) {
     const background=!!(options?.background||job?.background);
@@ -601,21 +604,21 @@
       if(state.open)await nextPaint();
     }
     try{
-      if(resumed)checkpointSyncJob(job,job.progress);
-      migrateHistoryPagination(job);
+      if(resumed)await checkpointSyncJob(job,job.progress);
+      await migrateHistoryPagination(job);
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
         else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
-          if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
-          else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
+          if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);await checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
+          else{job.phase='logs-abroad-verify';await checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
         }
-        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
+        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='logs-abroad-verify';await checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
         else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());await finishResumableSync(job);break;}
-        else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
+        else{job.phase='setup';await checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
       }
       if(syncJobCancelled(job)){
         job.cancelled=true;
@@ -629,7 +632,7 @@
         try{commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();}catch(_){}
         state.backgroundSyncProgress=`Background Quick Sync skipped \u00B7 ${job.lastError}`;
       }else{
-        try{checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){diagnosticFromError(saveError,'checkpoint');setSyncProgress(`Sync stopped: ${saveError.message}`);if(!job.fullResetDone){clearSyncJob();try{abandonResumableMarkers(job);}catch(markerError){diagnosticFromError(markerError,'storage');}}}
+        try{await checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){diagnosticFromError(saveError,'checkpoint');setSyncProgress(`Sync stopped: ${saveError.message}`);if(!job.fullResetDone){clearSyncJob();try{abandonResumableMarkers(job);}catch(markerError){diagnosticFromError(markerError,'storage');}}}
       }
     }
     finally{
@@ -684,7 +687,7 @@
     if(job?.cancelled){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&job.syncMode!==requestedMode){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&syncJobIsStale(job)){await discardStaleSyncJob(job);job=null;}
-    if(!job)job=createResumableSyncJob(requestedMode,background);
+    if(!job)job=await createResumableSyncJob(requestedMode,background);
     if(background)job.background=true;
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }

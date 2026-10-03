@@ -32,7 +32,7 @@
     try{localStorage.setItem(NS+'notices',JSON.stringify(state.notices));}catch(_){}
   }
   function diagnosticFromError(error,source='interface') {
-    if(error?.name==='QuotaExceededError'||error?.code===22)return reportDiagnostic('STORAGE_QUOTA','error','Browser storage is full. Export a backup, free browser storage and retry. The last successful sync has not advanced.',{source:'storage'});
+    if(error?.name==='QuotaExceededError'||error?.code===22||error?.code==='QuotaExceeded'||error?.code==='GlobalQuotaExceeded')return reportDiagnostic('STORAGE_QUOTA','error','Storage is full. Increase the Torn PDA script limit or free browser site storage, then retry. The last successful sync has not advanced.',{source:'storage'});
     return reportDiagnostic(typeof error?.code==='string'?error.code:'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{source,...(error?.context||{})});
   }
   function dataQualityNotices() {
@@ -69,8 +69,11 @@
     return `<div class="tta-quality ${errors?'error':notices.length?'warning':'ok'}" role="status"><span>${esc(label)}</span><button class="tta-btn secondary" data-act="diagnostics">Details</button></div>`;
   }
   function diagnosticsHtml() {
-    const notices=dataQualityNotices(),d=state.sync?.diagnostics||{};
-    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p><pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
+    const notices=dataQualityNotices(),d=state.sync?.diagnostics||{},st=durableStorageState||{};
+    const backend=st.backend==='pda'?'Torn PDA native storage':st.backend==='indexeddb'?'Browser IndexedDB':'Browser localStorage fallback';
+    const usage=st.quota>0?((st.used/1048576).toFixed(1)+' / '+(st.quota/1048576).toFixed(1)+' MB'):(st.backend==='localStorage'?'Shared browser quota':'Available');
+    const storageHtml=`<section class="tta-fin-section"><h3>Storage</h3><div class="tta-fin-row"><span>History backend</span><b>${esc(backend)}</b></div><div class="tta-fin-row"><span>Usage</span><b>${esc(usage)}</b></div>${st.migrated?'<div class="tta-note">'+qty(st.migrated)+' legacy data sets were moved safely from localStorage during this session.</div>':''}</section>`;
+    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p><pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};

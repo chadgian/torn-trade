@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.3.6
+// @version      0.3.7
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -15,8 +15,210 @@
   'use strict';
 
 
+  // Source: storage.js
+  // Large analyzer datasets use Torn PDA native storage when available and IndexedDB elsewhere.
+  // localStorage remains the last-resort fallback and is kept for small synchronous preferences.
+  const DURABLE_STORAGE_KEYS=new Set(['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','catalog','logTypes']);
+  const durableCache=new Map();
+  const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
+  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null;
+
+  function storageIssue(key) {
+    try{if(typeof storageIssues!=='undefined'&&!storageIssues.includes(key))storageIssues.push(key);}catch(_){}
+  }
+  function normalizedStoredValue(k,value,fallback) {
+    if(value==null)return fallback;
+    try{
+      if(fallback!=null&&(Array.isArray(fallback)!==Array.isArray(value)||typeof fallback!==typeof value))throw new Error('Invalid saved type');
+      if(Array.isArray(value)&&['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','catalog','logTypes','notices'].includes(k)){
+        const rows=value.filter(row=>row&&typeof row==='object'&&!Array.isArray(row));
+        if(rows.length!==value.length)storageIssue(k);
+        return rows;
+      }
+      return value;
+    }catch(_){storageIssue(k);return fallback;}
+  }
+  function parseLocalValue(k,fallback) {
+    try{
+      const raw=localStorage.getItem(NS+k);if(raw==null)return fallback;
+      return normalizedStoredValue(k,JSON.parse(raw),fallback);
+    }catch(_){storageIssue(k);return fallback;}
+  }
+  function load(k,fallback) {
+    if(DURABLE_STORAGE_KEYS.has(k)&&durableCache.has(k))return normalizedStoredValue(k,durableCache.get(k),fallback);
+    return parseLocalValue(k,fallback);
+  }
+  function storageDiagnostic(code,severity,message,context={}) {
+    try{if(typeof reportDiagnostic==='function')reportDiagnostic(code,severity,message,context);}catch(_){}
+  }
+  function isQuotaError(error) {
+    return error?.name==='QuotaExceededError'||error?.code===22||error?.code==='QuotaExceeded'||error?.code==='GlobalQuotaExceeded';
+  }
+  function storageError(error,key) {
+    const quota=isQuotaError(error),message=quota
+      ? 'Analyzer storage is full. Increase the Torn PDA script limit or free browser site storage, then retry.'
+      : 'Analyzer data could not be written to durable storage. Cached data remains in memory until the page closes.';
+    storageDiagnostic(quota?'STORAGE_QUOTA':'STORAGE_WRITE','error',message,{source:key||'storage'});
+    durableStorageState.lastError=String(error?.code||error?.name||error?.message||error||'storage error').slice(0,120);
+  }
+  function saveLocal(k,v) {
+    try{localStorage.setItem(NS+k,JSON.stringify(v));return true;}
+    catch(error){storageError(error,k);return false;}
+  }
+  function save(k,v) {
+    if(DURABLE_STORAGE_KEYS.has(k)&&durableStorageState.ready&&durableBackend?.kind!=='localStorage'){
+      durableCache.set(k,v);queueDurableWrite(k,v);return true;
+    }
+    return saveLocal(k,v);
+  }
+
+  function openAnalyzerDb() {
+    return new Promise((resolve,reject)=>{
+      if(typeof indexedDB==='undefined'){reject(new Error('IndexedDB unavailable'));return;}
+      let settled=false;
+      const request=indexedDB.open('torn-cash-flow-analyzer',1);
+      const timer=setTimeout(()=>{if(!settled){settled=true;reject(new Error('IndexedDB open timed out'));}},8000);
+      request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv');};
+      request.onerror=()=>{if(!settled){settled=true;clearTimeout(timer);reject(request.error||new Error('IndexedDB open failed'));}};
+      request.onblocked=()=>{if(!settled){settled=true;clearTimeout(timer);reject(new Error('IndexedDB is blocked by another tab'));}};
+      request.onsuccess=()=>{if(!settled){settled=true;clearTimeout(timer);resolve(request.result);}else request.result.close();};
+    });
+  }
+  async function indexedDbBackend() {
+    const db=await openAnalyzerDb();
+    const transact=(mode,action)=>new Promise((resolve,reject)=>{
+      let result,tx;
+      try{
+        tx=db.transaction('kv',mode);
+        const req=action(tx.objectStore('kv'));
+        if(req){
+          req.onsuccess=()=>{result=req.result;};
+          req.onerror=()=>reject(req.error||new Error('IndexedDB request failed'));
+        }
+        tx.oncomplete=()=>resolve(result);
+        tx.onabort=()=>reject(tx.error||new Error('IndexedDB transaction aborted'));
+        tx.onerror=()=>{};
+      }catch(error){reject(error);}
+    });
+    return {kind:'indexeddb',
+      get:key=>transact('readonly',store=>store.get(key)),
+      set:(key,value)=>transact('readwrite',store=>store.put(value,key)),
+      delete:key=>transact('readwrite',store=>store.delete(key)),
+      usage:async()=>{try{const e=await navigator?.storage?.estimate?.();return {used:Number(e?.usage)||0,quota:Number(e?.quota)||0,scope:'origin'};}catch(_){return {used:0,quota:0,scope:'origin'};}}
+    };
+  }
+  function tornPdaBackend() {
+    const api=globalThis.PDA_storage||globalThis.window?.PDA_storage;
+    if(!api||typeof api.get!=='function'||typeof api.set!=='function')return null;
+    return {kind:'pda',
+      get:key=>api.get(key,null),
+      set:(key,value)=>api.set(key,value),
+      delete:key=>api.delete(key),
+      usage:async()=>{const x=await api.usage();return {used:Number(x?.used)||0,quota:Number(x?.quota)||0,scope:'script'};}
+    };
+  }
+  function localBackend() {
+    return {kind:'localStorage',
+      get:async key=>{const raw=localStorage.getItem(key);return raw==null?null:JSON.parse(raw);},
+      set:async(key,value)=>localStorage.setItem(key,JSON.stringify(value)),
+      delete:async key=>localStorage.removeItem(key),
+      usage:async()=>({used:0,quota:0,scope:'origin'})
+    };
+  }
+  async function chooseDurableBackend() {
+    const pda=tornPdaBackend();if(pda)return pda;
+    try{return await indexedDbBackend();}catch(_){return localBackend();}
+  }
+  function applyDurableStateValue(key,value) {
+    durableCache.set(key,value);
+    if(typeof state!=='undefined'&&Object.prototype.hasOwnProperty.call(state,key))state[key]=normalizedStoredValue(key,value,state[key]);
+  }
+  async function initializeDurableStorage() {
+    if(durableStorageState.ready)return durableStorageState;
+    durableBackend=await chooseDurableBackend();
+    durableStorageState.backend=durableBackend.kind;
+    let migrated=0;
+    if(durableBackend.kind!=='localStorage'){
+      for(const key of DURABLE_STORAGE_KEYS){
+        const storageKey=NS+key;
+        let durableValue=null;
+        try{durableValue=await durableBackend.get(storageKey);}catch(error){storageError(error,key);continue;}
+        const localRaw=(()=>{try{return localStorage.getItem(storageKey);}catch(_){return null;}})();
+        if(durableValue==null&&localRaw!=null){
+          try{
+            const localValue=JSON.parse(localRaw);
+            await durableBackend.set(storageKey,localValue);
+            const verified=await durableBackend.get(storageKey);
+            if(JSON.stringify(verified)!==JSON.stringify(localValue))throw new Error('Migration verification failed');
+            durableValue=verified;migrated++;
+          }catch(error){storageError(error,key);continue;}
+        }
+        if(durableValue!=null){
+          applyDurableStateValue(key,durableValue);
+          if(localRaw!=null){try{localStorage.removeItem(storageKey);}catch(_){}}
+        }
+      }
+    }else{
+      for(const key of DURABLE_STORAGE_KEYS){const value=parseLocalValue(key,undefined);if(value!==undefined)applyDurableStateValue(key,value);}
+    }
+    durableStorageState.migrated=migrated;durableStorageState.ready=true;
+    try{const u=await durableBackend.usage();durableStorageState.used=u.used;durableStorageState.quota=u.quota;}catch(_){}
+    if(durableBackend.kind==='localStorage'){
+      storageDiagnostic('STORAGE_FALLBACK','warning','IndexedDB is unavailable, so large history is using limited browser localStorage.',{source:'localStorage'});
+    }
+    return durableStorageState;
+  }
+  function queueDurableWrite(k,v) {
+    if(!DURABLE_STORAGE_KEYS.has(k)||!durableStorageState.ready||durableBackend?.kind==='localStorage')return;
+    durableWriteChain=durableWriteChain.then(async()=>{
+      try{
+        await durableBackend.set(NS+k,v);
+        durableCache.set(k,v);
+        try{localStorage.removeItem(NS+k);}catch(_){}
+        durableWriteFailure=null;
+      }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
+    }).catch(()=>{});
+  }
+  async function saveDurable(k,v) {
+    if(!DURABLE_STORAGE_KEYS.has(k)) {
+      if(!saveLocal(k,v))throw new Error('Local storage write failed');
+      return true;
+    }
+    if(!durableStorageState.ready)await initializeDurableStorage();
+    durableCache.set(k,v);
+    if(durableBackend.kind==='localStorage'){
+      if(!saveLocal(k,v))throw new Error('Local storage write failed');
+      return true;
+    }
+    try{
+      await durableBackend.set(NS+k,v);
+      try{localStorage.removeItem(NS+k);}catch(_){}
+      durableWriteFailure=null;return true;
+    }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
+  }
+  async function flushDurableStorage() {
+    await durableWriteChain;
+    if(durableWriteFailure){const error=durableWriteFailure;durableWriteFailure=null;throw error;}
+    return true;
+  }
+  async function removeStoredKey(k) {
+    durableCache.delete(k);
+    try{localStorage.removeItem(NS+k);}catch(_){}
+    if(DURABLE_STORAGE_KEYS.has(k)&&durableStorageState.ready&&durableBackend?.kind!=='localStorage'){
+      try{await durableBackend.delete(NS+k);}catch(error){storageError(error,k);throw error;}
+    }
+  }
+  async function clearStoredKeys(keys) {for(const key of keys)await removeStoredKey(key);}
+  async function storageStatus() {
+    if(!durableStorageState.ready)await initializeDurableStorage();
+    let usage={used:0,quota:0,scope:'origin'};try{usage=await durableBackend.usage();}catch(_){}
+    durableStorageState.used=Number(usage.used)||0;durableStorageState.quota=Number(usage.quota)||0;
+    return {backend:durableBackend.kind,used:durableStorageState.used,quota:durableStorageState.quota,scope:usage.scope||'origin',migrated:durableStorageState.migrated,lastError:durableStorageState.lastError};
+  }
+
+
   // Source: state.js
-  const VERSION = '0.3.6';
+  const VERSION = '0.3.7';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -132,22 +334,6 @@
     state.netWorthTrackingStartedAt=firstStored;save('netWorthTrackingStartedAt',firstStored);
   }
 
-  function load(k, fallback) {
-    try {
-      const v = localStorage.getItem(NS + k);
-      if(v==null)return fallback;
-      const parsed=JSON.parse(v);
-      if(fallback!=null&&(parsed==null||Array.isArray(fallback)!==Array.isArray(parsed)||typeof fallback!==typeof parsed))throw new Error('Invalid saved type');
-      if(Array.isArray(parsed)&&['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','catalog','logTypes','notices'].includes(k)){
-        const rows=parsed.filter(row=>row&&typeof row==='object'&&!Array.isArray(row));if(rows.length!==parsed.length)storageIssues.push(k);return rows;
-      }
-      return parsed;
-    } catch (_) { storageIssues.push(k); return fallback; }
-  }
-  function save(k, v) {
-    try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; }
-    catch (_) { reportDiagnostic('STORAGE_WRITE', 'error', 'Local changes could not be saved. Free browser storage before syncing again.', {source:k}); return false; }
-  }
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -258,7 +444,7 @@
     try{localStorage.setItem(NS+'notices',JSON.stringify(state.notices));}catch(_){}
   }
   function diagnosticFromError(error,source='interface') {
-    if(error?.name==='QuotaExceededError'||error?.code===22)return reportDiagnostic('STORAGE_QUOTA','error','Browser storage is full. Export a backup, free browser storage and retry. The last successful sync has not advanced.',{source:'storage'});
+    if(error?.name==='QuotaExceededError'||error?.code===22||error?.code==='QuotaExceeded'||error?.code==='GlobalQuotaExceeded')return reportDiagnostic('STORAGE_QUOTA','error','Storage is full. Increase the Torn PDA script limit or free browser site storage, then retry. The last successful sync has not advanced.',{source:'storage'});
     return reportDiagnostic(typeof error?.code==='string'?error.code:'ACTION_FAILED','error',error instanceof AnalyzerError?error.message:'The action failed. Your cached history is still available.',{source,...(error?.context||{})});
   }
   function dataQualityNotices() {
@@ -295,8 +481,11 @@
     return `<div class="tta-quality ${errors?'error':notices.length?'warning':'ok'}" role="status"><span>${esc(label)}</span><button class="tta-btn secondary" data-act="diagnostics">Details</button></div>`;
   }
   function diagnosticsHtml() {
-    const notices=dataQualityNotices(),d=state.sync?.diagnostics||{};
-    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p><pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
+    const notices=dataQualityNotices(),d=state.sync?.diagnostics||{},st=durableStorageState||{};
+    const backend=st.backend==='pda'?'Torn PDA native storage':st.backend==='indexeddb'?'Browser IndexedDB':'Browser localStorage fallback';
+    const usage=st.quota>0?((st.used/1048576).toFixed(1)+' / '+(st.quota/1048576).toFixed(1)+' MB'):(st.backend==='localStorage'?'Shared browser quota':'Available');
+    const storageHtml=`<section class="tta-fin-section"><h3>Storage</h3><div class="tta-fin-row"><span>History backend</span><b>${esc(backend)}</b></div><div class="tta-fin-row"><span>Usage</span><b>${esc(usage)}</b></div>${st.migrated?'<div class="tta-note">'+qty(st.migrated)+' legacy data sets were moved safely from localStorage during this session.</div>':''}</section>`;
+    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p><pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
@@ -370,24 +559,47 @@
     if(data.sync?.accountId&&state.sync.accountId&&Number(data.sync.accountId)!==Number(state.sync.accountId))throw new AnalyzerError('ACCOUNT_MISMATCH','The backup belongs to another account. Export and reset history before switching accounts.');
     return data;
   }
-  function restoreImportRecovery() {
+  async function restoreImportRecovery() {
     const recovery=load('importRecovery',null);if(!recovery)return false;
-    for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])if(Object.prototype.hasOwnProperty.call(recovery,key)){
-      if(recovery[key]===null)localStorage.removeItem(NS+key);else localStorage.setItem(NS+key,recovery[key]);
-      if(BACKUP_KEYS.includes(key))state[key]=load(key,state[key]);
-    }
-    localStorage.removeItem(NS+'importRecovery');resetAnalyticsCache();return true;
-  }
-  function applyBackup(payload) {
-    const data=validateBackup(payload),previous={};
-    for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])previous[key]=localStorage.getItem(NS+key);
-    // Save a write-ahead recovery journal before changing any history key.
-    localStorage.setItem(NS+'importRecovery',JSON.stringify(previous));
     try{
-      for(const key of BACKUP_KEYS)if(data[key]!==undefined)localStorage.setItem(NS+key,JSON.stringify(data[key]));
-      for(const key of IMPORT_CLEAR_KEYS)localStorage.removeItem(NS+key);
-      localStorage.removeItem(NS+'importRecovery');
-    }catch(error){try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Import recovery could not finish. Free browser storage and reload to restore the previous history.',{source:'import'});}throw new AnalyzerError('IMPORT_STORAGE','The backup could not be saved. Previous history was retained or scheduled for recovery.');}
+      for(const key of [...BACKUP_KEYS,...IMPORT_CLEAR_KEYS])if(Object.prototype.hasOwnProperty.call(recovery,key)){
+        const raw=recovery[key];
+        if(raw===null)await removeStoredKey(key);
+        else{
+          const value=typeof raw==='string'?JSON.parse(raw):raw;
+          if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,value);else if(!save(key,value))throw new Error('Recovery write failed');
+          if(BACKUP_KEYS.includes(key)&&Object.prototype.hasOwnProperty.call(state,key))state[key]=value;
+        }
+      }
+      localStorage.removeItem(NS+'importRecovery');resetAnalyticsCache();return true;
+    }catch(error){
+      reportDiagnostic('IMPORT_RECOVERY','error','Previous import recovery could not finish. Existing durable history was left intact where possible.',{source:'import'});
+      throw error;
+    }
+  }
+  async function applyBackup(payload) {
+    const data=validateBackup(payload),previous={};
+    for(const key of BACKUP_KEYS)previous[key]=Object.prototype.hasOwnProperty.call(state,key)?state[key]:load(key,null);
+    for(const key of IMPORT_CLEAR_KEYS)previous[key]=load(key,null);
+    try{
+      for(const key of BACKUP_KEYS)if(data[key]!==undefined){
+        if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,data[key]);
+        else if(!save(key,data[key]))throw new Error('Backup write failed');
+        if(Object.prototype.hasOwnProperty.call(state,key))state[key]=data[key];
+      }
+      for(const key of IMPORT_CLEAR_KEYS)await removeStoredKey(key);
+      resetAnalyticsCache();return true;
+    }catch(error){
+      try{
+        for(const key of BACKUP_KEYS)if(previous[key]!==undefined&&previous[key]!==null){
+          if(DURABLE_STORAGE_KEYS.has(key))await saveDurable(key,previous[key]);else save(key,previous[key]);
+          if(Object.prototype.hasOwnProperty.call(state,key))state[key]=previous[key];
+        }
+        for(const key of IMPORT_CLEAR_KEYS)if(previous[key]!=null)save(key,previous[key]);
+        resetAnalyticsCache();
+      }catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Import rollback could not finish. Reload and restore your exported backup before syncing.',{source:'import'});}
+      throw new AnalyzerError('IMPORT_STORAGE','The backup could not be saved. Previous history was restored where possible.',{source:'import'});
+    }
   }
 
 
@@ -991,7 +1203,7 @@
     try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(_){reportDiagnostic('NETWORTH_UNAVAILABLE','warning','Net-worth snapshot could not be refreshed.',{source:'/user/networth'});}
     try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(_){reportDiagnostic('MONEY_UNAVAILABLE','warning','Current money snapshot could not be refreshed.',{source:'/user/money'});}
     if(!snap.networth&&!snap.money)return null;
-    const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);if(!save('financialSnapshots',next))throw new AnalyzerError('STORAGE_WRITE','The financial snapshot could not be saved.');state.financialSnapshots=next;return snap;
+    const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);await saveDurable('financialSnapshots',next);state.financialSnapshots=next;return snap;
   }
   async function refreshCompanyDailyAdjustment(userId,serverNow=nowSec()) {
     const me=Number(userId)||0;if(!(me>0))return null;
@@ -1158,10 +1370,10 @@
       const file=input.files?.[0];if(!file){input.remove();return;}
       const reader=new FileReader();
       reader.onerror=()=>{reportDiagnostic('IMPORT_READ','error','The backup file could not be read.',{source:'import'});input.remove();render();};
-      reader.onload=()=>{
+      reader.onload=async()=>{
         try{
           if(state.syncing||state.backgroundSyncing)throw new AnalyzerError('IMPORT_SYNC_ACTIVE','A sync started while choosing the backup. Stop it before importing.');
-          applyBackup(JSON.parse(String(reader.result||'')));
+          await applyBackup(JSON.parse(String(reader.result||'')));
           toast('Backup imported. Reloading analyzer...');setTimeout(()=>location.reload(),450);
         }catch(error){diagnosticFromError(error,'import');render();toast('Import failed. Existing history retained; see Data Quality.');}
         finally{input.remove();}
@@ -1510,7 +1722,7 @@
       }
       else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
         await clearFullResyncBackup();
-        ['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir'].forEach(k=>localStorage.removeItem(NS+k));state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
+        await clearStoredKeys(['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','catalog','catalogVersion','catalogUpdatedAt','logTypes','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir']);state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
       }
       }catch(error){diagnosticFromError(error);setBusy(false);render();toast('Action failed. See Data Quality for details.');}
     });
@@ -1575,7 +1787,7 @@
       const data=await apiGet('/torn/items');
       if(!Array.isArray(data.items)||!data.items.length)throw new AnalyzerError('CATALOG_FORMAT','Torn returned an incomplete item catalog.');
       state.catalog=data.items.filter(x=>x&&Number(x.id)>0&&x.name).map(x=>({id:Number(x.id),name:String(x.name),image:x.image||'',type:x.type||'',marketPrice:Number(x.value?.market_price)||0})).sort((a,b)=>a.name.localeCompare(b.name)||a.id-b.id);
-      state.catalogVersion=CATALOG_SCHEMA_VERSION;state.catalogUpdatedAt=nowSec();save('catalog',state.catalog);save('catalogVersion',state.catalogVersion);save('catalogUpdatedAt',state.catalogUpdatedAt);perfCache.catalogRef=null;
+      state.catalogVersion=CATALOG_SCHEMA_VERSION;state.catalogUpdatedAt=nowSec();await saveDurable('catalog',state.catalog);save('catalogVersion',state.catalogVersion);save('catalogUpdatedAt',state.catalogUpdatedAt);perfCache.catalogRef=null;
       resetAnalyticsCache();resolveDiagnostic('CATALOG_STALE');resolveDiagnostic('CATALOG_FAILED');
     }catch(e){reportDiagnostic('CATALOG_FAILED','warning','Catalog refresh failed. Cached prices remain in use.',{source:'/torn/items'});return false;}
     return true;
@@ -1598,7 +1810,7 @@
     if(state.logTypes.length&&!force&&age>=0&&age<24*3600)return state.logTypes;
     const data=await apiGet('/torn/logtypes');
     if(!Array.isArray(data.logtypes)||!data.logtypes.length)throw new AnalyzerError('LOG_TYPES_FORMAT','Torn returned an incomplete log-type catalog.',{source:'/torn/logtypes'});
-    state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();save('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
+    state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();await saveDurable('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
   }
 
   function relevantLogTypes(all) {
@@ -2260,8 +2472,9 @@
   function decorateSyncProgress(job,progress) {
     const text=String(progress||''),m=fullResyncProgressMetrics(job);if(!m)return text;const pc=Math.max(0,Math.min(99,Math.round(m.percent))),eta=m.etaNote||(m.etaMs!=null?`~${formatEtaDuration(m.etaMs)} left`:'estimating time left');return `${pc}% \u00B7 ${eta} \u00B7 ${text}`;
   }
-  function checkpointSyncJob(job,progress='') {
+  async function checkpointSyncJob(job,progress='') {
     if(progress){job.progressRaw=String(progress);job.progress=decorateSyncProgress(job,job.progressRaw);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}
+    await flushDurableStorage();
     if(!saveSyncJob(job))throw new AnalyzerError('STORAGE_WRITE','Unable to save the resumable sync checkpoint. Free some browser storage and try again.',{source:'syncJob',phase:job.phase});
   }
   function stripSyncRunMarkers() {
@@ -2270,7 +2483,7 @@
       if(!t||!Object.prototype.hasOwnProperty.call(t,'syncRunId'))return t;
       const x={...t};delete x.syncRunId;changed=true;return x;
     });
-    if(changed){localStorage.setItem(NS+'transactions',JSON.stringify(state.transactions));resetAnalyticsCache();}
+    if(changed){save('transactions',state.transactions);resetAnalyticsCache();}
     resumableTxMap=null;resumableTxJob='';
   }
   function checkpointTransactionRows(job,rows) {
@@ -2291,7 +2504,7 @@
     }
     if(job.diagnostics&&updated)job.diagnostics.transactionRowsUpdated=(Number(job.diagnostics.transactionRowsUpdated)||0)+updated;
     if(!changed)return 0;
-    const next=[...resumableTxMap.values()];localStorage.setItem(NS+'transactions',JSON.stringify(next));state.transactions=next;resetAnalyticsCache();state.renderPending=true;return added;
+    const next=[...resumableTxMap.values()];save('transactions',next);state.transactions=next;resetAnalyticsCache();state.renderPending=true;return added;
   }
   function finalizeResumableTransactions(job) {
     let freshCount=0;const next=[];
@@ -2301,12 +2514,12 @@
       if(Object.prototype.hasOwnProperty.call(row,'syncRunId')){const x={...row};delete x.syncRunId;next.push(x);}else next.push(row);
     }
     next.sort((a,b)=>(Number(a.timestamp)||0)-(Number(b.timestamp)||0)||String(a.id).localeCompare(String(b.id)));
-    localStorage.setItem(NS+'transactions',JSON.stringify(next));state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();return freshCount;
+    save('transactions',next);state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();return freshCount;
   }
   function replaceTradeTransactions(job,tradeId,rows) {
     const next=state.transactions.filter(row=>Number(row.tradeId)!==Number(tradeId));
     for(const row of rows)next.push({...row,syncRunId:job.id});
-    localStorage.setItem(NS+'transactions',JSON.stringify(next));
+    save('transactions',next);
     state.transactions=next;resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();state.renderPending=true;
   }
   function abandonResumableMarkers(job) {
@@ -2315,20 +2528,20 @@
       if(row?.syncRunId!==job?.id)return row;
       const x={...row};delete x.syncRunId;changed=true;return x;
     });
-    if(changed)localStorage.setItem(NS+'transactions',JSON.stringify(state.transactions));
+    if(changed)save('transactions',state.transactions);
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
     return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
-  function createResumableSyncJob(syncMode='quick',background=false) {
+  async function createResumableSyncJob(syncMode='quick',background=false) {
     stripSyncRunMarkers();
     const mode=syncMode==='full'?'full':'quick',now=nowSec(),last=Number(state.sync?.lastSync)||0;
     const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
     const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} \u2013 ${tctDateTimeStr(now)} TCT`;
     const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
     const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
-    checkpointSyncJob(job,job.progress);return job;
+    await checkpointSyncJob(job,job.progress);return job;
   }
 
   async function resetHistoryForFullResync() {
@@ -2341,7 +2554,7 @@
     }
     const nextSync={...(state.sync||{}),lastSync:0,coverageFrom:0,coverageTo:0,firstSyncComplete:false,autoDiscoveryComplete:false};
     try{
-      for(const key of historyKeys)localStorage.setItem(NS+key,'[]');
+      for(const key of historyKeys)await saveDurable(key,[]);
       localStorage.removeItem(NS+'syncCache');localStorage.setItem(NS+'sync',JSON.stringify(nextSync));
     }catch(error){
       try{await restoreFullResyncBackup({fullResetDone:true});}catch(_){reportDiagnostic('REBUILD_RECOVERY','error','History recovery could not finish. Free browser storage and reload.',{source:'storage'});}
@@ -2355,8 +2568,9 @@
     const backup=await readFullResyncBackup();if(!backup)return;
     if(typeof indexedDB!=='undefined'&&load('fullResyncBackup',null)?.storage!=='indexeddb')await saveFullResyncBackup(backup);
     // The durable backup remains intact if restoring any of these keys fails.
-    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])localStorage.removeItem(NS+key);
-    for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','sync']){localStorage.setItem(NS+key,JSON.stringify(backup[key]));state[key]=backup[key];}
+    if(load('fullResyncBackup',null)?.storage==='indexeddb')for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial'])await removeStoredKey(key);
+    for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial']){await saveDurable(key,backup[key]||[]);state[key]=backup[key]||[];}
+    localStorage.setItem(NS+'sync',JSON.stringify(backup.sync));state.sync=backup.sync;
     if(backup.syncCache)localStorage.setItem(NS+'syncCache',JSON.stringify(backup.syncCache));else localStorage.removeItem(NS+'syncCache');
     await clearFullResyncBackup();syncCacheMem=null;resumableTxMap=null;resetAnalyticsCache();resolveDiagnostic('REBUILD_RECOVERY');
   }
@@ -2437,12 +2651,12 @@
     while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
       const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
-      checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
+      await checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params={...(job.logPageParams||{limit:100,to:cursor}),from:scanPeriod.from};if(filtered)params.log=batchIds.join(',');
       const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+requests;
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
-      if(!rows.length){advanceResumableLogBatch(job);checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
+      if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
@@ -2463,7 +2677,7 @@
       const oldest=Math.min(...timestamps),signature=rows.map(rawLogKey).join('|');
       job.diagnostics.oldestTimestamp=job.diagnostics.oldestTimestamp?Math.min(job.diagnostics.oldestTimestamp,oldest):oldest;
       if(!next)advanceResumableLogBatch(job);else{job.logPageParams=next;job.logPageSeen=seen;job.logLastPageIds=rows.map(row=>String(row.id));job.logCursorTo=Number(next.to)||oldest;job.logPage=page;job.logPreviousSignature=signature;}
-      checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
+      await checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
     if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');}
@@ -2473,10 +2687,10 @@
     const serverNow=Number(job.tctNow)||nowSec();
     const verifyFrom=Number(job.logScanPeriod?.from)||0;
     const verifyTo=Math.min(Number(job.period?.to)||serverNow,serverNow);
-    if(!(verifyTo>=verifyFrom)){job.phase='trades-list';checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
+    if(!(verifyTo>=verifyFrom)){job.phase='trades-list';await checkpointSyncJob(job,'Abroad Buy verification skipped \u00B7 no overlapping selected period.');return true;}
     let cursor=verifyTo,page=0;
     while(!syncJobCancelled(job)){
-      page++;checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
+      page++;await checkpointSyncJob(job,`Abroad Buy verification \u00B7 page ${page} \u00B7 ${tctDateStr(verifyFrom)} \u2013 ${tctDateStr(Math.min(cursor,serverNow))} TCT`);
       const params={...(job.abroadPageParams||{limit:100,log:'4201',to:cursor}),from:verifyFrom};
       const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.abroadPageSeen||[],'log',job.abroadLastPageIds||[]);
       job.diagnostics.abroadVerifyPages=(Number(job.diagnostics.abroadVerifyPages)||0)+requests;
@@ -2498,9 +2712,9 @@
       }
       checkpointTransactionRows(job,parsedRows);
       if(!next)break;
-      job.abroadPageParams=next;job.abroadPageSeen=seen;job.abroadLastPageIds=rows.map(row=>String(row.id));cursor=Number(next.to)||cursor;checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
+      job.abroadPageParams=next;job.abroadPageSeen=seen;job.abroadLastPageIds=rows.map(row=>String(row.id));cursor=Number(next.to)||cursor;await checkpointSyncJob(job);await sleep(REQUEST_GAP_MS);
     }
-    job.phase='trades-list';checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
+    job.phase='trades-list';await checkpointSyncJob(job,`Abroad Buy verification complete \u00B7 ${qty(job.diagnostics.abroadVerifyRawRows||0)} raw 4201 logs \u00B7 ${qty(job.diagnostics.abroadVerifyQty||0)} overseas item(s) parsed.`);return true;
   }
 
   function compactTradeHeader(row) {
@@ -2509,16 +2723,16 @@
   }
   async function runResumableTradeList(job) {
     const scanPeriod=job.tradeScanPeriod;
-    if(!scanPeriod){job.phase='finalize';checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
+    if(!scanPeriod){job.phase='finalize';await checkpointSyncJob(job,'Player trades already fully covered \u00B7 no trade API requests needed.');return true;}
     const found=new Map([...Object.values(ensureSyncCache().pendingTrades),...(job.tradeHeaders||[])].map(x=>[Number(x.id),x]));
     let params={...(job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to}),from:scanPeriod.from};
     while(!syncJobCancelled(job)){
-      const page=(Number(job.diagnostics.tradeListPages)||0)+1;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
+      const page=(Number(job.diagnostics.tradeListPages)||0)+1;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
       const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
-      if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
-      job.tradeListSeen=seen;job.tradeListParams=next;params=next;checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
+      if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;await checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
+      job.tradeListSeen=seen;job.tradeListParams=next;params=next;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} saved`);await sleep(REQUEST_GAP_MS);
     }
     return false;
   }
@@ -2528,9 +2742,9 @@
       const i=Number(job.tradeDetailIndex)||0,h=headers[i];
       if(isTradeVerified(job,h)){
         job.diagnostics.tradeDetailsSkipped=(Number(job.diagnostics.tradeDetailsSkipped)||0)+1;job.tradeDetailIndex=i+1;
-        checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 already verified, skipped`);continue;
+        await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 already verified, skipped`);continue;
       }
-      checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 fetching missing detailed trade #${Number(h.id)}`);
+      await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 fetching missing detailed trade #${Number(h.id)}`);
       const data=await syncApiGet(`/user/${Number(h.id)}/trade`);job.diagnostics.tradeDetails=(Number(job.diagnostics.tradeDetails)||0)+1;
       const trade=data?.trade,detailEntries=Array.isArray(trade?.items)?trade.items:[];
       const participants=[Number(trade?.user?.id),Number(trade?.trader?.id)];
@@ -2548,7 +2762,7 @@
         reportDiagnostic('TRADE_DEFERRED','warning','Completed trade details are incomplete. This trade will be retried even after it leaves the recent scan window.',{tradeId:Number(h.id),timestamp:Number(h.completed_at),source:'Player Trade'});
         job.diagnostics.tradeDetailsDeferred=(Number(job.diagnostics.tradeDetailsDeferred)||0)+1;job.tradeDetailIndex=i+1;
         const why=!detailReady?'detail payload not ready':'item rows incomplete';
-        checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 ${why}; deferred for the next sync`);
+        await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 ${why}; deferred for the next sync`);
         if(job.tradeDetailIndex<headers.length&&!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
         continue;
       }
@@ -2563,10 +2777,10 @@
         job.diagnostics.tradeSoldQty=(Number(job.diagnostics.tradeSoldQty)||0)+soldRows.reduce((n,x)=>n+(Number(x.qty)||0),0);
         job.diagnostics.tradeBoughtQty=(Number(job.diagnostics.tradeBoughtQty)||0)+boughtRows.reduce((n,x)=>n+(Number(x.qty)||0),0);
       }
-      markTradeVerified(job,h.id,Math.max(Number(h.modified_at)||0,Number(h.completed_at)||0,Number(h.timestamp)||0));job.tradeDetailIndex=i+1;checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
+      markTradeVerified(job,h.id,Math.max(Number(h.modified_at)||0,Number(h.completed_at)||0,Number(h.timestamp)||0));job.tradeDetailIndex=i+1;await checkpointSyncJob(job,`Player trades \u00B7 ${i+1}/${headers.length} \u00B7 detail verified and FIFO rows cached`);
       if(job.tradeDetailIndex<headers.length&&!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
-    if(!syncJobCancelled(job)){job.phase='finalize';checkpointSyncJob(job,'Finalizing cached history and FIFO inputs\u2026');return true;}return false;
+    if(!syncJobCancelled(job)){job.phase='finalize';await checkpointSyncJob(job,'Finalizing cached history and FIFO inputs\u2026');return true;}return false;
   }
   async function refreshLiveSyncBounds(job) {
     let serverNow=nowSec();
@@ -2592,15 +2806,15 @@
     const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
-    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
+    if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
     job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
     job.diagnostics.recentLogRecheckHours=(job.period.to-job.logScanPeriod.from)/3600;job.diagnostics.recentTradeRecheckHours=(job.period.to-job.tradeScanPeriod.from)/3600;
-    if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
-    else{job.phase='trades-list';checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
+    if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';await checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
+    else{job.phase='trades-list';await checkpointSyncJob(job,'Normal sale logs already fully covered \u00B7 skipping log scan.');}
   }
   async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
@@ -2612,6 +2826,7 @@
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
+    await flushDurableStorage();
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){
@@ -2626,7 +2841,7 @@
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     job.active=false;job.phase='done';clearSyncJob();
   }
-  function migrateHistoryPagination(job) {
+  async function migrateHistoryPagination(job) {
     if(job.paginationVersion===HISTORY_PAGINATION_VERSION)return false;
     job.paginationVersion=HISTORY_PAGINATION_VERSION;
     if(job.phase==='setup')return false;
@@ -2640,7 +2855,7 @@
     job.lastError='';job.lastErrorCode='';job.lastErrorContext={};
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds?.length||0,Math.ceil((job.logTypeIds?.length||0)/MAX_LOG_IDS_PER_REQUEST));
     reportDiagnostic('CURSOR_CHECKPOINT_UPDATED','info','The saved scan was rewound to verify the original date range with updated cursor handling. Cached rows and the recovery copy were retained.',{source:'sync'});
-    checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
+    await checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
   }
   async function runResumableSync(job,resumed=false,options={}) {
     const background=!!(options?.background||job?.background);
@@ -2655,21 +2870,21 @@
       if(state.open)await nextPaint();
     }
     try{
-      if(resumed)checkpointSyncJob(job,job.progress);
-      migrateHistoryPagination(job);
+      if(resumed)await checkpointSyncJob(job,job.progress);
+      await migrateHistoryPagination(job);
       while(!syncJobCancelled(job)&&job.active){
         if(job.phase==='setup')await prepareResumableSync(job);
         else if(job.phase==='logs-filtered'){
           await runResumableLogPhase(job,'filtered');if(syncJobCancelled(job))break;
-          if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
-          else{job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
+          if((Number(job.diagnostics?.rawRows)||0)===0&&!job.logScanPeriod?.incremental){job.phase='logs-fallback';job.logMode='unfiltered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';job.diagnostics=newSyncDiagnostics(job,'unfiltered-fallback',0,1);await checkpointSyncJob(job,'Baseline filtered scan returned no raw rows \u00B7 starting compatibility scan\u2026');}
+          else{job.phase='logs-abroad-verify';await checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
         }
-        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='logs-abroad-verify';checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
+        else if(job.phase==='logs-fallback'){await runResumableLogPhase(job,'unfiltered');if(syncJobCancelled(job))break;job.phase='logs-abroad-verify';await checkpointSyncJob(job,'Verifying Foreign/Abroad Buy logs independently\u2026');}
         else if(job.phase==='logs-abroad-verify')await runAbroadBuyVerification(job);
         else if(job.phase==='trades-list')await runResumableTradeList(job);
         else if(job.phase==='trade-details')await runResumableTradeDetails(job);
         else if(job.phase==='finalize'){await refreshFinancialSnapshot();await refreshCompanyDailyAdjustment(job.userId,Number(job.tctNow)||nowSec());await finishResumableSync(job);break;}
-        else{job.phase='setup';checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
+        else{job.phase='setup';await checkpointSyncJob(job,'Repairing an unknown sync checkpoint\u2026');}
       }
       if(syncJobCancelled(job)){
         job.cancelled=true;
@@ -2683,7 +2898,7 @@
         try{commitTradeVerifications(job);abandonResumableMarkers(job);clearSyncJob();}catch(_){}
         state.backgroundSyncProgress=`Background Quick Sync skipped \u00B7 ${job.lastError}`;
       }else{
-        try{checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){diagnosticFromError(saveError,'checkpoint');setSyncProgress(`Sync stopped: ${saveError.message}`);if(!job.fullResetDone){clearSyncJob();try{abandonResumableMarkers(job);}catch(markerError){diagnosticFromError(markerError,'storage');}}}
+        try{await checkpointSyncJob(job,`Sync paused at saved checkpoint \u00B7 ${job.lastError} \u00B7 tap Sync or reload a Torn page to retry.`);}catch(saveError){diagnosticFromError(saveError,'checkpoint');setSyncProgress(`Sync stopped: ${saveError.message}`);if(!job.fullResetDone){clearSyncJob();try{abandonResumableMarkers(job);}catch(markerError){diagnosticFromError(markerError,'storage');}}}
       }
     }
     finally{
@@ -2738,7 +2953,7 @@
     if(job?.cancelled){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&job.syncMode!==requestedMode){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&syncJobIsStale(job)){await discardStaleSyncJob(job);job=null;}
-    if(!job)job=createResumableSyncJob(requestedMode,background);
+    if(!job)job=await createResumableSyncJob(requestedMode,background);
     if(background)job.background=true;
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }
@@ -2774,14 +2989,17 @@
   // Source: bootstrap.js
   let historyRecoveryFinished=false;
   async function initializeStoredHistory() {
-    try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
+    await initializeDurableStorage();
+    try{await restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
+    purgeBogusCrimeCashRows();
     repairCashFlowAccountingRows();
     if(state.transactions.length&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
       reportDiagnostic('PARSER_UPDATED','warning','Cached history was parsed by an older version. Full Resync rechecks historical amounts and trade details.',{source:'migration'});
     }
+    await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
   }
   // Startup recovery and sync must share the same cross-tab write lock.
