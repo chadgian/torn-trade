@@ -189,7 +189,7 @@ test('old verified history requires a full recheck, not just a quick sync',async
   const {app}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:now-100,firstSyncComplete:true,accountingVersion:'0.3.3'}},responses:baseResponses()});
   assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
   await app.syncAll({mode:'quick'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
-  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,2);
+  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,3);
 });
 
 test('reported 215-row legacy checkpoint rewinds and completes with recovery preserved',async()=>{
@@ -250,4 +250,102 @@ test('separate log filters keep independent boundary identities and complete bot
   const job={...boundaryJob(),logTypeIds:[1,2,3,4,5,6,7,8,9,10,4210]};await app.runResumableLogPhase(job,'filtered');
   assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);assert.equal(job.diagnostics.boundaryRecoveries,2);
   assert.equal(calls.filter(u=>u.searchParams.get('log')==='4210').length,5);
+});
+
+function zeroPage(rows,params,value='0') {
+  return {log:rows,_metadata:{nanostamp:value,links:{next:`https://api.torn.com/v2/user/log?from=${params.from}&to=${params.to}&nanostamp=0&limit=100`}}};
+}
+
+test('zero numeric/string metadata and zero-only links never become continuation cursors',()=>{
+  const {app}=harness();const params={from:50,to:110,limit:100};
+  for(const value of [0,'0','000'])assert.equal(app.nextHistoryPage(zeroPage([boundarySale('last')],params,value),params,[boundarySale('last')],[]),null);
+  const linked=zeroPage([boundarySale('last')],params);delete linked._metadata.nanostamp;
+  assert.equal(app.nextHistoryPage(linked,params,linked.log,[]),null);
+  linked._metadata.links.next='https://api.torn.com/v2/user/log?to=0&nanostamp=0';assert.equal(app.nextHistoryPage(linked,params,linked.log,[]),null);
+});
+
+test('zero metadata retains a usable positive link cursor or older timestamp',()=>{
+  const {app}=harness(),params={from:0,to:110,limit:100},rows=[boundarySale('last')];
+  for(const query of ['to=100&nanostamp=100000000001','to=90&nanostamp=0']){
+    const next=app.nextHistoryPage({log:rows,_metadata:{nanostamp:'0',links:{next:'https://api.torn.com/v2/user/log?'+query}}},params,rows,[]);
+    assert.equal(next.from,0);assert.equal(next.to,query.startsWith('to=100')?'100':'90');assert.notEqual(next.nanostamp,'0');
+  }
+});
+
+test('zero terminal pages are independently checked without sending zero or skipping a second',async()=>{
+  for(const value of [0,'0',undefined]){
+    const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+      const data=zeroPage([boundarySale('last')],Object.fromEntries(url.searchParams),value);if(value===undefined)delete data._metadata.nanostamp;return data;
+    }}});
+    const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');
+    assert.equal(calls.length,2);assert.equal(calls[1].searchParams.get('to'),'100');assert.equal(calls.every(u=>!u.searchParams.has('nanostamp')),true);
+    assert.equal(app.state.transactions.length,1);assert.equal(job.completedSources.log,true);assert.equal(job.diagnostics.boundaryRecoveries,1);
+  }
+});
+
+test('date verification loads older unseen logs after a zero cursor',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    const to=Number(url.searchParams.get('to')),rows=to>100?[boundarySale('newest')]:to===100?[boundarySale('last',90)]:[boundarySale('last',90)];
+    return zeroPage(rows,Object.fromEntries(url.searchParams));
+  }}});
+  const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);
+  assert.equal(calls.map(u=>u.searchParams.get('to')).join(','),'110,100,90,90');
+});
+
+test('same-second zero verification checkpoints additional IDs before terminal confirmation',async()=>{
+  let requests=0;
+  const {app}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>zeroPage([boundarySale(++requests%2?'a':'b')],Object.fromEntries(url.searchParams))}});
+  const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');assert.equal(requests,4);assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);
+});
+
+test('zero after a positive nanostamp verifies the boundary and retains every row',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    if(!url.searchParams.has('nanostamp')&&url.searchParams.get('to')==='110')return {log:[boundarySale('first',101)],_metadata:{nanostamp:'101000000001'}};
+    return zeroPage([boundarySale('last')],Object.fromEntries(url.searchParams));
+  }}});
+  const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);assert.equal(calls.length,3);assert.equal(calls.at(-1).searchParams.has('nanostamp'),false);
+});
+
+test('dense zero-cursor pages pause rather than silently losing same-second logs',async()=>{
+  for(const count of [99,100]){
+    const rows=Array.from({length:count},(_,i)=>boundarySale('sale-'+i));
+    const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':url=>zeroPage(rows,Object.fromEntries(url.searchParams))}});
+    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100},[]),e=>e.code==='PAGE_INCOMPLETE');assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+  }
+});
+
+test('zero verification failures and unbounded responses keep history incomplete',async()=>{
+  for(const probe of [{log:[boundarySale('ignored',101)],_metadata:{nanostamp:0}},{log:[boundarySale('out-of-range',40)],_metadata:{nanostamp:0}},{wrong:[]},{error:{code:2}}]){
+    const {app}=harness({stored:{apiKey:key,sync:{lastSync:77}},responses:{'/user/log':url=>url.searchParams.get('to')==='100'?probe:zeroPage([boundarySale('last')],Object.fromEntries(url.searchParams))}});
+    await assert.rejects(app.historyPage('/user/log',{from:50,to:110},[]));assert.equal(app.state.sync.lastSync,77);
+  }
+});
+
+test('saved zero cursor is removed before a valid positive cursor arrives',async()=>{
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:[boundarySale('last')],_metadata:{nanostamp:'100000000003'}}}});
+  const result=await app.historyPage('/user/log',{from:50,to:110,nanostamp:'0'},[]);
+  assert.equal(calls[0].searchParams.has('nanostamp'),false);assert.equal(result.next.nanostamp,'100000000003');assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'),false);
+});
+
+test('reported paused v0.3.5 quick scan and Full Resync complete with zero metadata',async()=>{
+  const responses=baseResponses();responses['/user/log']=url=>{
+    const params=Object.fromEntries(url.searchParams),to=Number(params.to);
+    const rows=params.log?.split(',').includes('4210')?Array.from({length:to>now-30?4:1},(_,i)=>boundarySale('sale-'+i,now-30)):[];
+    return zeroPage(rows,params);
+  };
+  const job={schema:3,id:'reported-zero',active:true,syncMode:'quick',paginationVersion:2,phase:'logs-filtered',period:{from:now-259200,to:now},logScanPeriod:{from:now-259200,to:now},tradeScanPeriod:{from:now-259200,to:now},logPageParams:{from:now-259200,to:now,nanostamp:'0'},logLastPageIds:['sale-0'],updatedAt:now,diagnostics:{rawRows:4,pages:12},lastErrorCode:'PAGE_REPEATED',lastError:'Old zero cursor'};
+  const {app,calls,storage}=harness({stored:{apiKey:key,catalog:[item],syncJob:job,sync:{lastSync:now-500,firstSyncComplete:true,accountingVersion:'0.3.3',historyPaginationVersion:2}},responses});
+  app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Old zero forward cursor',{source:'log',cursor:'0',nextCursor:'1790294845787692899'});
+  app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Unrelated source',{source:'catalog'});
+  await app.runResumableSync(job,true);assert.equal(app.state.sync.lastSync,now);assert.equal(storage.has('tta:v1:syncJob'),false);assert.equal(app.state.transactions.length,4);
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(app.state.transactions.length,4);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
+  assert.equal(calls.filter(u=>u.pathname==='/v2/user/log').every(u=>u.searchParams.get('nanostamp')!=='0'),true);
+  assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='log'),false);assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='catalog'),true);
+});
+
+test('Full Resync takes over a paused quick zero checkpoint instead of resuming quick mode',async()=>{
+  const responses=baseResponses();responses['/user/log']=url=>zeroPage([],Object.fromEntries(url.searchParams));
+  const paused={schema:3,id:'quick',active:true,syncMode:'quick',paginationVersion:2,phase:'logs-filtered',period:{from:now-60,to:now},updatedAt:now,logPageParams:{nanostamp:'0'},lastError:'Zero cursor'};
+  const {app,storage}=harness({stored:{apiKey:key,catalog:[item],syncJob:paused,sync:{lastSync:now-100}},responses});
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.sync.coverageFrom,0);assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(storage.has('tta:v1:syncJob'),false);
 });

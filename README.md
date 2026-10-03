@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.5.** The classic blue-green glass theme and readable text are retained. Transaction, sales and acquisition tables fit the page width; narrow screens use labelled rows with every field and sorting control preserved. Page and filter transitions show loading status; full rebuild recovery copies use IndexedDB where available to avoid duplicating history in localStorage. History pagination keeps the original date range fixed, checkpoints new boundary rows, and verifies a repeated inclusive nanosecond boundary before continuing. Dense, malformed, ignored or rate-limited boundaries still pause safely rather than claiming complete coverage. Legacy paused scans rewind within their existing recovery copy; previously completed history needs one verified Full Resync under the new pagination policy. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.3.6.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 
@@ -80,9 +80,11 @@ Optional browser checks use an installed Playwright package and Chrome:
 
 ```sh
 node tools/browser-check.cjs
+node tools/recovery-check.cjs
+node tools/zero-cursor-check.cjs
 ```
 
-`PLAYWRIGHT_MODULE` can point to an existing Playwright module; `BROWSER_CHANNEL` defaults to `chrome`. Screenshots go to ignored `test-results/`. Tests cover every view at 360, 390, 768 and 1440 px, sales filtering, focus, keyboard expansion, navigation labels and charts. Official API calls are blocked during preview tests.
+`PLAYWRIGHT_MODULE` can point to an existing Playwright module; `BROWSER_CHANNEL` defaults to `chrome`. Screenshots go to ignored `test-results/`. Tests cover every view at 320, 360, 390, 768, 1024 and 1440 px, table widths, sales filtering, focus, keyboard expansion, navigation labels and charts. Recovery checks cover quota failures, reloads, cancellation and cross-tab locks. The zero-cursor check exercises the generated userscript's Full Resync button against the reported failure shape. Live API calls are blocked; sync tests use synthetic responses and a dummy key.
 
 See [architecture and validation](docs/ARCHITECTURE.md) and [historical release notes](docs/LEGACY_CHANGELOG.md).
 
