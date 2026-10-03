@@ -349,6 +349,35 @@
         if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code))throw error;
         if(state.syncCancel)return {rows:[],next:null,seen:[...seen],requests};
         if(attempt===2){
+          if(key==='trades'&&error.code==='PAGE_REPEATED'){
+            const limit=Math.max(1,Number(params.limit||100));
+            const times=rows.map(row=>Number(row?.completed_at||row?.timestamp)).filter(Number.isFinite);
+            // A short repeated trade page can be checked safely with an older
+            // second-boundary request. Dense pages remain errors because moving
+            // back one second could hide additional trades at the same second.
+            if(!rows.length||times.length!==rows.length||rows.length>=Math.max(1,limit-1))throw error;
+            const from=Number(params.from)||0,oldest=Math.min(...times),probeTo=oldest-1;
+            if(probeTo<from){
+              reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info','A repeated short Player Trades page ended at the requested history boundary; the trade list is complete.',{source:key,phase:'trade-boundary-probe',from,to:Number(params.to)||0,count:rows.length});
+              return {rows,next:null,seen:[...seen],requests,boundaryRecovered:true};
+            }
+            const probe={...params,to:probeTo};delete probe.nanostamp;delete probe.offset;
+            setSyncProgress('Verifying the repeated Player Trades boundary');
+            const checked=await syncApiGet(path,probe),older=pageRows(checked,key);requests++;
+            const repeatedIds=new Set(rows.map(row=>String(row.id)));
+            if(older.some(row=>{
+              const ts=Number(row?.completed_at||row?.timestamp)||0;
+              return repeatedIds.has(String(row.id))||ts>probeTo||ts<from;
+            })){
+              throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn did not honor the Player Trades date-boundary check. No trade history was skipped and coverage remains incomplete.',{...error.context,phase:'trade-boundary-probe'});
+            }
+            if(!older.length){
+              reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info','A repeated short Player Trades page was independently verified as the end of trade history.',{source:key,phase:'trade-boundary-probe',from,to:probeTo,count:rows.length});
+              return {rows,next:null,seen:[...seen],requests,boundaryRecovered:true};
+            }
+            reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info','A repeated short Player Trades page was bypassed with an older date-boundary check; older trades are still being loaded.',{source:key,phase:'trade-boundary-probe',from,to:probeTo,count:older.length});
+            return {rows,next:probe,seen:[...seen],requests,boundaryRecovered:true};
+          }
           const boundary=key==='log'&&error.code==='PAGE_REPEATED'?logBoundaryCursor(data,params,rows):null;
           if(!boundary)throw error;
           const known=new Set(previousIds.map(String));
