@@ -346,12 +346,11 @@
   #tta-root .tta-diagnostic-contact .tta-btn{width:100%}
 }
 @media(max-width:420px){
-  #tta-root .tta-nw-daily-metrics{grid-template-columns:1fr}
-  #tta-root .tta-nw-company-card{grid-column:auto}
-  #tta-root .tta-nw-metric-card{padding:9px 10px}
-  #tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{font-size:17px}
-  #tta-root .tta-allocation-row{grid-template-columns:minmax(0,1fr) auto}
-  #tta-root .tta-allocation-row .tta-analytics-track{grid-column:1/-1}
+  #tta-root .tta-nw-daily-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  #tta-root .tta-nw-company-card{grid-column:1/-1}
+  #tta-root .tta-nw-metric-card{padding:8px}
+  #tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{font-size:16px}
+  #tta-root .tta-allocation-row{grid-template-columns:minmax(105px,.9fr) minmax(55px,1fr) auto;gap:6px}
   #tta-root .tta-nw-change{grid-template-columns:18px minmax(0,1fr) auto}
   #tta-root .tta-nw-change-value{font-size:11px;max-width:92px}
   #tta-root .tta-nw-quickstats .tta-cashcard b{font-size:15px}
