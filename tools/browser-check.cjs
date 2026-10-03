@@ -11,6 +11,9 @@ const root=path.resolve(__dirname,'..');
     await page.route('https://api.torn.com/**',route=>route.abort());
     await page.goto('file:///'+path.join(root,'.preview/index.html').replaceAll('\\','/'));
     await page.locator('#tta-fab').click();
+    const theme=await page.locator('#tta-root').evaluate(el=>({background:getComputedStyle(el).getPropertyValue('--tta-bg').trim(),hostBackground:getComputedStyle(document.documentElement).getPropertyValue('--tta-bg').trim()}));
+    assert.equal(theme.background,'#1b2a34','Classic theme palette should be preserved');
+    assert.equal(theme.hostBackground,'','Analyzer theme must not leak into the host page');
     for(const action of ['dashboard','trade','ledger','cashflow','networth','insights','settings','help','diagnostics']){
       const selector=action==='dashboard'?'[data-act="dashboard"]':`[data-act="${action}"]`;
       const button=page.locator(selector).first();
@@ -21,6 +24,7 @@ const root=path.resolve(__dirname,'..');
       const clippedNavigation=await page.locator('.tta-workspaces button').evaluateAll(buttons=>buttons.some(el=>el.scrollWidth>el.clientWidth+1));assert.equal(clippedNavigation,false,`${width}px navigation labels overlap`);
     }
     await page.locator('[data-act="trade"]').first().click();
+    assert.equal(await page.locator('.tta-item').first().evaluate(el=>getComputedStyle(el).borderRadius),'14px','Classic item card corners should be preserved');
     const chartDrawn=await page.locator('.tta-profitbar').evaluateAll(bars=>bars.some(bar=>bar.getBoundingClientRect().height>0));assert.equal(chartDrawn,true,'Profit chart is blank');
     await page.locator('[data-tab="sales"]').click();assert.equal(await page.locator('.tta-flowtable tbody tr').count(),2);
     assert.equal(await page.locator('.tta-chartcard').count(),0,'Acquisition chart should not crowd latest sales');

@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.0.** This rebuild is a review branch, not a production deployment. Existing update/download metadata is preserved.
+**Source version: 0.3.1.** This revision restores the classic blue-green glass theme while retaining the rebuilt accounting, sync, and diagnostics. Existing update/download metadata is preserved; production publication is separate from this review branch.
 
 ## Features
 
