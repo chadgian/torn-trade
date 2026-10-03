@@ -3,7 +3,7 @@
     try{restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     repairCashFlowAccountingRows();
-    if(state.transactions.length&&state.sync.accountingVersion!==VERSION){
+    if(state.transactions.length&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
       reportDiagnostic('PARSER_UPDATED','warning','Cached history was parsed by an older version. Full Resync rechecks historical amounts and trade details.',{source:'migration'});

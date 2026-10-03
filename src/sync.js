@@ -485,7 +485,7 @@
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
     if(job.repairWindow)nextSync.lastRepairSync=serverNow;
-    if(job.syncMode==='full')nextSync.accountingVersion=VERSION;
+    if(job.syncMode==='full')nextSync.accountingVersion=ACCOUNTING_VERSION;
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));

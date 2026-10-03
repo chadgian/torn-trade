@@ -128,18 +128,39 @@
 #tta-root .tta-banner{border:1px solid #91cdf745;border-left:3px solid var(--tta-blue);border-radius:12px;padding:10px 12px;margin:12px 0;background:linear-gradient(145deg,#91cdf715,#79dfb30b);font-size:13px;overflow-wrap:anywhere}
 #tta-root .tta-status-banner{display:flex;gap:8px}
 #tta-root .tta-status-dot{display:none}
-#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;overflow:auto;overscroll-behavior-x:contain;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}
-#tta-root table{border-collapse:collapse;width:100%;font-size:13px}
-#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left}
+#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{width:100%;min-width:0;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff07}
+#tta-root table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:13px}
+#tta-root th,#tta-root td{padding:12px 10px;vertical-align:top;border-bottom:1px solid var(--tta-line);text-align:left;overflow-wrap:anywhere;min-width:0}
 #tta-root table :where(thead,tbody,tfoot,tr,td){background:transparent!important}
 #tta-root th{font-size:12px;color:var(--tta-muted)!important;background:var(--tta-panel)!important}
 #tta-root td small,#tta-root .tta-flowmeta{display:block;font-size:12px;color:var(--tta-faint)!important;margin-top:3px}
 #tta-root td strong,#tta-root .tta-flowtitle{display:block;font-weight:600}
 #tta-root .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-#tta-root .tta-flowtable{min-width:620px}
-#tta-root .tta-ledgertable{min-width:1040px}
+#tta-root table .num{white-space:normal}
+#tta-root .tta-flowtable,#tta-root .tta-ledgertable{min-width:0;max-width:100%}
 #tta-root .tta-ledgertable th button{border:0;background:transparent;font-weight:600;color:inherit!important;padding:0}
 #tta-root .tta-ledgertable th button.active{color:var(--tta-green)!important}
+#tta-root .tta-ledgertable th button{max-width:100%;overflow-wrap:anywhere;white-space:normal;min-height:36px;text-align:left}
+@media(max-width:1100px){
+  #tta-root .tta-ledgertable,#tta-root .tta-ledgertable thead,#tta-root .tta-ledgertable tbody{display:block}
+  #tta-root .tta-ledgertable tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--tta-line)}
+  #tta-root .tta-ledgertable th,#tta-root .tta-ledgertable td{display:block;border-bottom:0;text-align:left;padding:10px 12px}
+  #tta-root .tta-ledgertable td::before{content:attr(data-label);display:block;font-size:12px;font-weight:400;color:var(--tta-muted);margin-bottom:4px}
+  #tta-root .tta-ledgertable .tta-ledgeritem{order:-1;grid-column:1/-1}
+  #tta-root .tta-ledgertable .tta-ledgerstatus,#tta-root .tta-ledgertable td[colspan]{grid-column:1/-1}
+  #tta-root .tta-ledgertable td[colspan]::before{content:none}
+}
+@media(max-width:720px){
+  #tta-root .tta-flowtable,#tta-root .tta-flowtable tbody{display:block}
+  #tta-root .tta-flowtable thead{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%)}
+  #tta-root .tta-flowtable tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:1px solid var(--tta-line)}
+  #tta-root .tta-flowtable td{display:block;border-bottom:0;text-align:left;padding:10px 12px}
+  #tta-root .tta-flowtable td:first-child,#tta-root .tta-flowtable td[colspan]{grid-column:1/-1}
+  #tta-root .tta-flowtable td::before{content:attr(data-label);display:block;font-size:12px;font-weight:400;color:var(--tta-muted);margin-bottom:4px}
+  #tta-root .tta-flowtable td[colspan]::before{content:none}
+  #tta-root .tta-ledgertable tbody tr{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #tta-root .tta-ledgertable .tta-ledgermethod{grid-column:1/-1}
+}
 #tta-root .tta-statuspill,#tta-root .tta-flowbadge{font-size:12px;color:var(--tta-muted)!important}
 #tta-root .tta-statuspill.sold,#tta-root .tta-flowbadge.in{color:var(--tta-green)!important}
 #tta-root .tta-flowbadge.out{color:var(--tta-red)!important}
