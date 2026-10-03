@@ -272,6 +272,21 @@
 #tta-root .tta-diagnostic.info{color:var(--tta-muted)!important}
 #tta-root summary{cursor:pointer;overflow-wrap:anywhere}
 #tta-root .tta-diagnostic code{font-size:12px;color:var(--tta-faint)!important;margin-right:8px}
+#tta-root .tta-diagnostic-guidance{margin:10px 0;padding:10px 12px;border-left:3px solid var(--tta-blue);border-radius:8px;background:#91cdf70d;color:var(--tta-text)!important}
+#tta-root .tta-diagnostic-guidance>strong{display:block;font-size:12px}
+#tta-root .tta-diagnostic-guidance p{margin:4px 0;color:var(--tta-muted)!important;font-size:12px;line-height:1.55}
+#tta-root .tta-diagnostic-contact{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+#tta-root .tta-diagnostic-contact small{color:var(--tta-faint)!important;font-size:11px;flex:1;min-width:180px}
+#tta-root .tta-update-intro{padding:4px 0 14px;border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-update-intro strong{font-size:18px}
+#tta-root .tta-update-intro p{margin:6px 0 0;color:var(--tta-muted)!important;line-height:1.6}
+#tta-root .tta-update-list{position:relative}
+#tta-root .tta-update-release{display:grid;grid-template-columns:105px minmax(0,1fr);gap:18px;padding:16px 0;border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-update-version{display:flex;flex-direction:column;gap:5px}
+#tta-root .tta-update-version b{font-size:15px}
+#tta-root .tta-update-version span{width:max-content;max-width:100%;padding:3px 7px;border-radius:999px;background:#79dfb31a;color:var(--tta-green)!important;font-size:10px;font-weight:700}
+#tta-root .tta-update-release ul{margin:0;padding-left:18px;color:var(--tta-muted)!important}
+#tta-root .tta-update-release li{margin:0 0 7px;line-height:1.5}
 #tta-root pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tta-muted)!important}
 #tta-root .tta-loading{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:#172630ed;padding:16px}
 #tta-root .tta-loading.show{display:grid}
@@ -323,6 +338,12 @@
   #tta-root .tta-nw-dayrange{grid-column:1/-1;grid-row:2}
   #tta-root .tta-nw-portfolio-grid .tta-stat{padding:10px 7px}
   #tta-root .tta-nw-portfolio-grid .tta-stat b{font-size:16px}
+}
+@media(max-width:520px){
+  #tta-root .tta-update-release{grid-template-columns:1fr;gap:8px}
+  #tta-root .tta-update-version{flex-direction:row;align-items:center}
+  #tta-root .tta-diagnostic-contact{align-items:stretch}
+  #tta-root .tta-diagnostic-contact .tta-btn{width:100%}
 }
 @media(max-width:420px){
   #tta-root .tta-nw-daily-metrics{grid-template-columns:1fr}
