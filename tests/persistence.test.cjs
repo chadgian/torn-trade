@@ -2,17 +2,35 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {harness,item}=require('./harness.cjs');
 const row={id:'safe',itemId:206,side:'buy',qty:5,total:100,timestamp:100};
+
+test('Torn PDA native storage migrates legacy history and removes the localStorage copy',async()=>{
+  const native=new Map(),pda={
+    get:async(k,d=null)=>native.has(k)?native.get(k):d,
+    set:async(k,v)=>{native.set(k,v);},
+    delete:async k=>{native.delete(k);},
+    usage:async()=>({used:1024,quota:10*1024*1024})
+  };
+  const {app,storage}=harness({stored:{transactions:[row],cashFlows:[]},pdaStorage:pda});
+  await app.initializeDurableStorage();
+  assert.equal(app.durableStorageState.backend,'pda');
+  assert.equal(native.get('tta:v1:transactions')[0].qty,5);
+  assert.equal(storage.has('tta:v1:transactions'),false);
+  app.state.transactions=[{...row,qty:8}];app.save('transactions',app.state.transactions);await app.flushDurableStorage();
+  assert.equal(native.get('tta:v1:transactions')[0].qty,8);
+  const status=await app.storageStatus();assert.equal(status.quota,10*1024*1024);
+});
+
 test('malformed saved types fall back without preventing startup',()=>{
   const {app}=harness({stored:{transactions:null,catalog:'invalid',sync:[]}});assert.equal(app.state.transactions.length,0);assert.equal(app.state.catalog.length,0);assert.equal(app.state.sync.lastSync,0);
 });
-test('backup roundtrip preserves history but never writes API keys',()=>{
-  const {app,storage}=harness({stored:{transactions:[row],apiKey:'fixture0123456789'}});const payload=app.backupPayload();payload.data.apiKey='malicious-key';app.applyBackup(payload);assert.equal(storage.get('tta:v1:apiKey'),'"fixture0123456789"');assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(storage.has('tta:v1:importRecovery'),false);
+test('backup roundtrip preserves history but never writes API keys',async()=>{
+  const {app,storage}=harness({stored:{transactions:[row],apiKey:'fixture0123456789'}});const payload=app.backupPayload();payload.data.apiKey='malicious-key';await app.applyBackup(payload);assert.equal(storage.get('tta:v1:apiKey'),'"fixture0123456789"');assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(storage.has('tta:v1:importRecovery'),false);
 });
-test('backup validation rejects invalid rows and another account before writing',()=>{
-  const {app}=harness({stored:{transactions:[row],sync:{accountId:1}}});const payload=app.backupPayload();payload.data={...payload.data,transactions:[{...row,qty:-1}]};assert.throws(()=>app.applyBackup(payload),/transaction/);payload.data={...payload.data,transactions:[row],sync:{accountId:2}};assert.throws(()=>app.applyBackup(payload),/another account/);assert.equal(app.state.transactions[0].qty,5);
+test('backup validation rejects invalid rows and another account before writing',async()=>{
+  const {app}=harness({stored:{transactions:[row],sync:{accountId:1}}});const payload=app.backupPayload();payload.data={...payload.data,transactions:[{...row,qty:-1}]};await assert.rejects(app.applyBackup(payload),/transaction/);payload.data={...payload.data,transactions:[row],sync:{accountId:2}};await assert.rejects(app.applyBackup(payload),/another account/);assert.equal(app.state.transactions[0].qty,5);
 });
-test('failed multi-key imports restore original values from recovery journal',()=>{
-  const {app,context,storage}=harness({stored:{transactions:[row],cashFlows:[]}});const payload=app.backupPayload();payload.data={...payload.data,transactions:[{...row,qty:99}]};const write=context.localStorage.setItem;let failed=false;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:cashFlows'&&!failed){failed=true;throw new Error('Storage full');}write(key,value);};assert.throws(()=>app.applyBackup(payload),/could not be saved/);assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(storage.has('tta:v1:importRecovery'),false);
+test('failed multi-key imports restore original values from recovery journal',async()=>{
+  const {app,context,storage}=harness({stored:{transactions:[row],cashFlows:[]}});const payload=app.backupPayload();payload.data={...payload.data,transactions:[{...row,qty:99}]};const write=context.localStorage.setItem;let failed=false;context.localStorage.setItem=(key,value)=>{if(key==='tta:v1:cashFlows'&&!failed){failed=true;throw new Error('Storage full');}write(key,value);};await assert.rejects(app.applyBackup(payload),/could not be saved/);assert.equal(JSON.parse(storage.get('tta:v1:transactions'))[0].qty,5);assert.equal(storage.has('tta:v1:importRecovery'),false);
 });
 test('corrections replace transfer, consumption and cash records, not just transactions',()=>{
   const {app}=harness();const transfer={id:'gift',timestamp:150,itemId:206,qty:1,direction:'out'},cash={id:'cash',timestamp:160,amount:100,direction:'in'};app.checkpointPlayerTransferRows([transfer]);app.checkpointPlayerTransferRows([{...transfer,qty:3}]);app.checkpointItemConsumptionRows([transfer]);app.checkpointItemConsumptionRows([{...transfer,qty:4}]);app.checkpointCashFlowRows([cash]);app.checkpointCashFlowRows([{...cash,amount:250}]);assert.equal(app.state.playerTransfers[0].qty,3);assert.equal(app.state.itemConsumptions[0].qty,4);assert.equal(app.state.cashFlows[0].amount,250);
