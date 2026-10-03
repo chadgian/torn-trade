@@ -48,13 +48,15 @@ async function assertCompactTableLayout(page,selector,label){
     const theme=await page.locator('#tta-root').evaluate(el=>({background:getComputedStyle(el).getPropertyValue('--tta-bg').trim(),hostBackground:getComputedStyle(document.documentElement).getPropertyValue('--tta-bg').trim()}));
     assert.equal(theme.background,'#1b2a34','Classic theme palette should be preserved');
     assert.equal(theme.hostBackground,'','Analyzer theme must not leak into the host page');
-    for(const action of ['dashboard','trade','ledger','cashflow','networth','insights','settings','help','diagnostics']){
+    for(const action of ['dashboard','trade','ledger','cashflow','networth','insights','settings','help','updates','diagnostics']){
       const selector=action==='dashboard'?'[data-act="dashboard"]':`[data-act="${action}"]`;
       const button=page.locator(selector).first();
       if(action==='diagnostics'){await page.locator('[data-act="settings"]').first().click();await settled();}
       await button.click();
       await settled();
       if(action==='diagnostics')assert.equal(await page.getByText('PARSER_UPDATED',{exact:true}).count(),0,'UI-only releases must retain verified accounting history');
+      if(action==='updates'){assert.equal(await page.getByText('v0.3.0',{exact:true}).count(),1);assert.equal(await page.getByText('v0.4.0',{exact:true}).count(),1);}
+      if(action==='networth'&&width<=700){const cols=await page.locator('.tta-nw-daily-metrics').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);assert.equal(cols,2,`${width}px Net Worth daily metrics should stay compact in two columns`);}
       await assertReadable(page,`${width}px ${action}`);
       await assertTablesFit(page,`${width}px ${action}`);
       if(action==='ledger'){
@@ -75,7 +77,7 @@ async function assertCompactTableLayout(page,selector,label){
         await page.locator('#tta-ledger-search').fill('');await page.waitForTimeout(300);await settled();
       }
     }
-    assert.ok(await page.evaluate(()=>window.transitionStarts)>=9,'Every workspace transition should paint loading status');
+    assert.ok(await page.evaluate(()=>window.transitionStarts)>=10,'Every workspace transition should paint loading status');
     await page.locator('[data-act="trade"]').first().click();
     await settled();
     assert.equal(await page.locator('.tta-item').first().evaluate(el=>getComputedStyle(el).borderRadius),'14px','Classic item card corners should be preserved');

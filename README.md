@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.9.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.4.0.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 
@@ -12,11 +12,12 @@ A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO tra
 - Trade Analysis with a single FIFO engine, acquisition-attributed profit and actual sale-date quantities.
 - Latest Sales across city shops, item markets, bazaars and completed player trades, with source filters, trade IDs and excluded-unit indicators.
 - Acquisition History with source, cost, proceeds, status, transfers, consumption, sorting and filters.
-- Net Worth snapshots, daily changes, allocation, recorded portfolio and director company P/L.
+- Net Worth snapshots, daily changes, allocation, recorded portfolio and director company P/L, with a denser mobile layout and collapsible calculation/breakdown details.
 - Income/spending insights, goals and unrecognized financial events.
 - Catalog search, tracked items, pin/hide/restore and a draggable compact launcher.
 - Quick Sync, background refresh, resumable Full Resync, cancellation and recovery.
 - JSON backup/import, Cash Flow CSV, Net Worth CSV and redacted diagnostic reports.
+- A built-in What's New page covering user-facing changes since v0.3.0.
 
 ## Installation
 
@@ -60,7 +61,7 @@ Single-item cash trades use actual cash. Multi-item/mixed trades retain the prev
 
 ## Data Quality And Bug Reports
 
-A compact quality strip summarizes issues. Details shows stable codes, severity, sanitized context, timestamps and report export. Errors and low-severity inference warnings are retained without repeating long messages in every view.
+A compact quality strip summarizes issues. Details shows stable codes, severity, sanitized context, timestamps and report export. Each diagnostic also includes a suggested action. Errors that are not safely fixable on the user's device provide a developer-contact path and a compact support detail to include with the exported report.
 
 Examples: `HISTORY_STALE`, `FIFO_UNMATCHED`, `ITEM_VALUE_MISSING`, `VALUATION_INFERRED`, `TRADE_DEFERRED`, `TRADE_SOURCE_MISMATCH`, `PAGE_INCOMPLETE`, `RATE_LIMIT`, `LOG_SCOPE` and `STORAGE_WRITE`.
 

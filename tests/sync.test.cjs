@@ -44,6 +44,23 @@ test('full resync can restore previous rows and coverage after cancellation',asy
 test('diagnostics whitelist context and redact API keys and URLs',()=>{
   const {app}=harness({stored:{apiKey:key}});app.reportDiagnostic('TEST','warning',`Failed https://api.torn.com/?key=${key} key=${key}`,{source:'/user/log',raw:{key},url:`https://x/?key=${key}`,itemId:206});const report=JSON.stringify(app.diagnosticReport());assert.equal(report.includes(key),false);assert.equal(report.includes('https://'),false);assert.equal(report.includes('"raw"'),false);assert.equal(JSON.stringify(app.backupPayload()).includes(key),false);
 });
+test('Data Quality provides suggested actions and developer contact for non-user-fix errors',()=>{
+  const {app}=harness();
+  app.reportDiagnostic('API_SCHEMA','error','Unexpected response',{source:'trades',phase:'trade-details'});
+  const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
+  assert.equal(html.includes('Suggested action'),true);
+  assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
+  assert.equal(html.includes('v0.4.0'),true);
+  assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
+  assert.equal(row.suggestedAction.length>20,true);
+  assert.equal(JSON.stringify(report).includes('https://'),false);
+});
+test('What\'s New page lists user-facing releases from v0.3.0 through current',()=>{
+  const {app}=harness(),html=app.updatesHtml();
+  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0'])assert.equal(html.includes(version),true);
+  assert.equal(html.includes('native per-script storage'),true);
+  assert.equal(html.includes('Net Worth'),true);
+});
 test('API rate limits expose only code and context, never provider text or secrets',async()=>{
   const {app}=harness({stored:{apiKey:key},responses:{'/test':{error:{code:5,error:`secret ${key}`}}}});await assert.rejects(app.apiGet('/test'),e=>e.code==='RATE_LIMIT'&&e.retryable);assert.equal(app.state.notices[0].context.apiCode,5);assert.equal(JSON.stringify(app.state.notices).includes(key),false);
 });

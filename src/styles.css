@@ -231,22 +231,32 @@
 #tta-root .tta-goal-values{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 #tta-root .tta-unmapped,#tta-root .tta-hiddenrow{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--tta-line)}
 #tta-root .tta-unmapped small{display:block;color:var(--tta-faint)!important;font-size:12px}
-#tta-root .tta-nw-chart svg{width:100%;height:180px}
+#tta-root .tta-nw-chart svg{width:100%;height:160px}
 #tta-root .tta-nw-line{fill:none;stroke:var(--tta-blue);stroke-width:2}
 #tta-root .tta-nw-point{fill:var(--tta-green)}
 #tta-root .tta-nw-chart-meta{display:flex;justify-content:space-between;gap:12px;font-size:12px}
-#tta-root .tta-allocation-row{display:grid;grid-template-columns:minmax(0,1fr) 1fr auto;gap:12px;align-items:center;margin:10px 0}
-#tta-root .tta-allocation-row>div:first-child{display:flex;justify-content:space-between;gap:8px}
-#tta-root .tta-nw-daypicker{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:16px 0}
+#tta-root .tta-nw-empty{min-height:0;padding:16px 8px}
+#tta-root .tta-nw-empty strong,#tta-root .tta-nw-empty small{display:block}
+#tta-root .tta-nw-empty small{margin-top:4px;color:var(--tta-faint)!important;font-size:12px}
+#tta-root .tta-allocation-row{display:grid;grid-template-columns:minmax(150px,.9fr) minmax(100px,1fr) auto;gap:12px;align-items:center;margin:8px 0}
+#tta-root .tta-allocation-row>div:first-child{display:flex;justify-content:space-between;gap:8px;min-width:0}
+#tta-root .tta-nw-daypicker{display:grid;grid-template-columns:auto auto minmax(180px,1fr);align-items:end;gap:10px 12px;margin:12px 0}
 #tta-root .tta-nw-daypicker label{display:grid;gap:4px}
-#tta-root .tta-nw-dayrange{flex:1;color:var(--tta-faint)!important;font-size:12px;min-width:180px}
-#tta-root .tta-nw-daily-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-#tta-root .tta-nw-delta small,#tta-root .tta-nw-company-delta small,#tta-root .tta-nw-delta span,#tta-root .tta-nw-company-delta span{display:block;color:var(--tta-muted)!important;font-size:12px}
-#tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{display:block;font-size:20px;margin:6px 0;overflow-wrap:anywhere}
-#tta-root .tta-nw-change{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--tta-line)}
-#tta-root .tta-nw-change-copy strong{display:block;font-size:14px;overflow-wrap:anywhere}
-#tta-root .tta-nw-change-copy small{display:block;color:var(--tta-faint)!important;font-size:12px;margin-top:4px}
-#tta-root .tta-nw-change-value{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#tta-root .tta-nw-dayrange{color:var(--tta-faint)!important;font-size:12px;align-self:center}
+#tta-root .tta-nw-daily-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+#tta-root .tta-nw-metric-card{min-width:0;padding:10px 12px;border:1px solid var(--tta-line);border-radius:11px;background:#ffffff07}
+#tta-root .tta-nw-delta small,#tta-root .tta-nw-company-delta small,#tta-root .tta-nw-delta span,#tta-root .tta-nw-company-delta span{display:block;color:var(--tta-muted)!important;font-size:11px;line-height:1.45}
+#tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{display:block;font-size:18px;margin:4px 0;overflow-wrap:anywhere}
+#tta-root .tta-nw-change{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-nw-change-copy strong{display:block;font-size:13px;overflow-wrap:anywhere}
+#tta-root .tta-nw-change-copy small{display:block;color:var(--tta-faint)!important;font-size:11px;margin-top:3px;line-height:1.4}
+#tta-root .tta-nw-change-value{font-variant-numeric:tabular-nums;overflow-wrap:anywhere;text-align:right;font-weight:650}
+#tta-root .tta-nw-method,#tta-root .tta-nw-breakdowns{margin:12px 0;border-top:1px solid var(--tta-line);padding-top:10px}
+#tta-root .tta-nw-method summary,#tta-root .tta-nw-breakdowns summary{font-weight:700;color:var(--tta-muted)!important}
+#tta-root .tta-nw-method p{margin:8px 0 0;color:var(--tta-muted)!important;font-size:12px;line-height:1.55}
+#tta-root .tta-nw-breakdowns>.tta-fin-section{margin:10px 0;padding:10px 0}
+#tta-root .tta-nw-snapshot-hero{padding-top:6px}
+#tta-root .tta-nw-actions{padding-bottom:12px}
 #tta-root .tta-help-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:20px 0}
 #tta-root .tta-help-card{border-top:1px solid var(--tta-line);padding-top:16px}
 #tta-root .tta-help-card p,#tta-root .tta-help-intro p{color:var(--tta-muted)!important;line-height:1.7;margin:10px 0}
@@ -262,6 +272,21 @@
 #tta-root .tta-diagnostic.info{color:var(--tta-muted)!important}
 #tta-root summary{cursor:pointer;overflow-wrap:anywhere}
 #tta-root .tta-diagnostic code{font-size:12px;color:var(--tta-faint)!important;margin-right:8px}
+#tta-root .tta-diagnostic-guidance{margin:10px 0;padding:10px 12px;border-left:3px solid var(--tta-blue);border-radius:8px;background:#91cdf70d;color:var(--tta-text)!important}
+#tta-root .tta-diagnostic-guidance>strong{display:block;font-size:12px}
+#tta-root .tta-diagnostic-guidance p{margin:4px 0;color:var(--tta-muted)!important;font-size:12px;line-height:1.55}
+#tta-root .tta-diagnostic-contact{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+#tta-root .tta-diagnostic-contact small{color:var(--tta-faint)!important;font-size:11px;flex:1;min-width:180px}
+#tta-root .tta-update-intro{padding:4px 0 14px;border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-update-intro strong{font-size:18px}
+#tta-root .tta-update-intro p{margin:6px 0 0;color:var(--tta-muted)!important;line-height:1.6}
+#tta-root .tta-update-list{position:relative}
+#tta-root .tta-update-release{display:grid;grid-template-columns:105px minmax(0,1fr);gap:18px;padding:16px 0;border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-update-version{display:flex;flex-direction:column;gap:5px}
+#tta-root .tta-update-version b{font-size:15px}
+#tta-root .tta-update-version span{width:max-content;max-width:100%;padding:3px 7px;border-radius:999px;background:#79dfb31a;color:var(--tta-green)!important;font-size:10px;font-weight:700}
+#tta-root .tta-update-release ul{margin:0;padding-left:18px;color:var(--tta-muted)!important}
+#tta-root .tta-update-release li{margin:0 0 7px;line-height:1.5}
 #tta-root pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;color:var(--tta-muted)!important}
 #tta-root .tta-loading{position:absolute;inset:0;z-index:20;display:none;place-items:center;background:#172630ed;padding:16px}
 #tta-root .tta-loading.show{display:grid}
@@ -287,6 +312,7 @@
 #tta-fab.snapping{transition:left .2s ease}
 @keyframes tta-spin{to{transform:rotate(360deg)}}
 @media(max-width:700px){
+  #tta-root .tta-shell{padding-bottom:max(96px,calc(72px + env(safe-area-inset-bottom)))}
   #tta-root .tta-content{padding:14px 12px}
   #tta-root .tta-header{padding:10px 12px;gap:6px}
   #tta-root .tta-title{font-size:15px}
@@ -294,19 +320,40 @@
   #tta-root .tta-period{align-items:start;flex-direction:column;gap:10px}
   #tta-root .tta-summary,#tta-root .tta-cashhero,#tta-root .tta-bento-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   #tta-root .tta-stat.main,#tta-root .tta-cashcard.main,#tta-root .tta-bento-hero{grid-column:1/-1}
-  #tta-root .tta-position-grid,#tta-root .tta-insight-grid,#tta-root .tta-nw-daily-metrics,#tta-root .tta-goal-list,#tta-root .tta-help-grid{grid-template-columns:1fr}
+  #tta-root .tta-position-grid,#tta-root .tta-insight-grid,#tta-root .tta-goal-list,#tta-root .tta-help-grid{grid-template-columns:1fr}
+  #tta-root .tta-nw-daily-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #tta-root .tta-nw-company-card{grid-column:1/-1}
   #tta-root .tta-ledgerfilters,#tta-root .tta-goal-form{grid-template-columns:repeat(2,minmax(0,1fr))}
   #tta-root .tta-ledgersearch{grid-column:1/-1}
   #tta-root .tta-fin-grid,#tta-root .tta-ledgersummary{grid-template-columns:repeat(2,minmax(0,1fr))}
   #tta-root .tta-keyinputrow{grid-template-columns:1fr 1fr}
   #tta-root .tta-keyinputrow input{grid-column:1/-1}
   #tta-root .tta-stat,#tta-root .tta-bento,#tta-root .tta-cashcard{padding:12px 8px}
-  #tta-root .tta-nw-change{grid-template-columns:24px minmax(0,1fr)}
-  #tta-root .tta-nw-change-value{grid-column:2}
-  #tta-root .tta-allocation-row{grid-template-columns:1fr auto}
-  #tta-root .tta-allocation-row .tta-analytics-track{grid-column:1/-1}
+  #tta-root .tta-nw-change{grid-template-columns:20px minmax(0,1fr) auto;gap:8px}
+  #tta-root .tta-nw-change-value{grid-column:auto}
+  #tta-root .tta-allocation-row{grid-template-columns:minmax(130px,.9fr) minmax(80px,1fr) auto;gap:8px}
+  #tta-root .tta-nw-daypicker{grid-template-columns:minmax(0,1fr) auto}
+  #tta-root .tta-nw-daypicker label{min-width:0}
+  #tta-root .tta-nw-daypicker input{width:100%}
+  #tta-root .tta-nw-dayrange{grid-column:1/-1;grid-row:2}
+  #tta-root .tta-nw-portfolio-grid .tta-stat{padding:10px 7px}
+  #tta-root .tta-nw-portfolio-grid .tta-stat b{font-size:16px}
+}
+@media(max-width:520px){
+  #tta-root .tta-update-release{grid-template-columns:1fr;gap:8px}
+  #tta-root .tta-update-version{flex-direction:row;align-items:center}
+  #tta-root .tta-diagnostic-contact{align-items:stretch}
+  #tta-root .tta-diagnostic-contact .tta-btn{width:100%}
 }
 @media(max-width:420px){
+  #tta-root .tta-nw-daily-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  #tta-root .tta-nw-company-card{grid-column:1/-1}
+  #tta-root .tta-nw-metric-card{padding:8px}
+  #tta-root .tta-nw-delta b,#tta-root .tta-nw-company-delta b{font-size:16px}
+  #tta-root .tta-allocation-row{grid-template-columns:minmax(105px,.9fr) minmax(55px,1fr) auto;gap:6px}
+  #tta-root .tta-nw-change{grid-template-columns:18px minmax(0,1fr) auto}
+  #tta-root .tta-nw-change-value{font-size:11px;max-width:92px}
+  #tta-root .tta-nw-quickstats .tta-cashcard b{font-size:15px}
   #tta-root .tta-listtools,#tta-root .tta-sales-filters{grid-template-columns:1fr}
   #tta-root .tta-itemtop{grid-template-columns:40px minmax(0,1fr);gap:10px}
   #tta-root .tta-thumbwrap{width:40px;height:40px}
