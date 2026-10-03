@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.3.5
+// @version      0.3.6
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -16,10 +16,10 @@
 
 
   // Source: state.js
-  const VERSION = '0.3.5';
+  const VERSION = '0.3.6';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
-  const HISTORY_PAGINATION_VERSION = 2;
+  const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
   const API = 'https://api.torn.com/v2';
@@ -2071,19 +2071,35 @@
     if(data[key].some(row=>row?.id==null||!(Number(key==='log'?row.timestamp:row.completed_at||row.timestamp)>0)))throw new AnalyzerError('API_SCHEMA','A history row is missing its identity or event time. Coverage remains incomplete.',{source:key});
     return data[key];
   }
+  function preciseHistoryCursor(value,key='log') {
+    if(value==null||String(value)==='')return null;
+    if(!/^\d{1,30}$/.test(String(value))||(typeof value==='number'&&!Number.isSafeInteger(value)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
+    return BigInt(value)>0n?String(value):null;
+  }
+  function zeroHistoryPage(data,params,key='log') {
+    return key==='log'&&(/^0{1,30}$/.test(String(data?._metadata?.nanostamp))||/^0{1,30}$/.test(String(nextLogPageParams(data,params,key)?.nanostamp)));
+  }
   function nextHistoryPage(data,params,rows,seen,key='log') {
     if(!rows.length)return null;
+    params={...params};
+    const currentCursor=preciseHistoryCursor(params.nanostamp,key);
+    if(!currentCursor)delete params.nanostamp;
     let next=nextLogPageParams(data,params,key);
-    const precise=key==='log'?data?._metadata?.nanostamp:null;
-    if(precise!=null&&String(precise)!==''){
-      if(!/^\d{1,30}$/.test(String(precise))||(typeof precise==='number'&&!Number.isSafeInteger(precise)))throw new AnalyzerError('API_SCHEMA','Torn returned an invalid precise history cursor.',{source:key});
-      if(/^\d{1,30}$/.test(String(params.nanostamp||''))&&BigInt(precise)>BigInt(params.nanostamp))throw new AnalyzerError('PAGE_SOURCE_MISMATCH','Torn moved the precise history cursor forward. Coverage remains incomplete.',{source:key,cursor:String(params.nanostamp),nextCursor:String(precise)});
+    const zeroCursor=zeroHistoryPage(data,params,key);
+    const precise=key==='log'?preciseHistoryCursor(data?._metadata?.nanostamp,key):null;
+    if(next){const linkCursor=preciseHistoryCursor(next.nanostamp,key);if(linkCursor)next.nanostamp=linkCursor;else delete next.nanostamp;}
+    if(precise){
       // The link can retain an inclusive second; metadata advances within that second.
-      next={...params,nanostamp:String(precise)};
+      next={...params,nanostamp:precise};
     }
+    // A zero cursor cannot advance the scan. Keep a real timestamp/link cursor,
+    // otherwise independently verify the short terminal page in historyPage.
+    if(zeroCursor&&next&&!next.nanostamp&&(!(Number(next.to)>0)||Number(next.to)===Number(params.to))&&String(next.offset||'')===String(params.offset||''))next=null;
+    if(next?.nanostamp&&currentCursor&&BigInt(next.nanostamp)>BigInt(currentCursor))throw new AnalyzerError('PAGE_SOURCE_MISMATCH','Torn moved the precise history cursor forward. Coverage remains incomplete.',{source:key,cursor:currentCursor,nextCursor:next.nanostamp});
     if(!next) {
       // A full page without a precise cursor may hide events in its final second.
-      if(rows.length>=Number(params.limit||100))throw new AnalyzerError('PAGE_INCOMPLETE','A full history page has no continuation cursor. Coverage remains incomplete.',{source:key});
+      const minimum=(currentCursor||zeroCursor)?Math.max(1,Number(params.limit||100)-1):Number(params.limit||100);
+      if(rows.length>=minimum)throw new AnalyzerError('PAGE_INCOMPLETE','A dense history page has no continuation cursor that can be used safely. Coverage remains incomplete.',{source:key,count:rows.length});
       return null;
     }
     if(params.log!=null)next.log=params.log;
@@ -2359,11 +2375,26 @@
   }
   async function historyPage(path,params,seen,key='log',previousIds=[]) {
     params={...params,from:params.from??0};
+    if(!preciseHistoryCursor(params.nanostamp,key))delete params.nanostamp;
     let requests=0;
     for(let attempt=0;attempt<3;attempt++){
       const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];requests++;
       try{
         const next=nextHistoryPage(data,params,rows,cursors,key);
+        if(rows.length&&!next&&zeroHistoryPage(data,params,key)){
+          // Zero is not a precise timestamp. Query the oldest returned second
+          // inclusively without nanostamp; never decrement a whole second.
+          const oldest=Math.min(...rows.map(row=>Number(row.timestamp))),probe={...params,to:oldest};delete probe.nanostamp;
+          if(rows.some(row=>Number(row.timestamp)<Number(params.from)||Number(row.timestamp)>Number(params.to)))throw new AnalyzerError('PAGE_ZERO_UNVERIFIED','Torn returned logs outside the requested date range after a zero cursor. Coverage remains incomplete.',{source:key,phase:'zero-cursor-probe',from:Number(params.from),to:Number(params.to),count:rows.length});
+          const checked=await syncApiGet(path,probe),older=pageRows(checked,key);requests++;
+          if(older.some(row=>Number(row.timestamp)>oldest||Number(row.timestamp)<Number(params.from)))throw new AnalyzerError('PAGE_ZERO_UNVERIFIED','Torn did not honor the date-boundary check after a zero cursor. Coverage remains incomplete.',{source:key,phase:'zero-cursor-probe',from:Number(params.from),to:oldest,count:older.length});
+          const probeSeen=[],probeNext=nextHistoryPage(checked,probe,older,probeSeen,key),known=new Set([...previousIds.map(String),...rows.map(row=>String(row.id))]);
+          const hasNewRows=older.some(row=>!known.has(String(row.id)));
+          const verifiedNext=probeNext||(hasNewRows?{...probe,to:Math.min(...older.map(row=>Number(row.timestamp)))}:null);
+          reportDiagnostic('PAGE_ZERO_RECOVERED','info',verifiedNext?'An unusable zero history cursor was bypassed with a date-boundary check; older logs are still being loaded.':'A zero history cursor was independently verified at the end of this batch.',{source:key,phase:'zero-cursor-probe',from:Number(params.from),to:oldest,count:older.length});
+          const savedRows=Array.from(new Map([...rows,...older].map(row=>[String(row.id),row])).values());
+          return {rows:savedRows,next:verifiedNext,seen:[...seen],requests,boundaryRecovered:true};
+        }
         if(attempt)reportDiagnostic('PAGE_RETRY','info','A stalled history page recovered after a fresh request. No history was skipped.',{source:key,count:attempt});
         return {rows,next,seen:cursors,requests};
       }catch(error){
@@ -2585,7 +2616,8 @@
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){
       await clearFullResyncBackup();
-      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE','PAGE_BOUNDARY_UNVERIFIED','HISTORY_COVERAGE_RECHECK',22])resolveDiagnostic(code);
+      for(const code of ['PAGE_REPEATED','PAGE_INCOMPLETE','PAGE_BOUNDARY_UNVERIFIED','PAGE_ZERO_UNVERIFIED','HISTORY_COVERAGE_RECHECK',22])resolveDiagnostic(code);
+      for(const source of ['log','pagination'])resolveDiagnostic('PAGE_SOURCE_MISMATCH',source);
       for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','syncJob','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
     }
     resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
