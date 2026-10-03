@@ -374,3 +374,108 @@
 #tta-root .tta-transition{position:absolute;inset:var(--tta-transition-top,106px) 0 0;z-index:12;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;background:var(--tta-bg);color:var(--tta-text)!important;pointer-events:none;font-size:14px;text-align:center}
 #tta-root .tta-transition[hidden]{display:none!important}
 #tta-root .tta-transition .tta-spinner{flex-shrink:0;width:28px;height:28px}
+
+
+/* v0.4.1 UI/UX polish: calmer hierarchy, faster navigation and touch-first spacing. */
+#tta-root,#tta-fab{--tta-surface:#ffffff0a;--tta-surface-strong:#ffffff10;--tta-focus:#91cdf7b8;--tta-header-h:58px;--tta-nav-h:46px}
+#tta-root{-webkit-tap-highlight-color:transparent}
+#tta-root .tta-shell{scrollbar-gutter:stable;scroll-behavior:smooth}
+#tta-root .tta-header{min-height:var(--tta-header-h);padding:8px 14px;background:linear-gradient(180deg,#243944f2,#20323ced);box-shadow:0 4px 20px #06131b22}
+#tta-root .tta-brandcopy{min-width:0}
+#tta-root .tta-title,#tta-root .tta-sub{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+#tta-root .tta-title{font-size:15px;letter-spacing:.01em}
+#tta-root .tta-sub{max-width:680px;color:var(--tta-faint)!important}
+#tta-root .tta-iconbtn,#tta-root .tta-back{border-color:#ffffff1c;background:#ffffff09}
+#tta-root .tta-iconbtn:hover:not(:disabled),#tta-root .tta-back:hover:not(:disabled){background:#ffffff13;filter:none}
+#tta-root .tta-workspaces{position:sticky;top:var(--tta-header-h);z-index:9;min-height:var(--tta-nav-h);align-items:center;gap:4px;padding:5px 12px;background:#1d303ae8;border-bottom-color:#ffffff17;backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);scrollbar-width:none}
+#tta-root .tta-workspaces::-webkit-scrollbar,#tta-root .tta-chips::-webkit-scrollbar{display:none}
+#tta-root .tta-workspaces button{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:7px 10px;border-color:transparent;border-radius:9px;background:transparent;color:var(--tta-muted)!important;box-shadow:none}
+#tta-root .tta-workspaces button:hover:not(:disabled){background:#ffffff0b;filter:none}
+#tta-root .tta-workspaces button[aria-current=page]{background:#ffffff10;border-color:#79dfb33b;color:var(--tta-text)!important;box-shadow:inset 0 -2px var(--tta-green)}
+#tta-root .tta-navicon{display:inline-grid;place-items:center;width:15px;color:var(--tta-faint)!important;font-size:12px;line-height:1}
+#tta-root .tta-workspaces button[aria-current=page] .tta-navicon{color:var(--tta-green)!important}
+#tta-root .tta-content{max-width:1120px;padding:18px 20px 28px}
+#tta-root .tta-quality{padding:9px 11px;margin:0 0 16px;border:1px solid #f0cc7838;border-radius:11px;background:#f0cc7809;color:var(--tta-yellow)!important}
+#tta-root .tta-quality.error{border-color:#ff9da345;background:#ff9da30c}
+#tta-root .tta-quality.ok{border-color:#79dfb32e;background:#79dfb308;color:var(--tta-muted)!important}
+#tta-root .tta-quality>span{display:flex;align-items:center;gap:8px;min-width:0;font-weight:650}
+#tta-root .tta-quality>span::before{content:"";width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px currentColor;opacity:.72}
+#tta-root .tta-quality .tta-btn{min-height:30px;padding:4px 9px;border-radius:8px}
+#tta-root .tta-btn{transition:transform .12s ease,filter .12s ease,border-color .12s ease,background .12s ease}
+#tta-root .tta-btn:active:not(:disabled){transform:translateY(1px)}
+#tta-root .tta-btn.secondary:hover:not(:disabled){background:#ffffff15;border-color:#ffffff32;filter:none}
+#tta-root .tta-period{padding:2px 0 4px}
+#tta-root .tta-chips{gap:6px;margin-bottom:14px;scrollbar-width:none}
+#tta-root .tta-chip{border-color:#ffffff18;background:#ffffff08}
+#tta-root .tta-chip.active{box-shadow:0 5px 14px #06151d20}
+#tta-root .tta-fin-section,#tta-root .tta-glass-section{scroll-margin-top:calc(var(--tta-header-h) + var(--tta-nav-h) + 14px)}
+#tta-root .tta-sectionhead,#tta-root .tta-sectionintro,#tta-root .tta-charthead{margin:12px 0}
+#tta-root .tta-sectionhead h3,#tta-root .tta-sectionintro h3,#tta-root .tta-charthead h3{font-size:15px;letter-spacing:.005em}
+#tta-root .tta-stat,#tta-root .tta-cashcard,#tta-root .tta-bento,#tta-root .tta-ministat{box-shadow:0 7px 20px #08141c24,inset 0 1px #ffffff12}
+#tta-root .tta-stat b,#tta-root .tta-cashcard b,#tta-root .tta-bento b,#tta-root .tta-ministat b,#tta-root .tta-profit,#tta-root .tta-nw-change-value{font-variant-numeric:tabular-nums}
+#tta-root .tta-history-search,#tta-root .tta-search input,#tta-root .tta-customdates input,#tta-root .tta-ledgerfilters select,#tta-root .tta-keyinputrow input,#tta-root .tta-nw-daypicker input,#tta-root select{transition:border-color .12s ease,box-shadow .12s ease,background .12s ease}
+#tta-root .tta-history-search:focus,#tta-root .tta-search input:focus,#tta-root .tta-customdates input:focus,#tta-root .tta-ledgerfilters select:focus,#tta-root .tta-keyinputrow input:focus,#tta-root .tta-nw-daypicker input:focus,#tta-root select:focus{border-color:var(--tta-focus);box-shadow:0 0 0 3px #91cdf71b;background:#263b47;outline:none}
+#tta-root .tta-table-scroll,#tta-root .tta-ledgerwrap{box-shadow:inset 0 1px #ffffff08}
+#tta-root th{position:relative;font-weight:700;letter-spacing:.01em}
+#tta-root tbody tr:last-child td{border-bottom:0}
+#tta-root .tta-item{transition:border-color .12s ease,background .12s ease,box-shadow .12s ease}
+#tta-root .tta-item.expanded{border-color:#91cdf73b;background:linear-gradient(145deg,#ffffff13,#ffffff08)}
+#tta-root .tta-chevron{font-weight:650}
+#tta-root .tta-banner{box-shadow:inset 0 1px #ffffff0d}
+#tta-root .tta-help-card{padding:16px;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff06}
+#tta-root .tta-help-grid{gap:12px}
+#tta-root .tta-keycard,#tta-root .tta-settings>.tta-fin-section{padding:14px;border:1px solid var(--tta-line);border-radius:12px;background:#ffffff05;margin:12px 0}
+#tta-root .tta-keycard{border-bottom:1px solid var(--tta-line)}
+#tta-root .tta-settings label{margin-top:12px}
+#tta-root .tta-diagnostic{margin:8px 0;padding:0;border:1px solid var(--tta-line);border-radius:11px;background:#ffffff05;overflow:hidden}
+#tta-root .tta-diagnostic>summary{padding:11px 12px;font-weight:650;list-style-position:inside}
+#tta-root .tta-diagnostic>p,#tta-root .tta-diagnostic>pre,#tta-root .tta-diagnostic>.tta-diagnostic-guidance{margin-left:12px;margin-right:12px}
+#tta-root .tta-diagnostic>pre{padding:9px 10px;border-radius:8px;background:#111f27}
+#tta-root .tta-update-release{padding:14px 12px;border:1px solid var(--tta-line);border-radius:11px;background:#ffffff04;margin:8px 0}
+#tta-root .tta-update-list{display:grid;gap:2px}
+#tta-root .tta-empty{border:1px dashed #ffffff20;border-radius:11px;background:#ffffff03}
+#tta-root .tta-toast{bottom:max(28px,calc(18px + env(safe-area-inset-bottom)));min-width:min(320px,calc(100vw - 30px));max-width:min(560px,calc(100vw - 30px));text-align:center;background:#223742f5;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+#tta-root .tta-loading{background:#101d25d9;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+#tta-root .tta-loadingcard{padding:22px;border-radius:18px;background:linear-gradient(155deg,#2a3f4b,#21343f);box-shadow:0 24px 60px #06111970,inset 0 1px #ffffff1c}
+#tta-root .tta-loadingtitle{font-size:18px;margin:10px 0 5px}
+#tta-root .tta-loadingdetail{min-height:38px;line-height:1.55}
+#tta-root .tta-loadingbar{height:3px;margin:16px auto 0;max-width:220px;overflow:hidden;border-radius:999px;background:#ffffff10}
+#tta-root .tta-loadingbar span{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--tta-green),var(--tta-blue));animation:tta-loadslide 1.25s ease-in-out infinite alternate}
+@keyframes tta-loadslide{from{transform:translateX(-5%)}to{transform:translateX(170%)}}
+/* Workspace transitions are a small status pill instead of a full-page flash. */
+#tta-root .tta-transition{position:fixed;inset:auto auto max(88px,calc(70px + env(safe-area-inset-bottom))) 50%;z-index:29;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:9px;max-width:min(88vw,420px);padding:9px 13px;transform:translateX(-50%);background:#1c303af2;border:1px solid #ffffff2b;border-radius:999px;color:var(--tta-text)!important;pointer-events:none;font-size:12px;text-align:left;box-shadow:0 12px 28px #06131b55;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+#tta-root .tta-transition .tta-spinner{width:16px;height:16px}
+@media(hover:hover){
+  #tta-root tbody tr:hover td{background:#ffffff035!important}
+  #tta-root .tta-item:hover{border-color:#ffffff2f;background:linear-gradient(145deg,#ffffff13,#ffffff08)}
+}
+@media(max-width:700px){
+  #tta-root{--tta-header-h:56px;--tta-nav-h:44px}
+  #tta-root .tta-shell{scrollbar-gutter:auto}
+  #tta-root .tta-header{padding:7px 10px;gap:5px}
+  #tta-root .tta-header .tta-iconbtn,#tta-root .tta-header .tta-back{width:38px;height:38px;min-width:38px;flex-basis:38px;border-radius:9px}
+  #tta-root .tta-sub{font-size:10px}
+  #tta-root .tta-workspaces{padding:4px 8px;gap:2px}
+  #tta-root .tta-workspaces button{min-height:34px;padding:6px 9px;font-size:11px}
+  #tta-root .tta-navicon{font-size:11px}
+  #tta-root .tta-content{padding:14px 11px 34px}
+  #tta-root .tta-quality{margin-bottom:13px}
+  #tta-root .tta-settings-actions .tta-btn{min-height:40px}
+  #tta-root .tta-toast{bottom:max(106px,calc(88px + env(safe-area-inset-bottom)))}
+  #tta-root .tta-transition{bottom:max(112px,calc(94px + env(safe-area-inset-bottom)))}
+  #tta-root .tta-help-card{padding:13px}
+  #tta-root .tta-keycard,#tta-root .tta-settings>.tta-fin-section{padding:12px}
+}
+@media(max-width:420px){
+  #tta-root .tta-title{font-size:14px}
+  #tta-root .tta-header .tta-iconbtn,#tta-root .tta-header .tta-back{width:36px;height:36px;min-width:36px;flex-basis:36px}
+  #tta-root .tta-workspaces button{padding:6px 8px}
+  #tta-root .tta-navicon{display:none}
+  #tta-root .tta-quality{gap:8px;padding:8px 9px}
+  #tta-root .tta-quality>span{font-size:11px}
+  #tta-root .tta-quality .tta-btn{font-size:11px}
+  #tta-root .tta-settings-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  #tta-root .tta-settings-actions .tta-btn{width:100%}
+  #tta-root .tta-nw-actions{display:flex}
+  #tta-root .tta-nw-actions .tta-btn{width:auto}
+}

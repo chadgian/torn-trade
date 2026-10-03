@@ -42,8 +42,10 @@
   }
 
   function header(title, sub, back=false) {
-    const views=[['dashboard','Overview','dashboard'],['cash','Cash Flow','cashflow'],['trade','Trade Analysis','trade'],['ledger','Acquisitions','ledger'],['networth','Net Worth','networth'],['insights','Insights & Goals','insights']];
-    return `<div class="tta-header">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">\u2039</button>':''}<div class="tta-brand"><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div><button class="tta-iconbtn" data-act="help" aria-label="Help and guide" title="Help">?</button><button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">\u2699</button><button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">\u00D7</button></div><nav class="tta-workspaces" aria-label="Financial workspaces">${views.map(([view,label,action])=>`<button data-act="${action}" aria-current="${state.view===view?'page':'false'}">${label}</button>`).join('')}</nav>`;
+    const views=[['dashboard','Overview','dashboard','\u2302'],['cash','Cash Flow','cashflow','\u2195'],['trade','Trade Analysis','trade','\u25C7'],['ledger','Acquisitions','ledger','\u2637'],['networth','Net Worth','networth','\u25C8'],['insights','Insights & Goals','insights','\u25CE']];
+    const primary=views.some(([view])=>state.view===view);
+    const nav=primary?`<nav class="tta-workspaces" aria-label="Financial workspaces">${views.map(([view,label,action,icon])=>`<button data-act="${action}" aria-current="${state.view===view?'page':'false'}"><span class="tta-navicon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav>`:'';
+    return `<div class="tta-header ${primary?'primary':'utility'}">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">\u2039</button>':''}<div class="tta-brand"><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div><button class="tta-iconbtn" data-act="help" aria-label="Help and guide" title="Help">?</button><button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">\u2699</button><button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">\u00D7</button></div>${nav}`;
   }
 
   function pinnedCountFor(items) {
