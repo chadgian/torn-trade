@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.3.7.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.3.8.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages and unverified responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 
@@ -37,7 +37,7 @@ Large analyzer datasets no longer depend on the browser's small shared `localSto
 - **Other modern browsers/userscript managers:** uses IndexedDB for large history and caches.
 - **Fallback:** if neither native Torn PDA storage nor IndexedDB is available, the analyzer keeps working with `localStorage` and shows a Data Quality warning about the limited backend.
 - Small synchronous preferences and resumable-sync metadata stay in `localStorage`; large transaction, trade, cash-flow, snapshot, catalog and log-type datasets use the durable backend.
-- Data Quality shows the active history backend and the available usage/quota information. A successful sync watermark is not advanced until queued durable writes have finished.
+- Data Quality shows the active history backend and the available usage/quota information. A successful sync watermark is not advanced until queued durable writes have finished. Short repeated Player Trades pages are independently checked with an older date boundary instead of aborting near the end of Full Resync; dense repeated pages still pause rather than risk skipping trades.
 
 ## Accounting And Freshness
 
