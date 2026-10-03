@@ -1,0 +1,1 @@
+Verify the public Torn Cash Flow Analyzer v0.3.7 Worker endpoint after merging native storage support.
