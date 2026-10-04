@@ -443,16 +443,33 @@
     const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];
   }
   async function runResumableLogPhase(job,mode) {
-    const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[],totalBatches=filtered?Math.ceil(ids.length/MAX_LOG_IDS_PER_REQUEST):1;
-    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];}
-    while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
-      const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
+    const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[];
+    const batches=filtered?ensureFilteredLogBatches(job):[[]];
+    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;resetActiveLogBatchState(job);}
+    while((Number(job.logBatchIndex)||0)<batches.length&&!syncJobCancelled(job)){
+      const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?(batches[batchIndex]||[]):[],totalBatches=batches.length;
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
       await checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params={...(job.logPageParams||{limit:100,to:cursor}),from:scanPeriod.from};if(filtered)params.log=batchIds.join(',');
-      const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
+      let pageResult;
+      try{
+        pageResult=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
+      }catch(error){
+        if(filtered&&error?.code==='PAGE_INCOMPLETE'&&batchIds.length>1){
+          const splitAt=Math.ceil(batchIds.length/2),left=batchIds.slice(0,splitAt),right=batchIds.slice(splitAt);
+          batches.splice(batchIndex,1,left,right);job.logBatches=batches;
+          job.diagnostics.logBatchSplits=(Number(job.diagnostics.logBatchSplits)||0)+1;job.diagnostics.batches=batches.length;
+          resetActiveLogBatchState(job);
+          reportDiagnostic('PAGE_BATCH_SPLIT','info','A dense User Log page was split into smaller log-type batches so coverage can be verified without skipping same-second events.',{source:'log',phase:'adaptive-batch-split',count:batchIds.length});
+          await checkpointSyncJob(job,`Dense log page detected \u00B7 split batch ${batchIndex+1} into ${left.length} + ${right.length} log types \u00B7 restarting this batch safely`);
+          continue;
+        }
+        throw error;
+      }
+      const {rows,next,seen,requests,boundaryRecovered,denseBoundaryRecovered}=pageResult;
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+requests;
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
+      if(denseBoundaryRecovered)job.diagnostics.denseBoundaryRecoveries=(Number(job.diagnostics.denseBoundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
@@ -477,7 +494,7 @@
       await checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
-    if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');}
+    if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');resolveDiagnostic('PAGE_BATCH_SPLIT','log');}
     return !syncJobCancelled(job);
   }
   async function runAbroadBuyVerification(job) {
