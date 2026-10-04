@@ -50,14 +50,14 @@ test('Data Quality provides suggested actions and developer contact for non-user
   const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
   assert.equal(html.includes('Suggested action'),true);
   assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
-  assert.equal(html.includes('v0.4.2'),true);
+  assert.equal(html.includes('v0.4.3'),true);
   assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
   assert.equal(row.suggestedAction.length>20,true);
   assert.equal(JSON.stringify(report).includes('https://'),false);
 });
 test('What\'s New page lists user-facing releases from v0.3.0 through current',()=>{
   const {app}=harness(),html=app.updatesHtml();
-  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2'])assert.equal(html.includes(version),true);
+  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2','v0.4.3'])assert.equal(html.includes(version),true);
   assert.equal(html.includes('native per-script storage'),true);
   assert.equal(html.includes('Net Worth'),true);
 });
@@ -344,11 +344,55 @@ test('zero after a positive nanostamp verifies the boundary and retains every ro
   const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);assert.equal(calls.length,3);assert.equal(calls.at(-1).searchParams.has('nanostamp'),false);
 });
 
+test('dense filtered log batches split adaptively and resume without skipped rows',async()=>{
+  const dense=Array.from({length:99},(_,i)=>boundarySale('dense-'+i,104));
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    const ids=String(url.searchParams.get('log')||'').split(',').filter(Boolean);
+    if(ids.length>1){
+      if(!url.searchParams.has('nanostamp'))return {log:[boundarySale('shared-top',105)],_metadata:{nanostamp:'104000000500'}};
+      return {log:dense};
+    }
+    if(ids[0]==='4210')return {log:[boundarySale('shared-top',105),boundarySale('sale-final',100)]};
+    return {log:[]};
+  }}});
+  const job={...boundaryJob(),logTypeIds:[4210,4800],diagnostics:{parsedRows:0,matchedRows:0}};
+  await app.runResumableLogPhase(job,'filtered');
+  assert.equal(job.completedSources.log,true);
+  assert.equal(job.diagnostics.logBatchSplits,1);
+  assert.equal(job.logBatches.length,2);
+  assert.equal(app.state.transactions.length,2);
+  assert.equal(new Set(app.state.transactions.map(r=>r.id)).size,2);
+  assert.equal(calls.some(u=>u.searchParams.get('log')==='4210,4800'&&u.searchParams.has('nanostamp')),true);
+  assert.equal(calls.some(u=>u.searchParams.get('log')==='4210'&&!u.searchParams.has('nanostamp')),true);
+});
+test('singleton dense log page can be verified by a short inclusive date-boundary probe',async()=>{
+  const current=[...Array.from({length:98},(_,i)=>boundarySale('new-'+i,101)),boundarySale('boundary',100)];
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':url=>{
+    if(url.searchParams.has('nanostamp'))return {log:current};
+    if(url.searchParams.get('to')==='100')return {log:[boundarySale('boundary',100),boundarySale('older',90)]};
+    return {log:[]};
+  }}});
+  const result=await app.historyPage('/user/log',{from:0,to:110,limit:100,nanostamp:'101000000500',log:'4210'},[]);
+  assert.equal(result.next,null);
+  assert.equal(result.denseBoundaryRecovered,true);
+  assert.equal(result.rows.length,100);
+  assert.equal(new Set(result.rows.map(r=>r.id)).size,100);
+  assert.equal(calls.length,4);
+  assert.equal(calls.at(-1).searchParams.get('to'),'100');
+  assert.equal(calls.at(-1).searchParams.has('nanostamp'),false);
+});
+test('singleton 99-row date probes remain incomplete when the verification page is still dense',async()=>{
+  const rows=Array.from({length:99},(_,i)=>boundarySale('same-'+i,100));
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:rows}}});
+  await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100,nanostamp:'100000000500',log:'4210'},[]),e=>e.code==='PAGE_INCOMPLETE');
+  assert.equal(calls.length,4);
+  assert.equal(app.state.sync.lastSync,0);
+});
 test('dense zero-cursor pages pause rather than silently losing same-second logs',async()=>{
   for(const count of [99,100]){
     const rows=Array.from({length:count},(_,i)=>boundarySale('sale-'+i));
     const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':url=>zeroPage(rows,Object.fromEntries(url.searchParams))}});
-    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100},[]),e=>e.code==='PAGE_INCOMPLETE');assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100},[]),e=>e.code==='PAGE_INCOMPLETE');assert.equal(calls.length,4);assert.equal(app.state.sync.lastSync,0);
   }
 });
 

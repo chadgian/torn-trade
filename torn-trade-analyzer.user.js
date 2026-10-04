@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.4.2
+// @version      0.4.3
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -218,7 +218,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.4.2';
+  const VERSION = '0.4.3';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -542,7 +542,7 @@
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
-    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries'])counts[key]=Number(d[key])||0;
+    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
     const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
@@ -1571,7 +1571,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.4.2',label:'Current',items:['Added a persistent privacy assurance notice at the top of Overview explaining that analyzer history is stored locally on the player\'s device.','Clarified that gameplay and financial history are not sold or transmitted to the developer or third parties, and API requests go only to Torn\'s official API.']},
+      {version:'0.4.3',label:'Current',items:['Added adaptive recovery for Torn User Log pages that return 99 dense records without a safe continuation cursor.','Ambiguous multi-log batches are split into smaller independent batches and restarted safely, while single-log boundaries receive an inclusive date verification before completion is accepted.','The analyzer still pauses rather than guessing if a 99-row boundary cannot be independently proven complete.']},
+      {version:'0.4.2',items:['Added a persistent privacy assurance notice at the top of Overview explaining that analyzer history is stored locally on the player\'s device.','Clarified that gameplay and financial history are not sold or transmitted to the developer or third parties, and API requests go only to Torn\'s official API.']},
       {version:'0.4.1',items:['Polished the analyzer navigation and visual hierarchy across desktop, mobile and Torn PDA.','Main workspace navigation now stays available while browsing financial pages, keeps the active workspace centered, and gets out of the way on Settings, Help, Data Quality and What\'s New.','Replaced full-page workspace transition flashes with a compact progress pill, improved touch targets, focus states, feedback, empty states and mobile spacing.']},
       {version:'0.4.0',items:['Refined the Net Worth page for phones: denser daily metrics, compact event rows, clearer snapshot sections and collapsible calculation details.','Added this What\'s New page so users can review changes since the v0.3.0 rebuild.','Data Quality errors now include suggested next steps and developer-contact guidance when the problem cannot be fixed on the user\'s device.']},
       {version:'0.3.9',items:['Restored compact responsive tables on phones and tablets instead of converting rows into card layouts.','Kept important table columns visible while folding lower-priority details into secondary text.']},
@@ -2531,7 +2532,7 @@
     const priorTradePages=Math.max(1,Number(prior.tradeListPages)||1),priorTrades=Math.max(0,Number(prior.tradeHeaders)||0),priorAbroadPages=Math.max(1,Number(prior.abroadVerifyPages)||1),detailMs=phase==='trade-details'?pageMs:1150;
     if(phase==='setup'){pct=2;etaNote='preparing scan';}
     else if(phase==='logs-filtered'){
-      const totalBatches=Math.max(1,Math.ceil((job.logTypeIds||[]).length/MAX_LOG_IDS_PER_REQUEST)),doneBatches=Math.max(0,Math.min(totalBatches,Number(job.logBatchIndex)||0)),currentPages=Math.max(0,Number(job.logPage)||0),pagesDone=Math.max(0,Number(d.pages)||0),priorPages=Math.max(totalBatches,Number(prior.pages)||0);
+      const totalBatches=Math.max(1,(Array.isArray(job.logBatches)&&job.logBatches.length)||Math.ceil((job.logTypeIds||[]).length/MAX_LOG_IDS_PER_REQUEST)),doneBatches=Math.max(0,Math.min(totalBatches,Number(job.logBatchIndex)||0)),currentPages=Math.max(0,Number(job.logPage)||0),pagesDone=Math.max(0,Number(d.pages)||0),priorPages=Math.max(totalBatches,Number(prior.pages)||0);
       let predictedTotalPages=priorPages;if(doneBatches>0){const completedPages=Math.max(1,pagesDone-currentPages),avg=completedPages/doneBatches;predictedTotalPages=Math.max(pagesDone+1,avg*totalBatches);predictedTotalPages=priorPages>0?predictedTotalPages*.72+priorPages*.28:predictedTotalPages;}else if(!(priorPages>0))predictedTotalPages=Math.max(pagesDone+totalBatches*4,totalBatches*5);
       const remainingPages=Math.max(0,predictedTotalPages-pagesDone),futureMs=priorAbroadPages*1150+priorTradePages*1150+Math.max(priorTrades,10)*1150+4000;eta=remainingPages*pageMs+futureMs;pct=5+55*Math.min(1,pagesDone/Math.max(1,predictedTotalPages));etaNote=doneBatches>0||priorPages>0?`~${formatEtaDuration(eta)} left`:'learning history depth';
     }else if(phase==='logs-fallback'){
@@ -2608,7 +2609,19 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,logBatchSplits:0,denseBoundaryRecoveries:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+  }
+  function initialLogBatches(ids=[]) {
+    const list=ids.map(Number).filter(x=>x>0),batches=[];
+    for(let i=0;i<list.length;i+=MAX_LOG_IDS_PER_REQUEST)batches.push(list.slice(i,i+MAX_LOG_IDS_PER_REQUEST));
+    return batches;
+  }
+  function ensureFilteredLogBatches(job) {
+    if(!Array.isArray(job.logBatches)||!job.logBatches.length)job.logBatches=initialLogBatches(job.logTypeIds||[]);
+    return job.logBatches;
+  }
+  function resetActiveLogBatchState(job) {
+    const p=job.logScanPeriod||job.period;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];
   }
   async function createResumableSyncJob(syncMode='quick',background=false) {
     stripSyncRunMarkers();
@@ -2616,7 +2629,7 @@
     const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
     const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} \u2013 ${tctDateTimeStr(now)} TCT`;
     const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
-    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
+    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logBatches:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
     await checkpointSyncJob(job,job.progress);return job;
   }
 
@@ -2691,6 +2704,33 @@
         if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code))throw error;
         if(state.syncCancel)return {rows:[],next:null,seen:[...seen],requests};
         if(attempt===2){
+          if(key==='log'&&error.code==='PAGE_INCOMPLETE'){
+            const filterIds=String(params.log||'').split(',').filter(Boolean);
+            // Multi-type filtered pages are split by runResumableLogPhase so each
+            // subset can be verified independently. A singleton/unfiltered dense
+            // page gets one inclusive date-boundary probe before we give up.
+            if(filterIds.length<=1&&rows.length){
+              const times=rows.map(row=>Number(row?.timestamp)).filter(Number.isFinite),from=Number(params.from)||0,to=Number(params.to)||0;
+              if(times.length!==rows.length||times.some(ts=>ts<from||ts>to))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn returned logs outside the dense-page verification range. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe'});
+              const oldest=Math.min(...times),probe={...params,to:oldest};delete probe.nanostamp;delete probe.offset;
+              setSyncProgress('Verifying a dense history boundary');
+              const checked=await syncApiGet(path,probe),older=pageRows(checked,key);requests++;
+              if(older.some(row=>Number(row.timestamp)>oldest||Number(row.timestamp)<from))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn did not honor the dense-page date-boundary check. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              let probeNext;
+              try{probeNext=nextHistoryPage(checked,probe,older,[],key);}catch(probeError){
+                if(probeError.code==='PAGE_INCOMPLETE')throw error;
+                throw probeError;
+              }
+              if(!probeNext){
+                if(older.length>=Math.max(1,Number(probe.limit||100)-1))throw error;
+                const returnedIds=new Set(older.map(row=>String(row.id))),boundaryIds=rows.filter(row=>Number(row.timestamp)===oldest).map(row=>String(row.id));
+                if(boundaryIds.some(id=>!returnedIds.has(id)))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','The terminal dense-page probe did not reproduce the known boundary records. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              }
+              const savedRows=Array.from(new Map([...rows,...older].map(row=>[String(row.id),row])).values());
+              reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',probeNext?'A dense history page was recovered with an independent date-boundary cursor; older logs are still being loaded.':'A dense history page was independently verified as the end of this log batch.',{source:key,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              return {rows:savedRows,next:probeNext,seen:[...seen],requests,boundaryRecovered:true,denseBoundaryRecovered:true};
+            }
+          }
           if(key==='trades'&&error.code==='PAGE_REPEATED'){
             const limit=Math.max(1,Number(params.limit||100));
             const times=rows.map(row=>Number(row?.completed_at||row?.timestamp)).filter(Number.isFinite);
@@ -2751,16 +2791,33 @@
     const p=job.logScanPeriod||job.period;job.logBatchIndex=(Number(job.logBatchIndex)||0)+1;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];
   }
   async function runResumableLogPhase(job,mode) {
-    const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[],totalBatches=filtered?Math.ceil(ids.length/MAX_LOG_IDS_PER_REQUEST):1;
-    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;job.logCursorTo=scanPeriod.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];}
-    while((Number(job.logBatchIndex)||0)<totalBatches&&!syncJobCancelled(job)){
-      const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?ids.slice(batchIndex*MAX_LOG_IDS_PER_REQUEST,(batchIndex+1)*MAX_LOG_IDS_PER_REQUEST):[];
+    const scanPeriod=job.logScanPeriod||job.period,filtered=mode==='filtered',ids=filtered?(job.logTypeIds||[]):[];
+    const batches=filtered?ensureFilteredLogBatches(job):[[]];
+    if(job.logMode!==mode){job.logMode=mode;job.logBatchIndex=0;resetActiveLogBatchState(job);}
+    while((Number(job.logBatchIndex)||0)<batches.length&&!syncJobCancelled(job)){
+      const batchIndex=Number(job.logBatchIndex)||0,batchIds=filtered?(batches[batchIndex]||[]):[],totalBatches=batches.length;
       const cursor=Number(job.logCursorTo)||scanPeriod.to,page=(Number(job.logPage)||0)+1,label=filtered?`Historical scan ${batchIndex+1}/${totalBatches}`:'Compatibility history scan';
       await checkpointSyncJob(job,`${label} \u00B7 page ${page} \u00B7 back to ${dateStr(Math.max(scanPeriod.from,Math.min(cursor,nowSec())))}`);
       const params={...(job.logPageParams||{limit:100,to:cursor}),from:scanPeriod.from};if(filtered)params.log=batchIds.join(',');
-      const {rows,next,seen,requests,boundaryRecovered}=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
+      let pageResult;
+      try{
+        pageResult=await historyPage('/user/log',params,job.logPageSeen||[],'log',job.logLastPageIds||[]);
+      }catch(error){
+        if(filtered&&error?.code==='PAGE_INCOMPLETE'&&batchIds.length>1){
+          const splitAt=Math.ceil(batchIds.length/2),left=batchIds.slice(0,splitAt),right=batchIds.slice(splitAt);
+          batches.splice(batchIndex,1,left,right);job.logBatches=batches;
+          job.diagnostics.logBatchSplits=(Number(job.diagnostics.logBatchSplits)||0)+1;job.diagnostics.batches=batches.length;
+          resetActiveLogBatchState(job);
+          reportDiagnostic('PAGE_BATCH_SPLIT','info','A dense User Log page was split into smaller log-type batches so coverage can be verified without skipping same-second events.',{source:'log',phase:'adaptive-batch-split',count:batchIds.length});
+          await checkpointSyncJob(job,`Dense log page detected \u00B7 split batch ${batchIndex+1} into ${left.length} + ${right.length} log types \u00B7 restarting this batch safely`);
+          continue;
+        }
+        throw error;
+      }
+      const {rows,next,seen,requests,boundaryRecovered,denseBoundaryRecovered}=pageResult;
       job.diagnostics.pages=(Number(job.diagnostics.pages)||0)+requests;
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
+      if(denseBoundaryRecovered)job.diagnostics.denseBoundaryRecoveries=(Number(job.diagnostics.denseBoundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
       const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
@@ -2785,7 +2842,7 @@
       await checkpointSyncJob(job,`${label} \u00B7 ${qty(job.diagnostics.matchedRows||0)} item rows checkpointed`);
       if(!syncJobCancelled(job))await sleep(REQUEST_GAP_MS);
     }
-    if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');}
+    if(!syncJobCancelled(job)){job.completedSources={...(job.completedSources||{}),log:true};resolveDiagnostic('PAGE_INCOMPLETE','log');resolveDiagnostic('PAGE_REPEATED','log');resolveDiagnostic('PAGE_BATCH_SPLIT','log');}
     return !syncJobCancelled(job);
   }
   async function runAbroadBuyVerification(job) {
@@ -2914,8 +2971,8 @@
     if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
-    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
-    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
+    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logBatches=initialLogBatches(job.logTypeIds);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
+    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?job.logBatches.length:0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
     job.diagnostics.recentLogRecheckHours=(job.period.to-job.logScanPeriod.from)/3600;job.diagnostics.recentTradeRecheckHours=(job.period.to-job.tradeScanPeriod.from)/3600;
     if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';await checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
@@ -2953,12 +3010,12 @@
     // Rewind legacy cursors inside the existing rebuild; its durable recovery
     // copy and already checkpointed rows stay intact. Upserts deduplicate them.
     job.phase=job.fullResetDone&&job.logTypeIds?.length?'logs-filtered':'setup';
-    job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;
+    job.logMode='filtered';job.logBatches=initialLogBatches(job.logTypeIds||[]);job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;
     job.logPage=0;job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];job.logPreviousSignature='';
     job.abroadPageParams=null;job.abroadPageSeen=[];job.abroadLastPageIds=[];
     job.tradeListParams=null;job.tradeListSeen=[];job.tradeHeaders=[];job.tradeDetailIndex=0;job.completedSources={};
     job.lastError='';job.lastErrorCode='';job.lastErrorContext={};
-    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds?.length||0,Math.ceil((job.logTypeIds?.length||0)/MAX_LOG_IDS_PER_REQUEST));
+    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds?.length||0,job.logBatches.length);
     reportDiagnostic('CURSOR_CHECKPOINT_UPDATED','info','The saved scan was rewound to verify the original date range with updated cursor handling. Cached rows and the recovery copy were retained.',{source:'sync'});
     await checkpointSyncJob(job,'Rechecking saved history from the original scan boundary');return true;
   }
