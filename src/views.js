@@ -166,7 +166,7 @@
   async function refreshCompanyDailyAdjustment(userId,serverNow=nowSec()) {
     const me=Number(userId)||0;if(!(me>0))return null;
     let profileData;
-    try{profileData=await apiGet('/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}catch(error){if([6,7,16].includes(error.context?.apiCode))resolveDiagnostic(error.code,'/company/profile');else reportDiagnostic('COMPANY_UNAVAILABLE','warning','Company profit could not be refreshed.',{source:'/company/profile'});return null;}
+    try{profileData=await apiGet('/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}catch(error){const apiCode=Number(error?.context?.apiCode)||0;if([6,7].includes(apiCode)){resolveDiagnostic(error.code,'/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}else{if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/company/profile');reportDiagnostic('COMPANY_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include Company \u2192 Profile; company profit tracking is unavailable.':'Company profit could not be refreshed.',{source:'/company/profile',apiCode});}return null;}
     const profile=profileData?.profile;
     if(!profile||Number(profile?.director?.id)!==me)return null;
     let employeesData;
