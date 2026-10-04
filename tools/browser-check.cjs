@@ -55,7 +55,7 @@ async function assertCompactTableLayout(page,selector,label){
       await button.click();
       await settled();
       if(action==='diagnostics')assert.equal(await page.getByText('PARSER_UPDATED',{exact:true}).count(),0,'UI-only releases must retain verified accounting history');
-      if(action==='updates'){assert.equal(await page.getByText('v0.3.0',{exact:true}).count(),1);assert.equal(await page.getByText('v0.4.3',{exact:true}).count(),1);}
+      if(action==='updates'){assert.equal(await page.getByText('v0.3.0',{exact:true}).count(),1);assert.equal(await page.getByText('v0.4.4',{exact:true}).count(),1);}
       if(action==='dashboard'){assert.equal(await page.locator('.tta-privacy-notice').count(),1,'Overview must show the privacy assurance');assert.equal(await page.getByText('Your financial data stays on this device.',{exact:true}).count(),1);}
       if(action==='networth'&&width<=700){const cols=await page.locator('.tta-nw-daily-metrics').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);assert.equal(cols,2,`${width}px Net Worth daily metrics should stay compact in two columns`);}
       const primaryWorkspace=['dashboard','trade','ledger','cashflow','networth','insights'].includes(action);

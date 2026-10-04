@@ -88,7 +88,7 @@
         if(Object.prototype.hasOwnProperty.call(state,key))state[key]=data[key];
       }
       for(const key of IMPORT_CLEAR_KEYS)await removeStoredKey(key);
-      resetAnalyticsCache();return true;
+      resetAnalyticsCache();await flushDurableStorage();announceCrossTabUpdate('backup-import');return true;
     }catch(error){
       try{
         for(const key of BACKUP_KEYS)if(previous[key]!==undefined&&previous[key]!==null){

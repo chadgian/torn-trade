@@ -63,7 +63,7 @@
       IMPORT_SYNC_ACTIVE:'Stop the active sync, then retry the import.',
       IMPORT_READ:'Confirm the selected file is the analyzer JSON backup and try importing it again.',
       INVALID_PERIOD:'Choose a start date that is on or before the end date.',
-      SYNC_OTHER_TAB:'Let the other Torn tab finish syncing, or keep only one analyzer tab actively syncing.',
+      SYNC_OTHER_TAB:'Another Torn tab owns the TCFA sync lock. You can keep browsing the locally stored history in this tab; it will refresh when the active sync finishes. Start another sync only after the first tab releases the lock.',
       SYNC_LOCK_UNAVAILABLE:'Keep only one Torn tab syncing at a time in this browser.',
       UNCLASSIFIED_FINANCE:'Review Insights for the excluded events. No manual correction is required unless a total looks wrong.',
       CASH_INFERRED:'No action is normally required. The analyzer inferred a safe value/category from the Torn log; review the event only if the total looks incorrect.',

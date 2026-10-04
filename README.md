@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.4.3.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages now trigger adaptive recovery: multi-log batches split into smaller independent batches, and singleton/unfiltered boundaries receive an inclusive date verification. Unverified dense responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.4.4.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages now trigger adaptive recovery: multi-log batches split into smaller independent batches, and singleton/unfiltered boundaries receive an inclusive date verification. Unverified dense responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
 
 ## Features
 
@@ -21,6 +21,7 @@ A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO tra
 - Refined workspace navigation, touch/focus feedback, compact transition status, calmer section hierarchy and Torn PDA-aware mobile spacing.
 - Overview now includes a clear privacy assurance that analyzer history is stored locally and is not sold or sent to the developer or third parties.
 - Dense 99-row User Log pagination can recover by splitting log-type batches and independently verifying singleton date boundaries without skipping same-second events.
+- Multiple Torn tabs can read the same local TCFA history. Web Locks still keep sync/recovery writes single-tab, while BroadcastChannel/local signals and focus refresh keep secondary tabs up to date.
 
 ## Installation
 
@@ -60,7 +61,7 @@ Single-item cash trades use actual cash. Multi-item/mixed trades retain the prev
 - Full Resync loads all API-available history. Previous history is recoverable on cancellation; older parsed caches remain flagged until a successful full rebuild.
 - Rebuilds commit a recovery copy before clearing history. IndexedDB avoids the old double-history localStorage quota failure; browsers without it retain the legacy backup path and refuse to clear history when the backup cannot fit. Long rebuilds retain their frozen scan endpoint across reloads; Quick Sync subsequently repairs freshness.
 - Diagnostic exports separate the last successful scan from the pending/failed attempt. Permanently stalled cursors pause after three attempts without advancing coverage or skipping same-second events.
-- Web Locks coordinate Torn tabs when available. Otherwise the interface warns to keep one tab syncing.
+- Web Locks coordinate sync/recovery writes across Torn tabs when available. Every tab may still read local history; secondary tabs refresh after sync/import/reset notifications and on focus. During Full Resync they can display the last safe recovery snapshot while the writer rebuilds live history. Without Web Locks the interface still warns to keep only one tab syncing.
 
 ## Data Quality And Bug Reports
 

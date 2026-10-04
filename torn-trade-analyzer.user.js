@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.4.3
+// @version      0.4.4
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -21,7 +21,9 @@
   const DURABLE_STORAGE_KEYS=new Set(['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','catalog','logTypes']);
   const durableCache=new Map();
   const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
-  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null;
+  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,crossTabSequence=0;
+  const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
+  function crossTabSignalKey(){return NS+'crossTabSignal';}
 
   function storageIssue(key) {
     try{if(typeof storageIssues!=='undefined'&&!storageIssues.includes(key))storageIssues.push(key);}catch(_){}
@@ -179,6 +181,36 @@
       }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
     }).catch(()=>{});
   }
+  async function reloadDurableStorage(keys=[...DURABLE_STORAGE_KEYS]) {
+    if(!durableStorageState.ready)await initializeDurableStorage();
+    let loaded=0;
+    for(const key of keys){
+      if(!DURABLE_STORAGE_KEYS.has(key))continue;
+      try{
+        let value;
+        if(durableBackend.kind==='localStorage')value=parseLocalValue(key,undefined);
+        else value=await durableBackend.get(NS+key);
+        if(value==null){
+          durableCache.delete(key);
+          if(typeof state!=='undefined'&&Object.prototype.hasOwnProperty.call(state,key)&&Array.isArray(state[key]))state[key]=[];
+          continue;
+        }
+        applyDurableStateValue(key,value);loaded++;
+      }catch(error){storageError(error,key);}
+    }
+    return loaded;
+  }
+  function announceCrossTabUpdate(reason='history-updated') {
+    const payload={type:'history-updated',reason:String(reason||'history-updated').slice(0,48),at:Date.now(),sequence:++crossTabSequence};
+    try{
+      if(typeof BroadcastChannel!=='undefined'){
+        const channel=new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+        channel.postMessage(payload);channel.close();
+      }
+    }catch(_){}
+    try{localStorage.setItem(crossTabSignalKey(),JSON.stringify(payload));}catch(_){}
+  }
+
   async function saveDurable(k,v) {
     if(!DURABLE_STORAGE_KEYS.has(k)) {
       if(!saveLocal(k,v))throw new Error('Local storage write failed');
@@ -218,7 +250,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.4.3';
+  const VERSION = '0.4.4';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -475,7 +507,7 @@
       IMPORT_SYNC_ACTIVE:'Stop the active sync, then retry the import.',
       IMPORT_READ:'Confirm the selected file is the analyzer JSON backup and try importing it again.',
       INVALID_PERIOD:'Choose a start date that is on or before the end date.',
-      SYNC_OTHER_TAB:'Let the other Torn tab finish syncing, or keep only one analyzer tab actively syncing.',
+      SYNC_OTHER_TAB:'Another Torn tab owns the TCFA sync lock. You can keep browsing the locally stored history in this tab; it will refresh when the active sync finishes. Start another sync only after the first tab releases the lock.',
       SYNC_LOCK_UNAVAILABLE:'Keep only one Torn tab syncing at a time in this browser.',
       UNCLASSIFIED_FINANCE:'Review Insights for the excluded events. No manual correction is required unless a total looks wrong.',
       CASH_INFERRED:'No action is normally required. The analyzer inferred a safe value/category from the Torn log; review the event only if the total looks incorrect.',
@@ -641,7 +673,7 @@
         if(Object.prototype.hasOwnProperty.call(state,key))state[key]=data[key];
       }
       for(const key of IMPORT_CLEAR_KEYS)await removeStoredKey(key);
-      resetAnalyticsCache();return true;
+      resetAnalyticsCache();await flushDurableStorage();announceCrossTabUpdate('backup-import');return true;
     }catch(error){
       try{
         for(const key of BACKUP_KEYS)if(previous[key]!==undefined&&previous[key]!==null){
@@ -1571,7 +1603,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.4.3',label:'Current',items:['Added adaptive recovery for Torn User Log pages that return 99 dense records without a safe continuation cursor.','Ambiguous multi-log batches are split into smaller independent batches and restarted safely, while single-log boundaries receive an inclusive date verification before completion is accepted.','The analyzer still pauses rather than guessing if a 99-row boundary cannot be independently proven complete.']},
+      {version:'0.4.4',label:'Current',items:['TCFA can now load and browse locally stored history in multiple Torn tabs while keeping sync/recovery writes exclusive to one tab.','Other tabs refresh durable Torn PDA/IndexedDB history after the active tab finishes syncing, importing a backup or resetting data, with focus/visibility refresh as a fallback.','During a Full Resync, secondary tabs show the last safe recovery snapshot instead of an empty or partially rebuilt history.']},
+      {version:'0.4.3',items:['Added adaptive recovery for Torn User Log pages that return 99 dense records without a safe continuation cursor.','Ambiguous multi-log batches are split into smaller independent batches and restarted safely, while single-log boundaries receive an inclusive date verification before completion is accepted.','The analyzer still pauses rather than guessing if a 99-row boundary cannot be independently proven complete.']},
       {version:'0.4.2',items:['Added a persistent privacy assurance notice at the top of Overview explaining that analyzer history is stored locally on the player\'s device.','Clarified that gameplay and financial history are not sold or transmitted to the developer or third parties, and API requests go only to Torn\'s official API.']},
       {version:'0.4.1',items:['Polished the analyzer navigation and visual hierarchy across desktop, mobile and Torn PDA.','Main workspace navigation now stays available while browsing financial pages, keeps the active workspace centered, and gets out of the way on Settings, Help, Data Quality and What\'s New.','Replaced full-page workspace transition flashes with a compact progress pill, improved touch targets, focus states, feedback, empty states and mobile spacing.']},
       {version:'0.4.0',items:['Refined the Net Worth page for phones: denser daily metrics, compact event rows, clearer snapshot sections and collapsible calculation details.','Added this What\'s New page so users can review changes since the v0.3.0 rebuild.','Data Quality errors now include suggested next steps and developer-contact guidance when the problem cannot be fixed on the user\'s device.']},
@@ -1799,7 +1832,7 @@
       }
       else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
         await clearFullResyncBackup();
-        await clearStoredKeys(['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','catalog','catalogVersion','catalogUpdatedAt','logTypes','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir']);state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();render();toast('Analyzer data reset.');
+        await clearStoredKeys(['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','catalog','catalogVersion','catalogUpdatedAt','logTypes','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir']);state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();announceCrossTabUpdate('reset');render();toast('Analyzer data reset.');
       }
       }catch(error){diagnosticFromError(error);setBusy(false);render();toast('Action failed. See Data Quality for details.');}
     });
@@ -3064,6 +3097,7 @@
       }
     }
     finally{
+      try{await flushDurableStorage();announceCrossTabUpdate(job?.active?'sync-checkpoint':'sync-complete');}catch(_){}
       if(background){state.backgroundSyncing=false;queueAnalyticsRender();}
       else{state.syncing=false;updateFabState();setBusy(false);render();}
     }
@@ -3088,7 +3122,7 @@
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
-        if(!lock){reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. This tab retains its cached results.',{source:'sync'});queueAnalyticsRender();return;}
+        if(!lock){reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. This tab can keep viewing locally stored results and will refresh when the active sync finishes.',{source:'sync'});if(!options.background)toast('Another Torn tab is syncing TCFA. You can keep viewing data here; this tab will refresh when it finishes.');queueAnalyticsRender();return;}
         resolveDiagnostic('SYNC_OTHER_TAB');return syncWithLocalState(options);
       });
     }
@@ -3149,9 +3183,18 @@
 
 
   // Source: bootstrap.js
-  let historyRecoveryFinished=false;
-  async function initializeStoredHistory() {
-    await initializeDurableStorage();
+  let historyRecoveryFinished=false,crossTabChannel=null,crossTabRefreshTimer=0,crossTabRefreshPromise=null,lastCrossTabRefreshAt=0;
+
+  function applyFullResyncPreview(backup) {
+    if(!backup?.sync)return false;
+    for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial']){
+      if(Array.isArray(backup[key]))state[key]=backup[key];
+    }
+    state.sync=backup.sync;
+    resetAnalyticsCache();
+    return true;
+  }
+  async function runStartupRecovery() {
     try{await restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     purgeBogusCrimeCashRows();
@@ -3164,14 +3207,76 @@
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
   }
-  // Startup recovery and sync must share the same cross-tab write lock.
-  historyRecoveryReady=(typeof navigator!=='undefined'&&navigator.locks?.request?
-    navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
-      if(lock)await initializeStoredHistory();else reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. Startup recovery will not change its history.',{source:'sync'});
-    }):initializeStoredHistory())
-    .catch(()=>{historyRecoveryFailed=true;reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be restored. Free browser storage and reload. Sync is blocked to protect the recovery copy.',{source:'storage'});})
+  async function previewHistoryWhileOtherTabWrites() {
+    const job=loadSyncJob();
+    if(!job?.fullResetDone||!load('fullResyncBackup',null))return false;
+    try{
+      const backup=await readFullResyncBackup();
+      if(applyFullResyncPreview(backup)){
+        reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is rebuilding TCFA history. This tab is showing the last safe history until that rebuild finishes.',{source:'sync'});
+        return true;
+      }
+    }catch(_){}
+    return false;
+  }
+  async function refreshCrossTabHistory(reason='cross-tab') {
+    if(state.syncing||state.backgroundSyncing)return false;
+    if(crossTabRefreshPromise)return crossTabRefreshPromise;
+    crossTabRefreshPromise=(async()=>{
+      const preview=await previewHistoryWhileOtherTabWrites();
+      if(!preview)await reloadDurableStorage();
+      const localKeys=['tracked','goals','pinnedIds','hiddenIds','notices','catalogUpdatedAt','logTypesUpdatedAt','dateMode','customFrom','customTo','granularity','netWorthDate','netWorthTrackingStartedAt','apiKey'];
+      for(const key of localKeys)if(Object.prototype.hasOwnProperty.call(state,key))state[key]=load(key,state[key]);
+      if(!preview)state.sync=load('sync',state.sync);
+      resetAnalyticsCache();lastCrossTabRefreshAt=Date.now();
+      if(!loadSyncJob())resolveDiagnostic('SYNC_OTHER_TAB');
+      queueAnalyticsRender();
+      return true;
+    })().catch(error=>{reportDiagnostic('STORAGE_READ','warning','Stored history could not be refreshed in this tab. Reload the Torn page to retry.',{source:'cross-tab'});return false;})
+      .finally(()=>{crossTabRefreshPromise=null;});
+    return crossTabRefreshPromise;
+  }
+  function scheduleCrossTabRefresh(reason='cross-tab',delay=80) {
+    clearTimeout(crossTabRefreshTimer);
+    crossTabRefreshTimer=setTimeout(()=>{void refreshCrossTabHistory(reason);},delay);
+  }
+  function setupCrossTabRefresh() {
+    try{
+      if(typeof BroadcastChannel!=='undefined'){
+        crossTabChannel=new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+        crossTabChannel.addEventListener('message',event=>{if(event?.data?.type==='history-updated')scheduleCrossTabRefresh(event.data.reason||'broadcast');});
+      }
+    }catch(_){crossTabChannel=null;}
+    const passiveKeys=new Set(['goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
+    window.addEventListener('storage',event=>{
+      if(event.key===crossTabSignalKey()){scheduleCrossTabRefresh('storage-signal');return;}
+      if(!event.key?.startsWith(NS))return;
+      const key=event.key.slice(NS.length);
+      if(passiveKeys.has(key))scheduleCrossTabRefresh('storage');
+    });
+    const refreshOnFocus=()=>{if(Date.now()-lastCrossTabRefreshAt>1500)scheduleCrossTabRefresh('focus',40);};
+    window.addEventListener('focus',refreshOnFocus);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshOnFocus();});
+  }
+
+  // Every tab may read durable history. Only recovery/mutation work is protected
+  // by the exclusive sync lock, so a second tab stays useful while another syncs.
+  historyRecoveryReady=initializeDurableStorage()
+    .then(async()=>{
+      if(typeof navigator!=='undefined'&&navigator.locks?.request){
+        await navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
+          if(lock)await runStartupRecovery();
+          else{
+            await previewHistoryWhileOtherTabWrites();
+            reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. You can keep viewing the locally stored TCFA history here.',{source:'sync'});
+          }
+        });
+      }else await runStartupRecovery();
+    })
+    .catch(()=>{historyRecoveryFailed=true;reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be loaded safely. Free browser storage and reload. Sync is blocked to protect the recovery copy.',{source:'storage'});})
     .finally(()=>{historyRecoveryFinished=true;});
-  window.addEventListener('storage',event=>{if(!event.key?.startsWith(NS)||state.syncing||state.backgroundSyncing)return;for(const key of ['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','financialSnapshots','sync','notices'])state[key]=load(key,state[key]);resetAnalyticsCache();queueAnalyticsRender();});
+
+  setupCrossTabRefresh();
   const boot=async()=>{if(document.body){await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
   setInterval(()=>{if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);
   function injectCss() {

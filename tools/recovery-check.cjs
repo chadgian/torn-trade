@@ -3,7 +3,7 @@ const path=require('node:path');
 const assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const root=path.resolve(__dirname,'..');
-const script=fs.readFileSync(path.join(root,'torn-trade-analyzer.user.js'),'utf8').replace(/\n\}\)\(\);\s*$/,'\nwindow.__ttaTest={state,resetHistoryForFullResync,restoreFullResyncBackup,readFullResyncBackup,clearFullResyncBackup,withTransition,navigate,setBusy,render};\n})();');
+const script=fs.readFileSync(path.join(root,'torn-trade-analyzer.user.js'),'utf8').replace(/\n\}\)\(\);\s*$/,'\nwindow.__ttaTest={state,resetHistoryForFullResync,restoreFullResyncBackup,readFullResyncBackup,clearFullResyncBackup,withTransition,navigate,setBusy,render,saveDurable,flushDurableStorage,announceCrossTabUpdate};\n})();');
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL||'chrome'});
   try{
@@ -47,9 +47,12 @@ const script=fs.readFileSync(path.join(root,'torn-trade-analyzer.user.js'),'utf8
     await page.waitForFunction(()=>!!window.releaseLock);
     const other=await context.newPage();other.on('pageerror',error=>errors.push(error.message));
     await other.goto('http://localhost:8123/');await other.addScriptTag({content:script});await other.locator('#tta-fab').waitFor();
-    assert.equal(await other.evaluate(()=>window.__ttaTest.state.transactions.length),0,'Startup must not restore while another tab is writing');
+    assert.equal(await other.evaluate(()=>window.__ttaTest.state.transactions[0]?.id),'safe','A second tab should show the last safe history while another tab owns a Full Resync lock');
+    assert.equal(await other.evaluate(()=>window.__ttaTest.state.notices.some(n=>n.code==='SYNC_OTHER_TAB')),true);
     assert.notEqual(await other.evaluate(()=>localStorage.getItem('tta:v1:fullResyncBackup')),null);
-    await other.close();await page.evaluate(async()=>{window.releaseLock();await window.lockTask;await window.__ttaTest.restoreFullResyncBackup({fullResetDone:true});});
+    await page.evaluate(async()=>{window.releaseLock();await window.lockTask;await window.__ttaTest.restoreFullResyncBackup({fullResetDone:true});const a=window.__ttaTest;const row={id:'cross-tab-updated',itemId:206,side:'buy',qty:1,total:10,timestamp:300};a.state.transactions=[row];await a.saveDurable('transactions',[row]);await a.flushDurableStorage();a.announceCrossTabUpdate('fixture-sync');});
+    await other.waitForFunction(()=>window.__ttaTest.state.transactions[0]?.id==='cross-tab-updated');
+    await other.close();
     await page.locator('#tta-fab').click();await page.locator('.tta-shell').waitFor();
     await page.evaluate(()=>{window.transitionTask=window.__ttaTest.withTransition('Loading Trade Analysis',()=>new Promise(resolve=>{window.releaseTransition=resolve;}));});
     await page.waitForFunction(()=>!!window.releaseTransition);
@@ -67,6 +70,6 @@ const script=fs.readFileSync(path.join(root,'torn-trade-analyzer.user.js'),'utf8
     await page.evaluate(async()=>{const a=window.__ttaTest;a.setBusy(true,'Syncing','Fixture',true);await a.navigate('diagnostics');});
     assert.equal(await page.locator('#tta-loading').isVisible(),true);assert.equal(await page.locator('#tta-root').getAttribute('aria-busy'),'true');
     await page.evaluate(()=>window.__ttaTest.setBusy(false));assert.equal(await page.locator('#tta-root').getAttribute('aria-busy'),'false');
-    assert.deepEqual(errors,[]);console.log('Real-browser quota recovery, reload, cancellation, recovery-write failure, cross-tab locking, spinner visibility, rapid navigation, close and independent sync loading verified.');
+    assert.deepEqual(errors,[]);console.log('Real-browser quota recovery, reload, cancellation, recovery-write failure, cross-tab readable history/live refresh, locking, spinner visibility, rapid navigation, close and independent sync loading verified.');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
