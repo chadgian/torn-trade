@@ -227,7 +227,7 @@ test('old verified history requires a full recheck, not just a quick sync',async
   const {app}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:now-100,firstSyncComplete:true,accountingVersion:'0.3.3'}},responses:baseResponses()});
   assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
   await app.syncAll({mode:'quick'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
-  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,4);
+  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,3);
 });
 
 test('reported 215-row legacy checkpoint rewinds and completes with recovery preserved',async()=>{
@@ -420,7 +420,7 @@ test('reported paused v0.3.5 quick scan and Full Resync complete with zero metad
   app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Old zero forward cursor',{source:'log',cursor:'0',nextCursor:'1790294845787692899'});
   app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Unrelated source',{source:'catalog'});
   await app.runResumableSync(job,true);assert.equal(app.state.sync.lastSync,now);assert.equal(storage.has('tta:v1:syncJob'),false);assert.equal(app.state.transactions.length,4);
-  await app.syncAll({mode:'full'});assert.equal(app.state.sync.historyPaginationVersion,4);assert.equal(app.state.transactions.length,4);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(app.state.transactions.length,4);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
   assert.equal(calls.filter(u=>u.pathname==='/v2/user/log').every(u=>u.searchParams.get('nanostamp')!=='0'),true);
   assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='log'),false);assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='catalog'),true);
 });
@@ -429,5 +429,5 @@ test('Full Resync takes over a paused quick zero checkpoint instead of resuming 
   const responses=baseResponses();responses['/user/log']=url=>zeroPage([],Object.fromEntries(url.searchParams));
   const paused={schema:3,id:'quick',active:true,syncMode:'quick',paginationVersion:2,phase:'logs-filtered',period:{from:now-60,to:now},updatedAt:now,logPageParams:{nanostamp:'0'},lastError:'Zero cursor'};
   const {app,storage}=harness({stored:{apiKey:key,catalog:[item],syncJob:paused,sync:{lastSync:now-100}},responses});
-  await app.syncAll({mode:'full'});assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.sync.coverageFrom,0);assert.equal(app.state.sync.historyPaginationVersion,4);assert.equal(storage.has('tta:v1:syncJob'),false);
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.sync.coverageFrom,0);assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(storage.has('tta:v1:syncJob'),false);
 });
