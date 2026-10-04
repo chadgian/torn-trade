@@ -361,6 +361,28 @@
         if(!['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code))throw error;
         if(state.syncCancel)return {rows:[],next:null,seen:[...seen],requests};
         if(attempt===2){
+          if(key==='log'&&error.code==='PAGE_INCOMPLETE'){
+            const filterIds=String(params.log||'').split(',').filter(Boolean);
+            // Multi-type filtered pages are split by runResumableLogPhase so each
+            // subset can be verified independently. A singleton/unfiltered dense
+            // page gets one inclusive date-boundary probe before we give up.
+            if(filterIds.length<=1&&rows.length){
+              const times=rows.map(row=>Number(row?.timestamp)).filter(Number.isFinite),from=Number(params.from)||0,to=Number(params.to)||0;
+              if(times.length!==rows.length||times.some(ts=>ts<from||ts>to))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn returned logs outside the dense-page verification range. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe'});
+              const oldest=Math.min(...times),probe={...params,to:oldest};delete probe.nanostamp;delete probe.offset;
+              setSyncProgress('Verifying a dense history boundary');
+              const checked=await syncApiGet(path,probe),older=pageRows(checked,key);requests++;
+              if(older.some(row=>Number(row.timestamp)>oldest||Number(row.timestamp)<from))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Torn did not honor the dense-page date-boundary check. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              let probeNext;
+              try{probeNext=nextHistoryPage(checked,probe,older,[],key);}catch(probeError){
+                if(probeError.code==='PAGE_INCOMPLETE')throw error;
+                throw probeError;
+              }
+              const savedRows=Array.from(new Map([...rows,...older].map(row=>[String(row.id),row])).values());
+              reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',probeNext?'A dense history page was recovered with an independent date-boundary cursor; older logs are still being loaded.':'A dense history page was independently verified as the end of this log batch.',{source:key,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              return {rows:savedRows,next:probeNext,seen:[...seen],requests,boundaryRecovered:true,denseBoundaryRecovered:true};
+            }
+          }
           if(key==='trades'&&error.code==='PAGE_REPEATED'){
             const limit=Math.max(1,Number(params.limit||100));
             const times=rows.map(row=>Number(row?.completed_at||row?.timestamp)).filter(Number.isFinite);
