@@ -161,7 +161,7 @@
         if(status>=400)throw new AnalyzerError(status===429?'RATE_LIMIT':'HTTP_ERROR',`Torn returned HTTP ${status}.`,{status},status===429||status>=500);
         const raw=pda?r.responseText:await r.text(); let json;
         try{json=JSON.parse(raw);}catch(_){throw new AnalyzerError('API_FORMAT','Torn returned an unreadable response.');}
-        if(json?.error){const code=Number(json.error.code)||0;throw new AnalyzerError(code===5?'RATE_LIMIT':'TORN_ERROR',`Torn API error ${code}.`,{apiCode:code},[0,5,17].includes(code));}
+        if(json?.error){const code=Number(json.error.code)||0,kind=code===5?'RATE_LIMIT':code===16?'API_ACCESS':'TORN_ERROR';throw new AnalyzerError(kind,code===16?'This API key does not have permission for the requested Torn data.':`Torn API error ${code}.`,{apiCode:code},[0,5,17].includes(code));}
         if(!json||typeof json!=='object')throw new AnalyzerError('API_FORMAT','Torn returned an unexpected response.');
         return json;
       };
@@ -174,7 +174,7 @@
 
   async function apiGet(path, params = {}) {
     const key=activeApiKey();
-    if (!key) throw new Error('No Torn API key is configured. Add one in Settings \u2192 API Key.');
+    if (!key) throw new AnalyzerError('API_KEY_MISSING','No Torn API key is configured. Add one in Settings \u2192 API Key.');
     const u = new URL(API + path);
     u.searchParams.set('key', key);
     u.searchParams.set('comment', 'CashFlowAnalyzr');
@@ -182,7 +182,7 @@
     const request=requestQueue.then(async()=>{
       const delay=REQUEST_GAP_MS-(Date.now()-lastRequestAt);if(delay>0)await sleep(delay);
       lastRequestAt=Date.now();
-      try{return await httpGet(u.toString());}
+      try{const data=await httpGet(u.toString());resolveDiagnostic('API_ACCESS',path);resolveDiagnostic('TORN_ERROR',path);return data;}
       catch(error){error.context={...(error.context||{}),source:path};reportDiagnostic(error.code||'API_ERROR','error',error.message,error.context);throw error;}
     });
     requestQueue=request.catch(()=>{});return request;
