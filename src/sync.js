@@ -189,7 +189,7 @@
     const priorTradePages=Math.max(1,Number(prior.tradeListPages)||1),priorTrades=Math.max(0,Number(prior.tradeHeaders)||0),priorAbroadPages=Math.max(1,Number(prior.abroadVerifyPages)||1),detailMs=phase==='trade-details'?pageMs:1150;
     if(phase==='setup'){pct=2;etaNote='preparing scan';}
     else if(phase==='logs-filtered'){
-      const totalBatches=Math.max(1,Math.ceil((job.logTypeIds||[]).length/MAX_LOG_IDS_PER_REQUEST)),doneBatches=Math.max(0,Math.min(totalBatches,Number(job.logBatchIndex)||0)),currentPages=Math.max(0,Number(job.logPage)||0),pagesDone=Math.max(0,Number(d.pages)||0),priorPages=Math.max(totalBatches,Number(prior.pages)||0);
+      const totalBatches=Math.max(1,(Array.isArray(job.logBatches)&&job.logBatches.length)||Math.ceil((job.logTypeIds||[]).length/MAX_LOG_IDS_PER_REQUEST)),doneBatches=Math.max(0,Math.min(totalBatches,Number(job.logBatchIndex)||0)),currentPages=Math.max(0,Number(job.logPage)||0),pagesDone=Math.max(0,Number(d.pages)||0),priorPages=Math.max(totalBatches,Number(prior.pages)||0);
       let predictedTotalPages=priorPages;if(doneBatches>0){const completedPages=Math.max(1,pagesDone-currentPages),avg=completedPages/doneBatches;predictedTotalPages=Math.max(pagesDone+1,avg*totalBatches);predictedTotalPages=priorPages>0?predictedTotalPages*.72+priorPages*.28:predictedTotalPages;}else if(!(priorPages>0))predictedTotalPages=Math.max(pagesDone+totalBatches*4,totalBatches*5);
       const remainingPages=Math.max(0,predictedTotalPages-pagesDone),futureMs=priorAbroadPages*1150+priorTradePages*1150+Math.max(priorTrades,10)*1150+4000;eta=remainingPages*pageMs+futureMs;pct=5+55*Math.min(1,pagesDone/Math.max(1,predictedTotalPages));etaNote=doneBatches>0||priorPages>0?`~${formatEtaDuration(eta)} left`:'learning history depth';
     }else if(phase==='logs-fallback'){
@@ -584,8 +584,8 @@
     if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
-    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
-    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?Math.ceil(job.logTypeIds.length/MAX_LOG_IDS_PER_REQUEST):0);
+    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logBatches=initialLogBatches(job.logTypeIds);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
+    job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?job.logBatches.length:0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
     job.diagnostics.recentLogRecheckHours=(job.period.to-job.logScanPeriod.from)/3600;job.diagnostics.recentTradeRecheckHours=(job.period.to-job.tradeScanPeriod.from)/3600;
     if(job.logScanPeriod){const scanLabel=job.syncMode==='full'?'Full resync from beginning':'Quick sync from last successful sync';job.phase='logs-filtered';await checkpointSyncJob(job,`${scanLabel} \u00B7 ${job.logScanPeriod.from>0?tctDateTimeStr(job.logScanPeriod.from)+' \u2013 ':''}${tctDateTimeStr(Math.min(job.logScanPeriod.to,job.tctNow||nowSec()))} TCT`);}
