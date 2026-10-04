@@ -50,16 +50,34 @@ test('Data Quality provides suggested actions and developer contact for non-user
   const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
   assert.equal(html.includes('Suggested action'),true);
   assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
-  assert.equal(html.includes('v0.4.3'),true);
+  assert.equal(html.includes('v0.4.4'),true);
   assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
   assert.equal(row.suggestedAction.length>20,true);
   assert.equal(JSON.stringify(report).includes('https://'),false);
 });
 test('What\'s New page lists user-facing releases from v0.3.0 through current',()=>{
   const {app}=harness(),html=app.updatesHtml();
-  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2','v0.4.3'])assert.equal(html.includes(version),true);
+  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2','v0.4.3','v0.4.4'])assert.equal(html.includes(version),true);
   assert.equal(html.includes('native per-script storage'),true);
   assert.equal(html.includes('Net Worth'),true);
+});
+test('durable history can be reloaded after another tab updates Torn PDA storage',async()=>{
+  const backing=new Map([['tta:v1:transactions',[{id:'old',itemId:206,side:'buy',qty:1,total:10,timestamp:100}]]]);
+  const pda={
+    get:async(k,fallback)=>backing.has(k)?backing.get(k):fallback,
+    set:async(k,v)=>{backing.set(k,v);},
+    delete:async k=>{backing.delete(k);},
+    usage:async()=>({used:1024,quota:10485760})
+  };
+  const {app,storage}=harness({pdaStorage:pda});
+  await app.initializeDurableStorage();
+  assert.equal(app.state.transactions[0].id,'old');
+  backing.set('tta:v1:transactions',[{id:'new',itemId:206,side:'buy',qty:2,total:20,timestamp:101}]);
+  await app.reloadDurableStorage(['transactions']);
+  assert.equal(app.state.transactions.length,1);
+  assert.equal(app.state.transactions[0].id,'new');
+  app.announceCrossTabUpdate('fixture');
+  assert.equal(JSON.parse(storage.get('tta:v1:crossTabSignal')).reason,'fixture');
 });
 test('API rate limits expose only code and context, never provider text or secrets',async()=>{
   const {app}=harness({stored:{apiKey:key},responses:{'/test':{error:{code:5,error:`secret ${key}`}}}});await assert.rejects(app.apiGet('/test'),e=>e.code==='RATE_LIMIT'&&e.retryable);assert.equal(app.state.notices[0].context.apiCode,5);assert.equal(JSON.stringify(app.state.notices).includes(key),false);
