@@ -1,0 +1,1 @@
+Verify the public Worker is serving v0.4.3 adaptive pagination recovery.
