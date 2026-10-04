@@ -63,11 +63,15 @@
     const info=raw?.info||{};
     const access=info?.access||{};
     const logAccess=access?.log||{};
-    const userSelections=Array.isArray(info?.selections?.user)?info.selections.user:[];
+    const userSelections=Array.isArray(info?.selections?.user)?info.selections.user:[],fullAccess=Number(access?.level)>=4;
+    const requiredUserSelections=['log','trade','trades','money','networth'];
+    const missingUserSelections=fullAccess?[]:requiredUserSelections.filter(name=>!userSelections.includes(name));
     return {
       type:String(access?.type||''),
       level:Number(access?.level)||0,
-      hasUserLog:userSelections.includes('log') || Number(access?.level)>=4,
+      hasUserLog:userSelections.includes('log') || fullAccess,
+      userSelections,
+      missingUserSelections,
       customLogPermissions:!!logAccess?.custom_permissions,
       availableLogGroups:Array.isArray(logAccess?.available)?logAccess.available.length:0,
       userId:Number(info?.user?.id)||0
@@ -566,7 +570,7 @@
     job.paginationVersion=HISTORY_PAGINATION_VERSION;
     await refreshLiveSyncBounds(job);
     await ensureCatalog();setBusyDetail(job.syncMode==='full'?'Verifying API access for full-history rebuild\u2026':'Verifying API access for quick last-sync update\u2026');
-    const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
+    const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new AnalyzerError('API_ACCESS','This API key does not include User \u2192 Log access.',{source:'/user/log',apiCode:16,phase:'key-check'});
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
     if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
@@ -598,7 +602,7 @@
       for(const source of ['log','pagination'])resolveDiagnostic('PAGE_SOURCE_MISMATCH',source);
       for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','syncJob','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
     }
-    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
+    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');resolveDiagnostic('ACTION_FAILED','sync');
     const repaired=Number(d.missingLogDays)||0;
     if(!freshCount)setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
