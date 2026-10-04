@@ -50,16 +50,30 @@ test('Data Quality provides suggested actions and developer contact for non-user
   const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
   assert.equal(html.includes('Suggested action'),true);
   assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
-  assert.equal(html.includes('v0.4.1'),true);
+  assert.equal(html.includes('v0.4.2'),true);
   assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
   assert.equal(row.suggestedAction.length>20,true);
   assert.equal(JSON.stringify(report).includes('https://'),false);
 });
 test('What\'s New page lists user-facing releases from v0.3.0 through current',()=>{
   const {app}=harness(),html=app.updatesHtml();
-  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1'])assert.equal(html.includes(version),true);
+  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2'])assert.equal(html.includes(version),true);
   assert.equal(html.includes('native per-script storage'),true);
   assert.equal(html.includes('Net Worth'),true);
+});
+test('Torn API error 16 is classified as a non-retryable API access problem',async()=>{
+  const {app}=harness({stored:{apiKey:key},responses:{'/test':{error:{code:16,error:'Access level of this key is not high enough'}}}});
+  await assert.rejects(app.apiGet('/test'),e=>e.code==='API_ACCESS'&&e.context.apiCode===16&&!e.retryable);
+  const notice=app.state.notices.find(n=>n.code==='API_ACCESS');
+  assert.equal(notice.context.source,'/test');
+  assert.equal(app.diagnosticsHtml().includes('Settings \u2192 Create key'),true);
+});
+test('custom keys report missing analyzer User selections before sync',async()=>{
+  const responses={'/key/info':{info:{access:{level:2,type:'Custom'},user:{id:1},selections:{user:['log','trades']}}}};
+  const {app}=harness({stored:{apiKey:key},responses});
+  const info=await app.inspectActiveKey();
+  assert.deepEqual(Array.from(info.missingUserSelections),['trade','money','networth']);
+  assert.equal(info.hasUserLog,true);
 });
 test('API rate limits expose only code and context, never provider text or secrets',async()=>{
   const {app}=harness({stored:{apiKey:key},responses:{'/test':{error:{code:5,error:`secret ${key}`}}}});await assert.rejects(app.apiGet('/test'),e=>e.code==='RATE_LIMIT'&&e.retryable);assert.equal(app.state.notices[0].context.apiCode,5);assert.equal(JSON.stringify(app.state.notices).includes(key),false);
