@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.4.1
+// @version      0.4.2
 // @description  Local Torn finances, FIFO trade accounting, latest sales and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -218,7 +218,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.2';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -381,7 +381,7 @@
         if(status>=400)throw new AnalyzerError(status===429?'RATE_LIMIT':'HTTP_ERROR',`Torn returned HTTP ${status}.`,{status},status===429||status>=500);
         const raw=pda?r.responseText:await r.text(); let json;
         try{json=JSON.parse(raw);}catch(_){throw new AnalyzerError('API_FORMAT','Torn returned an unreadable response.');}
-        if(json?.error){const code=Number(json.error.code)||0;throw new AnalyzerError(code===5?'RATE_LIMIT':'TORN_ERROR',`Torn API error ${code}.`,{apiCode:code},[0,5,17].includes(code));}
+        if(json?.error){const code=Number(json.error.code)||0,kind=code===5?'RATE_LIMIT':code===16?'API_ACCESS':'TORN_ERROR';throw new AnalyzerError(kind,code===16?'This API key does not have permission for the requested Torn data.':`Torn API error ${code}.`,{apiCode:code},[0,5,17].includes(code));}
         if(!json||typeof json!=='object')throw new AnalyzerError('API_FORMAT','Torn returned an unexpected response.');
         return json;
       };
@@ -394,7 +394,7 @@
 
   async function apiGet(path, params = {}) {
     const key=activeApiKey();
-    if (!key) throw new Error('No Torn API key is configured. Add one in Settings \u2192 API Key.');
+    if (!key) throw new AnalyzerError('API_KEY_MISSING','No Torn API key is configured. Add one in Settings \u2192 API Key.');
     const u = new URL(API + path);
     u.searchParams.set('key', key);
     u.searchParams.set('comment', 'CashFlowAnalyzr');
@@ -402,7 +402,7 @@
     const request=requestQueue.then(async()=>{
       const delay=REQUEST_GAP_MS-(Date.now()-lastRequestAt);if(delay>0)await sleep(delay);
       lastRequestAt=Date.now();
-      try{return await httpGet(u.toString());}
+      try{const data=await httpGet(u.toString());resolveDiagnostic('API_ACCESS',path);resolveDiagnostic('TORN_ERROR',path);return data;}
       catch(error){error.context={...(error.context||{}),source:path};reportDiagnostic(error.code||'API_ERROR','error',error.message,error.context);throw error;}
     });
     requestQueue=request.catch(()=>{});return request;
@@ -450,7 +450,16 @@
 
   const DEVELOPER_PROFILE_URL='https://www.torn.com/profiles.php?XID=4325416';
   function diagnosticGuidance(row) {
-    const code=String(row?.code||'ACTION_FAILED'),severity=String(row?.severity||'warning');
+    const code=String(row?.code||'ACTION_FAILED'),severity=String(row?.severity||'warning'),source=String(row?.context?.source||''),apiCode=Number(row?.context?.apiCode)||0;
+    if(code==='API_ACCESS'){
+      if(source.includes('/company/'))return {text:'This key does not grant the requested Company selection. If you want company P/L tracking, use Settings → Create key and include Company Profile and Employees, then Save & test. Other analyzer features can continue.',contact:false,developerOnly:false};
+      if(source==='/user/networth'||source==='/user/money')return {text:'This key is missing a financial selection. Use Settings → Create key, create the analyzer key, then Save & test it. Your cached history remains safe.',contact:false,developerOnly:false};
+      return {text:'Torn rejected this request because the API key does not have enough access. Open Settings → Create key, generate the analyzer-specific key with the requested selections, paste it into Settings, then Save & test before syncing again.',contact:false,developerOnly:false};
+    }
+    if(code==='NETWORTH_UNAVAILABLE'&&apiCode===16)return {text:'Create a new analyzer key from Settings → Create key so User → Networth is included, then Save & test and refresh the financial snapshot.',contact:false,developerOnly:false};
+    if(code==='MONEY_UNAVAILABLE'&&apiCode===16)return {text:'Create a new analyzer key from Settings → Create key so User → Money is included, then Save & test and refresh the financial snapshot.',contact:false,developerOnly:false};
+    if(code==='COMPANY_UNAVAILABLE'&&apiCode===16)return {text:'If you use company P/L tracking, recreate the analyzer key with Company → Profile access. If you are not a company director, no action is needed for the rest of the analyzer.',contact:false,developerOnly:false};
+    if(code==='COMPANY_WAGES_UNAVAILABLE'&&apiCode===16)return {text:'If you use company P/L tracking, recreate the analyzer key with Company → Employees access. Other analyzer features can continue.',contact:false,developerOnly:false};
     const direct={
       STORAGE_QUOTA:'In Torn PDA, open this script\'s Native storage setting and raise its limit. In another browser, export a JSON backup first, then free site storage if needed. Retry the sync after storage space is available.',
       STORAGE_WRITE:'Do not reset the analyzer. Reload Torn and retry once after checking available storage. If the storage warning remains, export a backup before clearing any browser/site data.',
@@ -459,6 +468,7 @@
       HISTORY_COVERAGE_RECHECK:'Run Full Resync once with the current analyzer version to re-verify older pagination boundaries.',
       HISTORY_STALE:'Run Quick Sync to check recent activity.',
       RANGE_NOT_COVERED:'Run Full Resync if you need data from before the currently verified history range.',
+      API_KEY_MISSING:'Open Settings and either save a Torn API key or use Torn PDA\'s injected key, then retry.',
       LOG_SCOPE:'Create or save an API key with unrestricted User Log access and the required analyzer selections, then sync again.',
       RATE_LIMIT:'Wait a few minutes before syncing again. Avoid running the analyzer in several Torn tabs at the same time.',
       CATALOG_STALE:'Open Settings and tap Refresh catalog, then return to the affected view.',
@@ -1255,19 +1265,19 @@
   async function refreshFinancialSnapshot() {
     if(!hasApiKey())return null;const snap={timestamp:nowSec(),networth:null,money:null};
     await requireAccountIdentity();
-    try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(_){reportDiagnostic('NETWORTH_UNAVAILABLE','warning','Net-worth snapshot could not be refreshed.',{source:'/user/networth'});}
-    try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(_){reportDiagnostic('MONEY_UNAVAILABLE','warning','Current money snapshot could not be refreshed.',{source:'/user/money'});}
+    try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/user/networth');reportDiagnostic('NETWORTH_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include User \u2192 Networth.':'Net-worth snapshot could not be refreshed.',{source:'/user/networth',apiCode:Number(error?.context?.apiCode)||0});}
+    try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/user/money');reportDiagnostic('MONEY_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include User \u2192 Money.':'Current money snapshot could not be refreshed.',{source:'/user/money',apiCode:Number(error?.context?.apiCode)||0});}
     if(!snap.networth&&!snap.money)return null;
     const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);await saveDurable('financialSnapshots',next);state.financialSnapshots=next;return snap;
   }
   async function refreshCompanyDailyAdjustment(userId,serverNow=nowSec()) {
     const me=Number(userId)||0;if(!(me>0))return null;
     let profileData;
-    try{profileData=await apiGet('/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}catch(error){if([6,7,16].includes(error.context?.apiCode))resolveDiagnostic(error.code,'/company/profile');else reportDiagnostic('COMPANY_UNAVAILABLE','warning','Company profit could not be refreshed.',{source:'/company/profile'});return null;}
+    try{profileData=await apiGet('/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}catch(error){const apiCode=Number(error?.context?.apiCode)||0;if([6,7].includes(apiCode)){resolveDiagnostic(error.code,'/company/profile');resolveDiagnostic('COMPANY_UNAVAILABLE');}else{if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/company/profile');reportDiagnostic('COMPANY_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include Company \u2192 Profile; company profit tracking is unavailable.':'Company profit could not be refreshed.',{source:'/company/profile',apiCode});}return null;}
     const profile=profileData?.profile;
     if(!profile||Number(profile?.director?.id)!==me)return null;
     let employeesData;
-    try{employeesData=await apiGet('/company/employees');resolveDiagnostic('COMPANY_WAGES_UNAVAILABLE');}catch(_){reportDiagnostic('COMPANY_WAGES_UNAVAILABLE','warning','Company wages could not be loaded; company profit was not recalculated.',{source:'/company/employees'});return null;}
+    try{employeesData=await apiGet('/company/employees');resolveDiagnostic('COMPANY_WAGES_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/company/employees');reportDiagnostic('COMPANY_WAGES_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include Company \u2192 Employees; company profit was not recalculated.':'Company wages could not be loaded; company profit was not recalculated.',{source:'/company/employees',apiCode:Number(error?.context?.apiCode)||0});return null;}
     const employees=Array.isArray(employeesData?.employees)?employeesData.employees:[];
     const grossIncome=Number(profile?.income?.daily)||0;
     const wages=employees.reduce((n,e)=>n+Math.max(0,Number(e?.wage)||0),0);
@@ -1548,7 +1558,7 @@
   // Source: settings.js
   function settingsHtml() {
     const hidden=[...new Set(state.hiddenIds.map(Number))].map(catalogItem),masked=state.apiKey?'\u2022'.repeat(16):'';
-    return `${header('Settings','API access, local history and exports',true)}<div class="tta-content tta-settings"><section class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(keySource())}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" aria-label="Torn API key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${masked}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn secondary" data-act="createApiKey">Create key</button><button class="tta-btn" data-act="saveApiKey">Save & test</button></div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved key</button></div>':''}<details class="tta-keynote"><summary>Permissions and privacy</summary><p>The key and history stay on this device. Only Torn's official API receives the key. Required selections: User Log, Trade, Trades, Money, Networth; Company Profile, Employees; Torn Items, Logtypes. Logs should be unrestricted. Torn PDA's injected key is used when there is no saved key.</p></details></section><section class="tta-fin-section"><h3>Local history</h3><div class="tta-fin-row"><span>Last verified scan</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Item transactions / cash movements / trades</span><b>${qty(state.transactions.length)} / ${qty(state.cashFlows.length)} / ${qty(state.playerTrades.length)}</b></div><div class="tta-fin-row"><span>Catalog updated</span><b>${state.catalogUpdatedAt?esc(tctDateTimeStr(state.catalogUpdatedAt))+' TCT':'Never'}</b></div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="diagnostics">Data Quality</button><button class="tta-btn secondary" data-act="refreshCatalog">Refresh catalog</button></div></section><section class="tta-fin-section"><h3>Backup & export</h3><div class="tta-settings-actions tta-backup-actions"><button class="tta-btn secondary" data-act="exportBackup">Export JSON backup</button><button class="tta-btn secondary" data-act="importBackup">Import backup</button><button class="tta-btn secondary" data-act="exportCashCsv">Cash Flow CSV</button><button class="tta-btn secondary" data-act="exportNetWorthCsv">Net Worth CSV</button></div><p class="tta-note">Backups include history, snapshots, preferences and goals. API keys are excluded.</p></section><section class="tta-fin-section"><h3>Hidden items (${qty(hidden.length)})</h3>${hidden.map(item=>`<div class="tta-hiddenrow"><span>${esc(item.name)} #${item.id}</span><button class="tta-btn secondary" data-act="restoreItem" data-id="${item.id}">Restore</button></div>`).join('')||'<p class="tta-note">No hidden items.</p>'}${hidden.length?'<button class="tta-btn secondary" data-act="restoreAllItems">Restore all</button>':''}</section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>About</small><h3>Torn Cash Flow Analyzer v${esc(VERSION)}</h3></div></div><p class="tta-note">See the improvements, fixes and compatibility updates added since the v0.3.0 rebuild.</p><button class="tta-btn secondary" data-act="updates">What's New since v0.3.0</button></section><section class="tta-fin-section"><h3>Reset</h3><button class="tta-btn danger" data-act="resetData" ${state.syncing||state.backgroundSyncing?'disabled':''}>Reset analyzer data</button></section></div>`;
+    return `${header('Settings','API access, local history and exports',true)}<div class="tta-content tta-settings"><section class="tta-keycard"><div class="tta-keyhead"><strong>API Key</strong><span class="tta-keystatus">${esc(keySource())}</span></div><div class="tta-keyinputrow"><input id="tta-api-key" type="password" aria-label="Torn API key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your Torn API key" value="${masked}" data-placeholder-key="${state.apiKey?'1':'0'}"><button class="tta-btn secondary" data-act="createApiKey">Create key</button><button class="tta-btn" data-act="saveApiKey">Save & test</button></div>${state.apiKey?'<div class="tta-settings-actions"><button class="tta-btn danger" data-act="clearApiKey">Clear saved key</button></div>':''}<details class="tta-keynote"><summary>Permissions and privacy</summary><p>The key and history stay on this device. Only Torn's official API receives the key. Required User selections: Log, Trade, Trades, Money and Networth. Company Profile and Employees are needed only for director company P/L tracking. Torn Items and Logtypes are also used. Logs should be unrestricted. If Torn returns API error 16, recreate the key with Create key and run Save & test again. Torn PDA's injected key is used when there is no saved key.</p></details></section><section class="tta-fin-section"><h3>Local history</h3><div class="tta-fin-row"><span>Last verified scan</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Item transactions / cash movements / trades</span><b>${qty(state.transactions.length)} / ${qty(state.cashFlows.length)} / ${qty(state.playerTrades.length)}</b></div><div class="tta-fin-row"><span>Catalog updated</span><b>${state.catalogUpdatedAt?esc(tctDateTimeStr(state.catalogUpdatedAt))+' TCT':'Never'}</b></div><div class="tta-settings-actions"><button class="tta-btn secondary" data-act="diagnostics">Data Quality</button><button class="tta-btn secondary" data-act="refreshCatalog">Refresh catalog</button></div></section><section class="tta-fin-section"><h3>Backup & export</h3><div class="tta-settings-actions tta-backup-actions"><button class="tta-btn secondary" data-act="exportBackup">Export JSON backup</button><button class="tta-btn secondary" data-act="importBackup">Import backup</button><button class="tta-btn secondary" data-act="exportCashCsv">Cash Flow CSV</button><button class="tta-btn secondary" data-act="exportNetWorthCsv">Net Worth CSV</button></div><p class="tta-note">Backups include history, snapshots, preferences and goals. API keys are excluded.</p></section><section class="tta-fin-section"><h3>Hidden items (${qty(hidden.length)})</h3>${hidden.map(item=>`<div class="tta-hiddenrow"><span>${esc(item.name)} #${item.id}</span><button class="tta-btn secondary" data-act="restoreItem" data-id="${item.id}">Restore</button></div>`).join('')||'<p class="tta-note">No hidden items.</p>'}${hidden.length?'<button class="tta-btn secondary" data-act="restoreAllItems">Restore all</button>':''}</section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>About</small><h3>Torn Cash Flow Analyzer v${esc(VERSION)}</h3></div></div><p class="tta-note">See the improvements, fixes and compatibility updates added since the v0.3.0 rebuild.</p><button class="tta-btn secondary" data-act="updates">What's New since v0.3.0</button></section><section class="tta-fin-section"><h3>Reset</h3><button class="tta-btn danger" data-act="resetData" ${state.syncing||state.backgroundSyncing?'disabled':''}>Reset analyzer data</button></section></div>`;
   }
   function latestSalesRows() {
     const range=dateRange(),q=String(state.saleSearch||'').trim().toLowerCase();
@@ -1570,7 +1580,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.4.1',label:'Current',items:['Polished the analyzer navigation and visual hierarchy across desktop, mobile and Torn PDA.','Main workspace navigation now stays available while browsing financial pages, keeps the active workspace centered, and gets out of the way on Settings, Help, Data Quality and What\'s New.','Replaced full-page workspace transition flashes with a compact progress pill, improved touch targets, focus states, feedback, empty states and mobile spacing.']},
+      {version:'0.4.2',label:'Current',items:['Torn API error 16 is now identified as an API-key permission problem instead of a generic TORN_ERROR.','Save & test now detects missing required User selections before starting a sync.','Optional Net Worth and Company permission failures are explained without incorrectly making the whole history sync look broken.']},
+      {version:'0.4.1',items:['Polished the analyzer navigation and visual hierarchy across desktop, mobile and Torn PDA.','Main workspace navigation now stays available while browsing financial pages, keeps the active workspace centered, and gets out of the way on Settings, Help, Data Quality and What\'s New.','Replaced full-page workspace transition flashes with a compact progress pill, improved touch targets, focus states, feedback, empty states and mobile spacing.']},
       {version:'0.4.0',items:['Refined the Net Worth page for phones: denser daily metrics, compact event rows, clearer snapshot sections and collapsible calculation details.','Added this What\'s New page so users can review changes since the v0.3.0 rebuild.','Data Quality errors now include suggested next steps and developer-contact guidance when the problem cannot be fixed on the user\'s device.']},
       {version:'0.3.9',items:['Restored compact responsive tables on phones and tablets instead of converting rows into card layouts.','Kept important table columns visible while folding lower-priority details into secondary text.']},
       {version:'0.3.8',items:['Added safe recovery for repeated short Player Trades pagination during Full Resync.','Dense repeated trade pages still pause instead of risking skipped same-second trades.']},
@@ -1786,8 +1797,8 @@
         const input=document.getElementById('tta-api-key');let key=String(input?.value||'').trim();if(input?.dataset.placeholderKey==='1'&&/^\u2022+$/.test(key))key=String(state.apiKey||'').trim();
         if(key.length<16){toast('Enter a valid Torn API key first.');return;}state.apiKey=key;save('apiKey',key);state.demo=false;render();
         try{
-          let info=null;await withBusy('Checking API key','Verifying access and refreshing the item catalog\u2026',async()=>{info=await inspectActiveKey();if(state.sync.accountId&&Number(state.sync.accountId)!==info.userId)throw new AnalyzerError('ACCOUNT_MISMATCH','This key belongs to a different account. Export and reset history before switching accounts.');await apiGet('/user/log',{limit:1});await ensureCatalog(true);});
-          toast(`API key confirmed (${info?.type||'access level '+(info?.level||'?')}).`);await navigate('dashboard');await syncAll();
+          let info=null;await withBusy('Checking API key','Verifying access and refreshing the item catalog\u2026',async()=>{info=await inspectActiveKey();if(state.sync.accountId&&Number(state.sync.accountId)!==info.userId)throw new AnalyzerError('ACCOUNT_MISMATCH','This key belongs to a different account. Export and reset history before switching accounts.');if(info.missingUserSelections?.length)throw new AnalyzerError('API_ACCESS',`This key is missing required User selections: ${info.missingUserSelections.join(', ')}.`,{source:'/key/info',apiCode:16,phase:'key-test'});await apiGet('/user/log',{limit:1});await ensureCatalog(true);});
+          resolveDiagnostic('ACTION_FAILED','key test');toast(`API key confirmed (${info?.type||'access level '+(info?.level||'?')}).`);await navigate('dashboard');await syncAll();
         }catch(err){if([1,2,13].includes(err.context?.apiCode)||err.code==='ACCOUNT_MISMATCH'){state.apiKey='';save('apiKey','');}diagnosticFromError(err,'key test');setBusy(false);render();toast(`API key test failed: ${err.message}`);}
       }
       else if(act==='clearApiKey'){state.apiKey='';save('apiKey','');state.demo=!hasApiKey();resetAnalyticsCache();render();toast(injectedApiKey()?'Saved key cleared. Torn PDA key will be used.':'Saved API key cleared.');}
@@ -2403,11 +2414,15 @@
     const info=raw?.info||{};
     const access=info?.access||{};
     const logAccess=access?.log||{};
-    const userSelections=Array.isArray(info?.selections?.user)?info.selections.user:[];
+    const userSelections=Array.isArray(info?.selections?.user)?info.selections.user:[],fullAccess=Number(access?.level)>=4;
+    const requiredUserSelections=['log','trade','trades','money','networth'];
+    const missingUserSelections=fullAccess?[]:requiredUserSelections.filter(name=>!userSelections.includes(name));
     return {
       type:String(access?.type||''),
       level:Number(access?.level)||0,
-      hasUserLog:userSelections.includes('log') || Number(access?.level)>=4,
+      hasUserLog:userSelections.includes('log') || fullAccess,
+      userSelections,
+      missingUserSelections,
       customLogPermissions:!!logAccess?.custom_permissions,
       availableLogGroups:Array.isArray(logAccess?.available)?logAccess.available.length:0,
       userId:Number(info?.user?.id)||0
@@ -2906,7 +2921,7 @@
     job.paginationVersion=HISTORY_PAGINATION_VERSION;
     await refreshLiveSyncBounds(job);
     await ensureCatalog();setBusyDetail(job.syncMode==='full'?'Verifying API access for full-history rebuild\u2026':'Verifying API access for quick last-sync update\u2026');
-    const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new Error('This API key does not include User \u2192 Log access.');
+    const keyInfo=await inspectActiveKey();if(!keyInfo.hasUserLog)throw new AnalyzerError('API_ACCESS','This API key does not include User \u2192 Log access.',{source:'/user/log',apiCode:16,phase:'key-check'});
     acceptAccountInfo(keyInfo);
     if(keyInfo.customLogPermissions)reportDiagnostic('LOG_SCOPE','warning','The API key restricts logs; historical coverage may be incomplete.',{source:'User Logs'});else resolveDiagnostic('LOG_SCOPE');
     if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
@@ -2938,7 +2953,7 @@
       for(const source of ['log','pagination'])resolveDiagnostic('PAGE_SOURCE_MISMATCH',source);
       for(const code of ['STORAGE_QUOTA','STORAGE_WRITE','REBUILD_BACKUP_UNAVAILABLE'])for(const source of ['storage','sync','syncJob','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','syncCache'])resolveDiagnostic(code,source);
     }
-    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');
+    resolveDiagnostic('SYNC_FAILED');resolveDiagnostic('SYNC_CANCELLED');resolveDiagnostic('SYNC_PAUSED');resolveDiagnostic('ACTION_FAILED','sync');
     const repaired=Number(d.missingLogDays)||0;
     if(!freshCount)setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
     else setSyncProgress(`${job.syncMode==='full'?'Full Resync':'Quick Sync'} checked through ${tctDateTimeStr(serverNow)} TCT \u00B7 ${qty(freshCount)} new item rows \u00B7 ${qty(d.foreignBuyQty||0)} overseas-acquired item(s) seen \u00B7 ${qty(d.existingRowsSkipped||0)} existing rows skipped.`);
