@@ -62,7 +62,7 @@
         crossTabChannel.addEventListener('message',event=>{if(event?.data?.type==='history-updated')scheduleCrossTabRefresh(event.data.reason||'broadcast');});
       }
     }catch(_){crossTabChannel=null;}
-    const passiveKeys=new Set(['sync','notices','goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
+    const passiveKeys=new Set(['goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
     window.addEventListener('storage',event=>{
       if(event.key===crossTabSignalKey()){scheduleCrossTabRefresh('storage-signal');return;}
       if(!event.key?.startsWith(NS))return;
