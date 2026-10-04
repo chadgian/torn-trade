@@ -22,6 +22,12 @@
 #tta-root .tta-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;border:1px solid transparent;border-radius:11px;padding:7px 11px;background:linear-gradient(135deg,#7fe2b8,#93cff7);color:#10242d!important;font-size:12px;font-weight:750;white-space:normal;text-align:center;box-shadow:0 7px 18px #0917202f}
 #tta-root .tta-btn.secondary{background:#ffffff0e;border-color:var(--tta-line);color:var(--tta-text)!important;box-shadow:none}
 #tta-root .tta-btn.danger{color:var(--tta-red)!important;border-color:#92505b;background:#361d23}
+#tta-root .tta-privacy-notice{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px 12px;margin:0 0 14px;padding:11px 12px;border:1px solid #79dfb338;border-left:3px solid var(--tta-green);border-radius:12px;background:linear-gradient(145deg,#79dfb30d,#91cdf708);box-shadow:inset 0 1px #ffffff0b}
+#tta-root .tta-privacy-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;background:#79dfb312;border:1px solid #79dfb32f;color:var(--tta-green)!important;font-size:16px}
+#tta-root .tta-privacy-copy{min-width:0}
+#tta-root .tta-privacy-copy strong{display:block;font-size:12px;color:var(--tta-text)!important}
+#tta-root .tta-privacy-copy span{display:block;margin-top:2px;color:var(--tta-muted)!important;font-size:11px;line-height:1.45}
+#tta-root .tta-privacy-notice .tta-btn{min-height:32px;padding:5px 9px;font-size:11px;white-space:nowrap}
 #tta-root .tta-quality{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0 14px;margin-bottom:12px;border-bottom:1px solid var(--tta-line);color:var(--tta-yellow)!important}
 #tta-root .tta-quality.error{color:var(--tta-red)!important}
 #tta-root .tta-quality.ok{color:var(--tta-muted)!important}
@@ -312,6 +318,9 @@
 #tta-fab.snapping{transition:left .2s ease}
 @keyframes tta-spin{to{transform:rotate(360deg)}}
 @media(max-width:700px){
+  #tta-root .tta-privacy-notice{grid-template-columns:30px minmax(0,1fr);padding:10px;gap:8px 10px}
+  #tta-root .tta-privacy-icon{width:30px;height:30px}
+  #tta-root .tta-privacy-notice .tta-btn{grid-column:2;justify-self:start}
   #tta-root .tta-shell{padding-bottom:max(96px,calc(72px + env(safe-area-inset-bottom)))}
   #tta-root .tta-content{padding:14px 12px}
   #tta-root .tta-header{padding:10px 12px;gap:6px}
@@ -346,6 +355,8 @@
   #tta-root .tta-diagnostic-contact .tta-btn{width:100%}
 }
 @media(max-width:420px){
+  #tta-root .tta-privacy-copy span{font-size:10.5px}
+  #tta-root .tta-privacy-notice .tta-btn{width:auto}
   #tta-root .tta-nw-daily-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
   #tta-root .tta-nw-company-card{grid-column:1/-1}
   #tta-root .tta-nw-metric-card{padding:8px}
