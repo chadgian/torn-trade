@@ -628,7 +628,7 @@
     if(job.syncMode==='full'&&!job.fullResetDone){await resetHistoryForFullResync();job.fullResetDone=true;await checkpointSyncJob(job,'Recovery copy saved \u00B7 starting full rebuild\u2026');}
     let types=[];if(job.logScanPeriod)types=relevantLogTypes(await ensureLogTypes(false));
     if(job.logScanPeriod&&!types.length)throw new Error('No relevant Torn transaction or free-acquisition log types were detected.');
-    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logBatches=initialLogBatches(job.logTypeIds);job.logMode='filtered';job.logBatches=initialLogBatches(job.logTypeIds||[]);job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
+    job.userId=keyInfo.userId;job.logTypeIds=types.map(x=>Number(x.id)).filter(x=>x>0);job.logBatches=initialLogBatches(job.logTypeIds);job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;job.logPage=0;job.logPreviousSignature='';
     job.diagnostics=newSyncDiagnostics(job,'filtered',job.logTypeIds.length,job.logScanPeriod?job.logBatches.length:0);
     job.diagnostics.keyType=keyInfo.type;job.diagnostics.keyLevel=keyInfo.level;job.diagnostics.keySource=keySource();job.diagnostics.customLogPermissions=keyInfo.customLogPermissions;job.diagnostics.probeRows=0;
     job.diagnostics.recentLogRecheckHours=(job.period.to-job.logScanPeriod.from)/3600;job.diagnostics.recentTradeRecheckHours=(job.period.to-job.tradeScanPeriod.from)/3600;
@@ -667,7 +667,7 @@
     // Rewind legacy cursors inside the existing rebuild; its durable recovery
     // copy and already checkpointed rows stay intact. Upserts deduplicate them.
     job.phase=job.fullResetDone&&job.logTypeIds?.length?'logs-filtered':'setup';
-    job.logMode='filtered';job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;
+    job.logMode='filtered';job.logBatches=initialLogBatches(job.logTypeIds||[]);job.logBatchIndex=0;job.logCursorTo=job.logScanPeriod?.to||job.period.to;
     job.logPage=0;job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];job.logPreviousSignature='';
     job.abroadPageParams=null;job.abroadPageSeen=[];job.abroadLastPageIds=[];
     job.tradeListParams=null;job.tradeListSeen=[];job.tradeHeaders=[];job.tradeDetailIndex=0;job.completedSources={};
