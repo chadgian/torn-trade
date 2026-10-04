@@ -3,7 +3,9 @@
   const DURABLE_STORAGE_KEYS=new Set(['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','catalog','logTypes']);
   const durableCache=new Map();
   const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
-  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null;
+  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,crossTabSequence=0;
+  const CROSS_TAB_SIGNAL_KEY=NS+'crossTabSignal';
+  const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
 
   function storageIssue(key) {
     try{if(typeof storageIssues!=='undefined'&&!storageIssues.includes(key))storageIssues.push(key);}catch(_){}
@@ -161,6 +163,36 @@
       }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
     }).catch(()=>{});
   }
+  async function reloadDurableStorage(keys=[...DURABLE_STORAGE_KEYS]) {
+    if(!durableStorageState.ready)await initializeDurableStorage();
+    let loaded=0;
+    for(const key of keys){
+      if(!DURABLE_STORAGE_KEYS.has(key))continue;
+      try{
+        let value;
+        if(durableBackend.kind==='localStorage')value=parseLocalValue(key,undefined);
+        else value=await durableBackend.get(NS+key);
+        if(value==null){
+          durableCache.delete(key);
+          if(typeof state!=='undefined'&&Object.prototype.hasOwnProperty.call(state,key)&&Array.isArray(state[key]))state[key]=[];
+          continue;
+        }
+        applyDurableStateValue(key,value);loaded++;
+      }catch(error){storageError(error,key);}
+    }
+    return loaded;
+  }
+  function announceCrossTabUpdate(reason='history-updated') {
+    const payload={type:'history-updated',reason:String(reason||'history-updated').slice(0,48),at:Date.now(),sequence:++crossTabSequence};
+    try{
+      if(typeof BroadcastChannel!=='undefined'){
+        const channel=new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+        channel.postMessage(payload);channel.close();
+      }
+    }catch(_){}
+    try{localStorage.setItem(CROSS_TAB_SIGNAL_KEY,JSON.stringify(payload));}catch(_){}
+  }
+
   async function saveDurable(k,v) {
     if(!DURABLE_STORAGE_KEYS.has(k)) {
       if(!saveLocal(k,v))throw new Error('Local storage write failed');
