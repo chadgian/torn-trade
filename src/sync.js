@@ -721,6 +721,7 @@
       }
     }
     finally{
+      try{await flushDurableStorage();announceCrossTabUpdate(job?.active?'sync-checkpoint':'sync-complete');}catch(_){}
       if(background){state.backgroundSyncing=false;queueAnalyticsRender();}
       else{state.syncing=false;updateFabState();setBusy(false);render();}
     }
@@ -745,7 +746,7 @@
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
-        if(!lock){reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. This tab retains its cached results.',{source:'sync'});queueAnalyticsRender();return;}
+        if(!lock){reportDiagnostic('SYNC_OTHER_TAB','info','Another Torn tab is syncing. This tab can keep viewing locally stored results and will refresh when the active sync finishes.',{source:'sync'});if(!options.background)toast('Another Torn tab is syncing TCFA. You can keep viewing data here; this tab will refresh when it finishes.');queueAnalyticsRender();return;}
         resolveDiagnostic('SYNC_OTHER_TAB');return syncWithLocalState(options);
       });
     }
