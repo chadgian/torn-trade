@@ -38,7 +38,16 @@
 
   const DEVELOPER_PROFILE_URL='https://www.torn.com/profiles.php?XID=4325416';
   function diagnosticGuidance(row) {
-    const code=String(row?.code||'ACTION_FAILED'),severity=String(row?.severity||'warning');
+    const code=String(row?.code||'ACTION_FAILED'),severity=String(row?.severity||'warning'),source=String(row?.context?.source||''),apiCode=Number(row?.context?.apiCode)||0;
+    if(code==='API_ACCESS'){
+      if(source.includes('/company/'))return {text:'This key does not grant the requested Company selection. If you want company P/L tracking, use Settings → Create key and include Company Profile and Employees, then Save & test. Other analyzer features can continue.',contact:false,developerOnly:false};
+      if(source==='/user/networth'||source==='/user/money')return {text:'This key is missing a financial selection. Use Settings → Create key, create the analyzer key, then Save & test it. Your cached history remains safe.',contact:false,developerOnly:false};
+      return {text:'Torn rejected this request because the API key does not have enough access. Open Settings → Create key, generate the analyzer-specific key with the requested selections, paste it into Settings, then Save & test before syncing again.',contact:false,developerOnly:false};
+    }
+    if(code==='NETWORTH_UNAVAILABLE'&&apiCode===16)return {text:'Create a new analyzer key from Settings → Create key so User → Networth is included, then Save & test and refresh the financial snapshot.',contact:false,developerOnly:false};
+    if(code==='MONEY_UNAVAILABLE'&&apiCode===16)return {text:'Create a new analyzer key from Settings → Create key so User → Money is included, then Save & test and refresh the financial snapshot.',contact:false,developerOnly:false};
+    if(code==='COMPANY_UNAVAILABLE'&&apiCode===16)return {text:'If you use company P/L tracking, recreate the analyzer key with Company → Profile access. If you are not a company director, no action is needed for the rest of the analyzer.',contact:false,developerOnly:false};
+    if(code==='COMPANY_WAGES_UNAVAILABLE'&&apiCode===16)return {text:'If you use company P/L tracking, recreate the analyzer key with Company → Employees access. Other analyzer features can continue.',contact:false,developerOnly:false};
     const direct={
       STORAGE_QUOTA:'In Torn PDA, open this script\'s Native storage setting and raise its limit. In another browser, export a JSON backup first, then free site storage if needed. Retry the sync after storage space is available.',
       STORAGE_WRITE:'Do not reset the analyzer. Reload Torn and retry once after checking available storage. If the storage warning remains, export a backup before clearing any browser/site data.',
@@ -47,6 +56,7 @@
       HISTORY_COVERAGE_RECHECK:'Run Full Resync once with the current analyzer version to re-verify older pagination boundaries.',
       HISTORY_STALE:'Run Quick Sync to check recent activity.',
       RANGE_NOT_COVERED:'Run Full Resync if you need data from before the currently verified history range.',
+      API_KEY_MISSING:'Open Settings and either save a Torn API key or use Torn PDA\'s injected key, then retry.',
       LOG_SCOPE:'Create or save an API key with unrestricted User Log access and the required analyzer selections, then sync again.',
       RATE_LIMIT:'Wait a few minutes before syncing again. Avoid running the analyzer in several Torn tabs at the same time.',
       CATALOG_STALE:'Open Settings and tap Refresh catalog, then return to the affected view.',
