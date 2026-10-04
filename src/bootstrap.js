@@ -64,7 +64,7 @@
     }catch(_){crossTabChannel=null;}
     const passiveKeys=new Set(['sync','notices','goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
     window.addEventListener('storage',event=>{
-      if(event.key===CROSS_TAB_SIGNAL_KEY){scheduleCrossTabRefresh('storage-signal');return;}
+      if(event.key===crossTabSignalKey()){scheduleCrossTabRefresh('storage-signal');return;}
       if(!event.key?.startsWith(NS))return;
       const key=event.key.slice(NS.length);
       if(passiveKeys.has(key))scheduleCrossTabRefresh('storage');
