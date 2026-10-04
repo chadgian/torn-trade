@@ -130,7 +130,7 @@
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
-    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries'])counts[key]=Number(d[key])||0;
+    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
     const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
