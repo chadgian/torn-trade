@@ -378,6 +378,10 @@
                 if(probeError.code==='PAGE_INCOMPLETE')throw error;
                 throw probeError;
               }
+              if(!probeNext){
+                const returnedIds=new Set(older.map(row=>String(row.id))),boundaryIds=rows.filter(row=>Number(row.timestamp)===oldest).map(row=>String(row.id));
+                if(boundaryIds.some(id=>!returnedIds.has(id)))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','The terminal dense-page probe did not reproduce the known boundary records. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe',from,to:oldest,count:older.length});
+              }
               const savedRows=Array.from(new Map([...rows,...older].map(row=>[String(row.id),row])).values());
               reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',probeNext?'A dense history page was recovered with an independent date-boundary cursor; older logs are still being loaded.':'A dense history page was independently verified as the end of this log batch.',{source:key,phase:'dense-date-probe',from,to:oldest,count:older.length});
               return {rows:savedRows,next:probeNext,seen:[...seen],requests,boundaryRecovered:true,denseBoundaryRecovered:true};
