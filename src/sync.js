@@ -379,6 +379,7 @@
                 throw probeError;
               }
               if(!probeNext){
+                if(older.length>=Math.max(1,Number(probe.limit||100)-1))throw error;
                 const returnedIds=new Set(older.map(row=>String(row.id))),boundaryIds=rows.filter(row=>Number(row.timestamp)===oldest).map(row=>String(row.id));
                 if(boundaryIds.some(id=>!returnedIds.has(id)))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','The terminal dense-page probe did not reproduce the known boundary records. Coverage remains incomplete.',{...error.context,phase:'dense-date-probe',from,to:oldest,count:older.length});
               }
