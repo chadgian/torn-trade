@@ -22,8 +22,8 @@
   const durableCache=new Map();
   const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
   let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,crossTabSequence=0;
-  const CROSS_TAB_SIGNAL_KEY=NS+'crossTabSignal';
   const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
+  function crossTabSignalKey(){return NS+'crossTabSignal';}
 
   function storageIssue(key) {
     try{if(typeof storageIssues!=='undefined'&&!storageIssues.includes(key))storageIssues.push(key);}catch(_){}
@@ -208,7 +208,7 @@
         channel.postMessage(payload);channel.close();
       }
     }catch(_){}
-    try{localStorage.setItem(CROSS_TAB_SIGNAL_KEY,JSON.stringify(payload));}catch(_){}
+    try{localStorage.setItem(crossTabSignalKey(),JSON.stringify(payload));}catch(_){}
   }
 
   async function saveDurable(k,v) {
@@ -3249,7 +3249,7 @@
     }catch(_){crossTabChannel=null;}
     const passiveKeys=new Set(['sync','notices','goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
     window.addEventListener('storage',event=>{
-      if(event.key===CROSS_TAB_SIGNAL_KEY){scheduleCrossTabRefresh('storage-signal');return;}
+      if(event.key===crossTabSignalKey()){scheduleCrossTabRefresh('storage-signal');return;}
       if(!event.key?.startsWith(NS))return;
       const key=event.key.slice(NS.length);
       if(passiveKeys.has(key))scheduleCrossTabRefresh('storage');
