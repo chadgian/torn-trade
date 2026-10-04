@@ -158,8 +158,8 @@
   async function refreshFinancialSnapshot() {
     if(!hasApiKey())return null;const snap={timestamp:nowSec(),networth:null,money:null};
     await requireAccountIdentity();
-    try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(_){reportDiagnostic('NETWORTH_UNAVAILABLE','warning','Net-worth snapshot could not be refreshed.',{source:'/user/networth'});}
-    try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(_){reportDiagnostic('MONEY_UNAVAILABLE','warning','Current money snapshot could not be refreshed.',{source:'/user/money'});}
+    try{const n=await apiGet('/user/networth');if(!n?.networth)throw new Error('Missing networth');snap.networth=n.networth;snap.timestamp=Number(n.networth.timestamp)||snap.timestamp;resolveDiagnostic('NETWORTH_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/user/networth');reportDiagnostic('NETWORTH_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include User \u2192 Networth.':'Net-worth snapshot could not be refreshed.',{source:'/user/networth',apiCode:Number(error?.context?.apiCode)||0});}
+    try{const m=await apiGet('/user/money');if(!m?.money)throw new Error('Missing money');snap.money=m.money;resolveDiagnostic('MONEY_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/user/money');reportDiagnostic('MONEY_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include User \u2192 Money.':'Current money snapshot could not be refreshed.',{source:'/user/money',apiCode:Number(error?.context?.apiCode)||0});}
     if(!snap.networth&&!snap.money)return null;
     const list=(state.financialSnapshots||[]).filter(x=>Math.abs((Number(x.timestamp)||0)-snap.timestamp)>300);list.push(snap);const next=list.sort((a,b)=>a.timestamp-b.timestamp).slice(-180);await saveDurable('financialSnapshots',next);state.financialSnapshots=next;return snap;
   }
@@ -170,7 +170,7 @@
     const profile=profileData?.profile;
     if(!profile||Number(profile?.director?.id)!==me)return null;
     let employeesData;
-    try{employeesData=await apiGet('/company/employees');resolveDiagnostic('COMPANY_WAGES_UNAVAILABLE');}catch(_){reportDiagnostic('COMPANY_WAGES_UNAVAILABLE','warning','Company wages could not be loaded; company profit was not recalculated.',{source:'/company/employees'});return null;}
+    try{employeesData=await apiGet('/company/employees');resolveDiagnostic('COMPANY_WAGES_UNAVAILABLE');}catch(error){if(error?.code==='API_ACCESS')resolveDiagnostic('API_ACCESS','/company/employees');reportDiagnostic('COMPANY_WAGES_UNAVAILABLE','warning',error?.code==='API_ACCESS'?'API key access does not include Company \u2192 Employees; company profit was not recalculated.':'Company wages could not be loaded; company profit was not recalculated.',{source:'/company/employees',apiCode:Number(error?.context?.apiCode)||0});return null;}
     const employees=Array.isArray(employeesData?.employees)?employeesData.employees:[];
     const grossIncome=Number(profile?.income?.daily)||0;
     const wages=employees.reduce((n,e)=>n+Math.max(0,Number(e?.wage)||0),0);
