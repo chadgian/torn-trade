@@ -227,7 +227,7 @@ test('old verified history requires a full recheck, not just a quick sync',async
   const {app}=harness({stored:{apiKey:key,catalog:[item],sync:{lastSync:now-100,firstSyncComplete:true,accountingVersion:'0.3.3'}},responses:baseResponses()});
   assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
   await app.syncAll({mode:'quick'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),true);
-  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,3);
+  await app.syncAll({mode:'full'});assert.equal(app.dataQualityNotices().some(n=>n.code==='HISTORY_COVERAGE_RECHECK'),false);assert.equal(app.state.sync.historyPaginationVersion,4);
 });
 
 test('reported 215-row legacy checkpoint rewinds and completes with recovery preserved',async()=>{
@@ -344,11 +344,55 @@ test('zero after a positive nanostamp verifies the boundary and retains every ro
   const job=boundaryJob();await app.runResumableLogPhase(job,'filtered');assert.equal(app.state.transactions.length,2);assert.equal(job.completedSources.log,true);assert.equal(calls.length,3);assert.equal(calls.at(-1).searchParams.has('nanostamp'),false);
 });
 
+test('dense filtered log batches split adaptively and resume without skipped rows',async()=>{
+  const dense=Array.from({length:99},(_,i)=>boundarySale('dense-'+i,104));
+  const {app,calls}=harness({stored:{apiKey:key,catalog:[item]},responses:{'/user/log':url=>{
+    const ids=String(url.searchParams.get('log')||'').split(',').filter(Boolean);
+    if(ids.length>1){
+      if(!url.searchParams.has('nanostamp'))return {log:[boundarySale('shared-top',105)],_metadata:{nanostamp:'104000000500'}};
+      return {log:dense};
+    }
+    if(ids[0]==='4210')return {log:[boundarySale('shared-top',105),boundarySale('sale-final',100)]};
+    return {log:[]};
+  }}});
+  const job={...boundaryJob(),logTypeIds:[4210,4800],diagnostics:{parsedRows:0,matchedRows:0}};
+  await app.runResumableLogPhase(job,'filtered');
+  assert.equal(job.completedSources.log,true);
+  assert.equal(job.diagnostics.logBatchSplits,1);
+  assert.equal(job.logBatches.length,2);
+  assert.equal(app.state.transactions.length,2);
+  assert.equal(new Set(app.state.transactions.map(r=>r.id)).size,2);
+  assert.equal(calls.some(u=>u.searchParams.get('log')==='4210,4800'&&u.searchParams.has('nanostamp')),true);
+  assert.equal(calls.some(u=>u.searchParams.get('log')==='4210'&&!u.searchParams.has('nanostamp')),true);
+});
+test('singleton dense log page can be verified by a short inclusive date-boundary probe',async()=>{
+  const current=[...Array.from({length:98},(_,i)=>boundarySale('new-'+i,101)),boundarySale('boundary',100)];
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':url=>{
+    if(url.searchParams.has('nanostamp'))return {log:current};
+    if(url.searchParams.get('to')==='100')return {log:[boundarySale('boundary',100),boundarySale('older',90)]};
+    return {log:[]};
+  }}});
+  const result=await app.historyPage('/user/log',{from:0,to:110,limit:100,nanostamp:'101000000500',log:'4210'},[]);
+  assert.equal(result.next,null);
+  assert.equal(result.denseBoundaryRecovered,true);
+  assert.equal(result.rows.length,100);
+  assert.equal(new Set(result.rows.map(r=>r.id)).size,100);
+  assert.equal(calls.length,4);
+  assert.equal(calls.at(-1).searchParams.get('to'),'100');
+  assert.equal(calls.at(-1).searchParams.has('nanostamp'),false);
+});
+test('singleton 99-row date probes remain incomplete when the verification page is still dense',async()=>{
+  const rows=Array.from({length:99},(_,i)=>boundarySale('same-'+i,100));
+  const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':{log:rows}}});
+  await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100,nanostamp:'100000000500',log:'4210'},[]),e=>e.code==='PAGE_INCOMPLETE');
+  assert.equal(calls.length,4);
+  assert.equal(app.state.sync.lastSync,0);
+});
 test('dense zero-cursor pages pause rather than silently losing same-second logs',async()=>{
   for(const count of [99,100]){
     const rows=Array.from({length:count},(_,i)=>boundarySale('sale-'+i));
     const {app,calls}=harness({stored:{apiKey:key},responses:{'/user/log':url=>zeroPage(rows,Object.fromEntries(url.searchParams))}});
-    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100},[]),e=>e.code==='PAGE_INCOMPLETE');assert.equal(calls.length,3);assert.equal(app.state.sync.lastSync,0);
+    await assert.rejects(app.historyPage('/user/log',{from:0,to:110,limit:100},[]),e=>e.code==='PAGE_INCOMPLETE');assert.equal(calls.length,4);assert.equal(app.state.sync.lastSync,0);
   }
 });
 
@@ -376,7 +420,7 @@ test('reported paused v0.3.5 quick scan and Full Resync complete with zero metad
   app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Old zero forward cursor',{source:'log',cursor:'0',nextCursor:'1790294845787692899'});
   app.reportDiagnostic('PAGE_SOURCE_MISMATCH','error','Unrelated source',{source:'catalog'});
   await app.runResumableSync(job,true);assert.equal(app.state.sync.lastSync,now);assert.equal(storage.has('tta:v1:syncJob'),false);assert.equal(app.state.transactions.length,4);
-  await app.syncAll({mode:'full'});assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(app.state.transactions.length,4);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.historyPaginationVersion,4);assert.equal(app.state.transactions.length,4);assert.equal(storage.has('tta:v1:fullResyncBackup'),false);
   assert.equal(calls.filter(u=>u.pathname==='/v2/user/log').every(u=>u.searchParams.get('nanostamp')!=='0'),true);
   assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='log'),false);assert.equal(app.state.notices.some(n=>n.code==='PAGE_SOURCE_MISMATCH'&&n.context.source==='catalog'),true);
 });
@@ -385,5 +429,5 @@ test('Full Resync takes over a paused quick zero checkpoint instead of resuming 
   const responses=baseResponses();responses['/user/log']=url=>zeroPage([],Object.fromEntries(url.searchParams));
   const paused={schema:3,id:'quick',active:true,syncMode:'quick',paginationVersion:2,phase:'logs-filtered',period:{from:now-60,to:now},updatedAt:now,logPageParams:{nanostamp:'0'},lastError:'Zero cursor'};
   const {app,storage}=harness({stored:{apiKey:key,catalog:[item],syncJob:paused,sync:{lastSync:now-100}},responses});
-  await app.syncAll({mode:'full'});assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.sync.coverageFrom,0);assert.equal(app.state.sync.historyPaginationVersion,3);assert.equal(storage.has('tta:v1:syncJob'),false);
+  await app.syncAll({mode:'full'});assert.equal(app.state.sync.firstSyncComplete,true);assert.equal(app.state.sync.coverageFrom,0);assert.equal(app.state.sync.historyPaginationVersion,4);assert.equal(storage.has('tta:v1:syncJob'),false);
 });
