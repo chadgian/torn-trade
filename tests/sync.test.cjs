@@ -50,14 +50,14 @@ test('Data Quality provides suggested actions and developer contact for non-user
   const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
   assert.equal(html.includes('Suggested action'),true);
   assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
-  assert.equal(html.includes('v0.4.1'),true);
+  assert.equal(html.includes('v0.4.2'),true);
   assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
   assert.equal(row.suggestedAction.length>20,true);
   assert.equal(JSON.stringify(report).includes('https://'),false);
 });
 test('What\'s New page lists user-facing releases from v0.3.0 through current',()=>{
   const {app}=harness(),html=app.updatesHtml();
-  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1'])assert.equal(html.includes(version),true);
+  for(const version of ['v0.3.0','v0.3.7','v0.3.9','v0.4.0','v0.4.1','v0.4.2'])assert.equal(html.includes(version),true);
   assert.equal(html.includes('native per-script storage'),true);
   assert.equal(html.includes('Net Worth'),true);
 });
