@@ -457,7 +457,7 @@
 #tta-root .tta-transition{position:fixed;inset:auto auto max(88px,calc(70px + env(safe-area-inset-bottom))) 50%;z-index:29;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:9px;max-width:min(88vw,420px);padding:9px 13px;transform:translateX(-50%);background:#1c303af2;border:1px solid #ffffff2b;border-radius:999px;color:var(--tta-text)!important;pointer-events:none;font-size:12px;text-align:left;box-shadow:0 12px 28px #06131b55;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 #tta-root .tta-transition .tta-spinner{width:16px;height:16px}
 @media(hover:hover){
-  #tta-root tbody tr:hover td{background:#ffffff035!important}
+  #tta-root tbody tr:hover td{background:#ffffff05!important}
   #tta-root .tta-item:hover{border-color:#ffffff2f;background:linear-gradient(145deg,#ffffff13,#ffffff08)}
 }
 @media(max-width:700px){
