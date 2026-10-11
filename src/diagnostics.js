@@ -81,7 +81,7 @@
   function diagnosticSupportDetail(row) {
     const context=safeDiagnosticContext(row?.context||{}),parts=[`v${VERSION}`,String(row?.code||'UNKNOWN')];
     for(const key of ['source','phase','tradeId','itemId','logId','apiCode'])if(context[key]!=null&&context[key]!=='')parts.push(`${key}=${context[key]}`);
-    return parts.join(' · ');
+    return parts.join(' \u00B7 ');
   }
   function diagnosticGuidanceHtml(row) {
     const g=diagnosticGuidance(row),detail=diagnosticSupportDetail(row);
