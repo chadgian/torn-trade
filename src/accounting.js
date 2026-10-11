@@ -5,7 +5,7 @@
   };
 
   function resetAnalyticsCache() {
-    perfCache.txRef=null;perfCache.byItem=new Map();perfCache.lastById=new Map();perfCache.itemIds=[];
+    perfCache.txRef=null;perfCache.rawTxRef=null;perfCache.exclusionSignature='';perfCache.byItem=new Map();perfCache.lastById=new Map();perfCache.itemIds=[];
     perfCache.fifo.clear();perfCache.summaries.clear();perfCache.series.clear();perfCache.overall.clear();
     perfCache.trackedTxRef=null;perfCache.trackedCatalogRef=null;perfCache.tracked=[];
     perfCache.ledgerTxRef=null;perfCache.ledgerRows=[];perfCache.ledgerByItem=new Map();
@@ -290,6 +290,16 @@
     return rows.sort((a,b)=>b.acquiredAt-a.acquiredAt||String(b.id).localeCompare(String(a.id)));
   }
 
+  function excludedAcquisitionLedgerRows() {
+    const rows=[];
+    for(const row of rawAcquisitionLedgerRows()){
+      const probe={id:row.id,side:'buy',source:row.source,title:row.title,itemId:row.itemId,timestamp:row.acquiredAt,total:row.costTotal};
+      const status=financialExclusionStatus(probe);if(!status.excluded)continue;
+      rows.push({...row,_financialExcluded:true,_financialKey:status.key,_financialType:status.typeKey,_financialTypeLabel:status.label,_financialReason:status.reason,_financialOverride:status.override});
+    }
+    return rows;
+  }
+
   function acquisitionMethod(t) {
     const source=String(t?.source||''),text=`${source} ${t?.title||''}`.toLowerCase();
     if(source==='Player Trade')return 'Player Trade';
@@ -333,7 +343,7 @@
 
   function filteredLedgerRows() {
     const q=String(state.ledgerSearch||'').trim().toLowerCase(),source=String(state.ledgerSource||'all'),status=String(state.ledgerStatus||'all'),range=ledgerRangeBounds();
-    const rows=acquisitionLedgerRows().filter(row=>{
+    const rows=[...acquisitionLedgerRows(),...excludedAcquisitionLedgerRows()].filter(row=>{
       if(row.acquiredAt<range.from||row.acquiredAt>range.to)return false;
       if(source!=='all'&&row.method!==source)return false;
       if(status!=='all'&&row.status!==status)return false;
@@ -353,14 +363,16 @@
   }
 
   function ledgerSortArrow(key){return state.ledgerSort===key?(state.ledgerSortDir==='asc'?' \u2191':' \u2193'):'';}
-  function ledgerMethodOptions(){return [...new Set(acquisitionLedgerRows().map(x=>x.method).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
-  function ledgerSummary(rows){return {lots:rows.length,qty:rows.reduce((n,x)=>n+x.qty,0),sold:rows.reduce((n,x)=>n+x.soldQty,0),profit:rows.reduce((n,x)=>n+x.realizedProfit,0)};}
+  function ledgerMethodOptions(){return [...new Set([...acquisitionLedgerRows(),...excludedAcquisitionLedgerRows()].map(x=>x.method).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
+  function ledgerSummary(rows){const included=rows.filter(x=>!x._financialExcluded);return {lots:included.length,qty:included.reduce((n,x)=>n+x.qty,0),sold:included.reduce((n,x)=>n+x.soldQty,0),profit:included.reduce((n,x)=>n+x.realizedProfit,0)};}
 
   function ledgerRowHtml(row) {
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
     const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
-    return `<tr role="row">
+    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+    const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`${exclusionNote}${exclusionAction}`;
+    return `<tr role="row" class="${row._financialExcluded?'tta-fin-excluded':''}">
       <td role="cell" data-label="Date / time"><strong>${esc(dateTimeStr(row.acquiredAt))}</strong></td>
       <td role="cell" data-label="Item" class="tta-ledgeritem"><strong>${esc(row.itemName)}</strong><small>#${row.itemId} \u00B7 ${esc(row.itemType)}</small><small class="tta-ledger-compact-meta">${esc(dateTimeStr(row.acquiredAt))} \u00B7 ${esc(row.method)}</small><small class="tta-ledger-mobile-status"><span class="tta-statuspill ${row.status}">${row.status==='sold'?'Sold':row.status==='transferred'?'Transferred':row.status==='consumed'?'Consumed':row.status==='depleted'?'Depleted':row.status==='partial'?'Partial':'Unsold'}</span> \u00B7 Sold ${qty(row.soldQty)}/${qty(row.qty)}${row.soldQty?' \u00B7 '+esc(money(row.soldProceeds)):''}</small><button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc('tx:'+String(row.id))}">Exclude</button></td>
       <td role="cell" data-label="Qty" class="num">${qty(row.qty)}</td>
