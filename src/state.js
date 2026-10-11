@@ -1,4 +1,4 @@
-  const VERSION = '0.4.4';
+  const VERSION = '0.5.0';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -69,6 +69,9 @@
     fabPosition: load('fabPosition', null),
     pinnedIds: load('pinnedIds', []),
     hiddenIds: load('hiddenIds', []),
+    financialExclusionRules: load('financialExclusionRules', {}),
+    financialOverrides: load('financialOverrides', {}),
+    excludedViewFilter: load('excludedViewFilter', 'all'),
     itemSearch: load('itemSearch', ''),
     sortMode: load('sortMode', 'recent'),
     ledgerSearch: load('ledgerSearch', ''),
