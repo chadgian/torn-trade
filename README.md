@@ -2,11 +2,12 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.0.** The analyzer now supports configurable financial exclusions without deleting history. Users can exclude whole transaction types or individual transactions, manually re-include a specific transaction even when its type is excluded, and review everything from a dedicated Excluded Transactions workspace. Exclusions affect Dashboard, Cash Flow, Trade Analysis, Acquisitions, Insights and related analytics; Net Worth deliberately uses the complete stored history.
+**Source version: 0.5.1.** The analyzer now includes a dedicated Transactions workspace for recent recognized financial activity, with compact search and filters plus per-transaction Include / Exclude controls. Financial exclusions still affect Dashboard, Cash Flow, Trade Analysis, Acquisitions, Insights and related analytics; Net Worth deliberately uses the complete stored history.
 
 ## Features
 
 - TCT daily overview: money in, money out, net flow and financial position.
+- Dedicated Transactions workspace with compact search, date/flow/category/status filters, highlighted incoming/outgoing/transfer rows and progressive loading.
 - Searchable Cash Flow ledger, category filters, progressive loading and interactive charts.
 - Financial exclusions by transaction type or individual record, with manual include overrides, dimmed audit rows and a dedicated Excluded Transactions workspace.
 - Net Worth ignores financial exclusions so Torn snapshots and analyzer portfolio reconciliation continue using complete stored history.
