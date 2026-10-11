@@ -1,4 +1,4 @@
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.1';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -60,6 +60,12 @@
     financialSnapshots: load('financialSnapshots', []),
     cashSearch: load('cashSearch', ''),
     cashCategory: load('cashCategory', 'all'),
+    transactionSearch: load('transactionSearch', ''),
+    transactionFlow: load('transactionFlow', 'all'),
+    transactionCategory: load('transactionCategory', 'all'),
+    transactionStatus: load('transactionStatus', 'all'),
+    transactionRange: load('transactionRange', '30d'),
+    transactionLimit: 150,
     catalog: load('catalog', []),
     catalogVersion: load('catalogVersion', 0),
     catalogUpdatedAt: load('catalogUpdatedAt', 0),
