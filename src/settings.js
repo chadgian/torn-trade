@@ -5,7 +5,7 @@
     const activeRules=Object.keys(rules).filter(k=>rules[k]).length,manual=Object.values(overrides).filter(v=>v==='exclude').length,forced=Object.values(overrides).filter(v=>v==='include').length;
     const rows=options.map(o=>{
       const excluded=!!rules[o.key];
-      return `<div class="tta-exclusion-rule"><div><strong>${esc(o.label)}</strong><small>${qty(o.count)} recorded interaction${o.count===1?'':'s'} · ${excluded?'Excluded by default':'Included by default'}</small></div><button class="tta-rule-toggle ${excluded?'active':''}" data-act="toggleFinancialRule" data-fin-type="${esc(o.key)}" aria-pressed="${excluded?'true':'false'}">${excluded?'Excluded':'Included'}</button></div>`;
+      return `<div class="tta-exclusion-rule"><div><strong>${esc(o.label)}</strong><small>${qty(o.count)} recorded interaction${o.count===1?'':'s'} \u00B7 ${excluded?'Excluded by default':'Included by default'}</small></div><button class="tta-rule-toggle ${excluded?'active':''}" data-act="toggleFinancialRule" data-fin-type="${esc(o.key)}" aria-pressed="${excluded?'true':'false'}">${excluded?'Excluded':'Included'}</button></div>`;
     }).join('');
 
     return `<section class="tta-fin-section tta-exclusion-settings"><div class="tta-sectionhead"><div><small>Calculations</small><h3>Financial exclusions</h3></div><button class="tta-btn secondary" data-act="excluded">View excluded transactions</button></div>
@@ -54,10 +54,10 @@
       <div class="tta-ledgerwrap"><table class="tta-flowtable tta-sales-table tta-compact-table" role="table" aria-label="Latest sales"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Sale</th><th role="columnheader" scope="col">Source</th><th role="columnheader" scope="col">Qty</th><th role="columnheader" scope="col">Net proceeds</th><th role="columnheader" scope="col">FIFO profit</th></tr></thead><tbody role="rowgroup">${rows.slice(0,limit).map(row=>{
         const key=row._financialKey||financialRecordKey(row),excluded=!!row._financialExcluded;
         const action=excluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(key)}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(key)}">Exclude</button>`;
-        const note=excluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+        const note=excluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
         const profit=Number(row.realizedProfit)||0;
         return `<tr role="row" class="${excluded?'tta-fin-excluded':''}">
-        <td role="cell" data-label="Sale"><strong>${esc(row.itemName)}</strong><small>${esc(tctDateTimeStr(row.timestamp))} TCT</small><small>#${row.itemId}${row.tradeId?' / trade #'+row.tradeId:''}</small><small class="tta-sales-compact-source">${esc(row.source)} · ${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small>${note}${action}</td>
+        <td role="cell" data-label="Sale"><strong>${esc(row.itemName)}</strong><small>${esc(tctDateTimeStr(row.timestamp))} TCT</small><small>#${row.itemId}${row.tradeId?' / trade #'+row.tradeId:''}</small><small class="tta-sales-compact-source">${esc(row.source)} \u00B7 ${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small>${note}${action}</td>
         <td role="cell" data-label="Source">${esc(row.source)}<small>${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small></td>
         <td role="cell" data-label="Qty" class="num">${qty(row.qty)}</td>
         <td role="cell" data-label="Net proceeds" class="num">${row.proceedsKnown===false?'Unavailable':money(row.netTotal??row.total)}</td>
@@ -86,5 +86,5 @@
       {version:'0.3.1',items:['Restored the classic blue-green glass visual theme while keeping the v0.3.0 analysis fixes.']},
       {version:'0.3.0',label:'Major rebuild',items:['Rebuilt Trade Analysis around a single FIFO engine and clearer acquisition-attributed profit.','Added stronger data-quality diagnostics, freshness checks and transparent warnings for incomplete, inferred or unavailable values.','Reorganized the source into maintainable modules with automated validation and safer sync behavior.']}
     ];
-    return `${header("What's New",`Updates since v0.3.0 · current v${VERSION}`,true)}<div class="tta-content tta-updates"><div class="tta-update-intro"><strong>Release history</strong><p>This page highlights user-facing changes from the v0.3.0 rebuild onward. It focuses on behavior you can notice in the analyzer rather than internal refactors.</p></div><div class="tta-update-list">${releases.map(r=>`<section class="tta-update-release"><div class="tta-update-version"><b>v${esc(r.version)}</b>${r.label?`<span>${esc(r.label)}</span>`:''}</div><ul>${r.items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></section>`).join('')}</div></div>`;
+    return `${header("What's New",`Updates since v0.3.0 \u00B7 current v${VERSION}`,true)}<div class="tta-content tta-updates"><div class="tta-update-intro"><strong>Release history</strong><p>This page highlights user-facing changes from the v0.3.0 rebuild onward. It focuses on behavior you can notice in the analyzer rather than internal refactors.</p></div><div class="tta-update-list">${releases.map(r=>`<section class="tta-update-release"><div class="tta-update-version"><b>v${esc(r.version)}</b>${r.label?`<span>${esc(r.label)}</span>`:''}</div><ul>${r.items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></section>`).join('')}</div></div>`;
   }
