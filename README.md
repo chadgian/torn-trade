@@ -2,12 +2,14 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.4.4.** The classic blue-green glass theme, readable text and page-width tables are retained. Zero nanostamps are no longer sent as pagination cursors or compared against valid timestamps. Short zero-cursor pages are independently checked with an inclusive date-bounded request before being accepted as terminal; older or additional same-second rows are checkpointed and scanning continues. Dense 99/full pages now trigger adaptive recovery: multi-log batches split into smaller independent batches, and singleton/unfiltered boundaries receive an inclusive date verification. Unverified dense responses still pause without claiming complete coverage. Saved scans from older cursor policies rewind safely; Full Resync replaces a paused Quick Sync and retains rebuild recovery. Accounting formulas remain unchanged from v0.3.3. Reports include sanitized cursor and failed-checkpoint context without API keys or raw responses.
+**Source version: 0.5.0.** The analyzer now supports configurable financial exclusions without deleting history. Users can exclude whole transaction types or individual transactions, manually re-include a specific transaction even when its type is excluded, and review everything from a dedicated Excluded Transactions workspace. Exclusions affect Dashboard, Cash Flow, Trade Analysis, Acquisitions, Insights and related analytics; Net Worth deliberately uses the complete stored history.
 
 ## Features
 
 - TCT daily overview: money in, money out, net flow and financial position.
 - Searchable Cash Flow ledger, category filters, progressive loading and interactive charts.
+- Financial exclusions by transaction type or individual record, with manual include overrides, dimmed audit rows and a dedicated Excluded Transactions workspace.
+- Net Worth ignores financial exclusions so Torn snapshots and analyzer portfolio reconciliation continue using complete stored history.
 - Compact responsive tables stay visually tabular on phones and tablets; lower-priority fields fold into concise secondary text instead of turning each row into a card.
 - Trade Analysis with a single FIFO engine, acquisition-attributed profit and actual sale-date quantities.
 - Latest Sales across city shops, item markets, bazaars and completed player trades, with source filters, trade IDs and excluded-unit indicators.
@@ -48,6 +50,8 @@ Large analyzer datasets no longer depend on the browser's small shared `localSto
 ## Accounting And Freshness
 
 FIFO consumes the oldest recorded acquisitions for sales, outgoing gifts and item use. Profit/chart attribution remains on acquisition dates; Latest Sales is ordered by actual sale time in TCT. These are intentionally different views.
+
+Financial exclusions are an analytics layer only: raw history is retained. An individual override takes priority over a type rule, so one player payment can be excluded without excluding every payment of the same type. Excluded item buys/sales are omitted from Trade/FIFO calculations but remain visible in audit views; Net Worth uses the unfiltered FIFO/history path.
 
 Missing costs or proceeds are **not** treated as free inventory. Unmatched or unknown-value sold units are excluded from profit and surfaced in Data Quality. Explicit free/reward acquisitions still have a valid zero cost.
 
