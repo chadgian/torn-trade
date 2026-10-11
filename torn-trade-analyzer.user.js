@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.1
+// @version      0.5.2
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -250,7 +250,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.1';
+  const VERSION = '0.5.2';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -534,7 +534,7 @@
   function diagnosticSupportDetail(row) {
     const context=safeDiagnosticContext(row?.context||{}),parts=[`v${VERSION}`,String(row?.code||'UNKNOWN')];
     for(const key of ['source','phase','tradeId','itemId','logId','apiCode'])if(context[key]!=null&&context[key]!=='')parts.push(`${key}=${context[key]}`);
-    return parts.join(' · ');
+    return parts.join(' \u00B7 ');
   }
   function diagnosticGuidanceHtml(row) {
     const g=diagnosticGuidance(row),detail=diagnosticSupportDetail(row);
@@ -1202,7 +1202,7 @@
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
     const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
-    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
     const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Exclude</button>`;
     return `<tr role="row" class="${row._financialExcluded?'tta-fin-excluded':''}">
       <td role="cell" data-label="Date / time"><strong>${esc(dateTimeStr(row.acquiredAt))}</strong></td>
@@ -1518,8 +1518,8 @@
       const action=excluded
         ? `<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(key)}">Include</button>`
         : `<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(key)}">Exclude</button>`;
-      const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(status)} · not included in calculations</span>`:'';
-      return `<tr role="row" class="${excluded?'tta-fin-excluded':''}"><td role="cell" data-label="Event"><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-cash-compact-flow tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span>${detail?`<span class="tta-flowmeta">${esc(detail)}</span>`:''}<span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span>${excludedNote}${action}</td><td role="cell" data-label="Flow"><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td role="cell" data-label="Category">${esc(x.category)}</td><td role="cell" data-label="Amount" class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'↔ '}${money(x.amount)}</td></tr>`;
+      const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(status)} \u00B7 not included in calculations</span>`:'';
+      return `<tr role="row" class="${excluded?'tta-fin-excluded':''}"><td role="cell" data-label="Event"><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-cash-compact-flow tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span>${detail?`<span class="tta-flowmeta">${esc(detail)}</span>`:''}<span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT \u00B7 ${esc(x.source||x.category)}</span>${excludedNote}${action}</td><td role="cell" data-label="Flow"><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td role="cell" data-label="Category">${esc(x.category)}</td><td role="cell" data-label="Amount" class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'\u2194 '}${money(x.amount)}</td></tr>`;
     }).join('')||'<tr role="row"><td role="cell" colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';
   }
 
@@ -1552,9 +1552,9 @@
 
   function transactionFlowInfo(x) {
     const direction=String(x?.direction||'');
-    if(direction.startsWith('transfer'))return {cls:'transfer',label:'Transfer',prefix:'↔ '};
+    if(direction.startsWith('transfer'))return {cls:'transfer',label:'Transfer',prefix:'\u2194 '};
     if(direction==='in')return {cls:'in',label:'Incoming',prefix:'+'};
-    return {cls:'out',label:'Outgoing',prefix:'−'};
+    return {cls:'out',label:'Outgoing',prefix:'\u2212'};
   }
 
   function transactionRowsHtml(rows,limit=150) {
@@ -1564,10 +1564,10 @@
       const action=excluded
         ? `<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(key)}">Include</button>`
         : `<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(key)}">Exclude</button>`;
-      const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(x._financialReason||'Excluded')} · not included in calculations</span>`:'';
+      const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(x._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
       return `<tr role="row" class="tta-transaction-row tta-tx-${flow.cls} ${excluded?'tta-fin-excluded':''}">
         <td role="cell" data-label="Transaction"><div class="tta-transaction-head"><span class="tta-flowbadge ${flow.cls}">${flow.label}</span><strong>${esc(x.title||x.category||'Financial activity')}</strong></div>
-          ${detail?`<small>${esc(detail)}</small>`:''}${counterparty?`<small>${esc(counterparty)}</small>`:''}<small>${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category||'')}</small>
+          ${detail?`<small>${esc(detail)}</small>`:''}${counterparty?`<small>${esc(counterparty)}</small>`:''}<small>${esc(tctDateTimeStr(x.timestamp))} TCT \u00B7 ${esc(x.source||x.category||'')}</small>
           <span class="tta-transaction-category-inline">${esc(x.category||'Other')}</span>${excludedNote}${action}</td>
         <td role="cell" data-label="Category"><span class="tta-transaction-category">${esc(x.category||'Other')}</span></td>
         <td role="cell" data-label="Amount" class="num"><strong class="tta-transaction-amount ${flow.cls==='in'?'pos':flow.cls==='out'?'neg':'tta-transfer'}">${flow.prefix}${money(x.amount)}</strong></td>
@@ -1582,13 +1582,13 @@
     const range=String(state.transactionRange||'30d'),flow=String(state.transactionFlow||'all'),category=String(state.transactionCategory||'all'),status=String(state.transactionStatus||'all');
     return `${header('Transactions','Recent recognized financial activity',true)}<div class="tta-content tta-transactions-page">
       <div class="tta-transaction-toolbar" aria-label="Transaction filters">
-        <div class="tta-searchwrap tta-transaction-searchwrap"><input id="tta-transaction-search" class="tta-history-search" placeholder="Search transactions…" value="${esc(state.transactionSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearTransactionSearch" aria-label="Clear transaction search" ${state.transactionSearch?'':'hidden'}>×</button></div>
+        <div class="tta-searchwrap tta-transaction-searchwrap"><input id="tta-transaction-search" class="tta-history-search" placeholder="Search transactions\u2026" value="${esc(state.transactionSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearTransactionSearch" aria-label="Clear transaction search" ${state.transactionSearch?'':'hidden'}>\u00D7</button></div>
         <select id="tta-transaction-range" class="tta-history-search" aria-label="Transaction date range"><option value="7d" ${range==='7d'?'selected':''}>7 days</option><option value="14d" ${range==='14d'?'selected':''}>14 days</option><option value="30d" ${range==='30d'?'selected':''}>30 days</option><option value="90d" ${range==='90d'?'selected':''}>90 days</option><option value="all" ${range==='all'?'selected':''}>All history</option></select>
         <select id="tta-transaction-flow" class="tta-history-search" aria-label="Transaction direction"><option value="all" ${flow==='all'?'selected':''}>All flows</option><option value="in" ${flow==='in'?'selected':''}>Incoming</option><option value="out" ${flow==='out'?'selected':''}>Outgoing</option><option value="transfer" ${flow==='transfer'?'selected':''}>Transfers</option></select>
         <select id="tta-transaction-category" class="tta-history-search" aria-label="Transaction category"><option value="all">All categories</option>${categories.map(c=>`<option value="${esc(c)}" ${category===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
         <select id="tta-transaction-status" class="tta-history-search" aria-label="Calculation status"><option value="all" ${status==='all'?'selected':''}>All statuses</option><option value="included" ${status==='included'?'selected':''}>Included</option><option value="excluded" ${status==='excluded'?'selected':''}>Excluded</option></select>
       </div>
-      <div class="tta-transaction-meta"><strong>${qty(rows.length)} matching transaction${rows.length===1?'':'s'}</strong><span>${qty(included)} included · ${qty(excluded)} excluded</span></div>
+      <div class="tta-transaction-meta"><strong>${qty(rows.length)} matching transaction${rows.length===1?'':'s'}</strong><span>${qty(included)} included \u00B7 ${qty(excluded)} excluded</span></div>
       <div class="tta-ledgerwrap tta-transaction-ledger"><table class="tta-flowtable tta-transaction-table tta-compact-table" role="table" aria-label="Recent transactions"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Transaction</th><th role="columnheader" scope="col">Category</th><th role="columnheader" scope="col" style="text-align:right">Amount</th></tr></thead><tbody role="rowgroup">${transactionRowsHtml(rows,limit)}</tbody></table></div>
       <div class="tta-morehint">Showing ${qty(Math.min(rows.length,limit))} of ${qty(rows.length)} matching transactions ${rows.length>limit?'<button class="tta-btn secondary" data-act="transactionsMore">Load more</button>':''}</div>
       <div class="tta-note">Excluded transactions stay visible here but are omitted from financial analytics. Net Worth still uses the complete stored history. <button class="tta-inline-link" data-act="excluded">Review excluded transactions</button></div>
@@ -1813,7 +1813,7 @@
       map.set(status.key,{
         id:'excluded:'+status.key,_financialKey:status.key,_financialType:status.typeKey,_financialTypeLabel:status.label,_financialExcluded:true,_financialReason:status.reason,_financialOverride:status.override,
         timestamp:Number(t.timestamp)||0,direction:t.side==='sell'?'in':'out',amount,category:status.label,source:String(t.source||'Trade Analysis'),
-        title:`${t.side==='sell'?'Sale':'Acquisition'}${item?' · '+item.name:''}`,detail:item?`${qty(t.qty)} × ${item.name}`:'',recordKind:'transaction'
+        title:`${t.side==='sell'?'Sale':'Acquisition'}${item?' \u00B7 '+item.name:''}`,detail:item?`${qty(t.qty)} \u00D7 ${item.name}`:'',recordKind:'transaction'
       });
     }
     return [...map.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));
@@ -1828,7 +1828,7 @@
       <div class="tta-banner"><strong>Net Worth is never filtered.</strong> These exclusions apply to Dashboard, Cash Flow, Trade Analysis, Acquisitions, Insights and related calculations only.</div>
       <div class="tta-cashhero"><div class="tta-cashcard"><small>Excluded inflows</small><b class="pos">${money(incoming)}</b></div><div class="tta-cashcard"><small>Excluded outflows</small><b class="neg">${money(outgoing)}</b></div><div class="tta-cashcard main"><small>Excluded records</small><b>${qty(rows.length)}</b></div></div>
       <div class="tta-chips"><button class="tta-chip ${filter==='all'?'active':''}" data-act="excludedFilter" data-filter="all">All</button><button class="tta-chip ${filter==='manual'?'active':''}" data-act="excludedFilter" data-filter="manual">Manual</button><button class="tta-chip ${filter==='rule'?'active':''}" data-act="excludedFilter" data-filter="rule">By type rule</button></div>
-      <div class="tta-ledgerwrap"><table class="tta-flowtable tta-compact-table" role="table" aria-label="Excluded transactions"><thead><tr><th>Event</th><th>Type</th><th>Reason</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows.map(x=>`<tr><td data-label="Event"><strong>${esc(x.title||x.category||'Financial activity')}</strong>${flowDetailText(x)?`<small>${esc(flowDetailText(x))}</small>`:''}<small>${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||'')}</small><button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(x._financialKey)}">Include in calculations</button></td><td data-label="Type">${esc(x._financialTypeLabel||financialTypeLabel(x))}</td><td data-label="Reason"><span class="tta-excludedbadge">${esc(x._financialReason||'Excluded')}</span></td><td data-label="Amount" class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':''}">${x.direction==='in'?'+':x.direction==='out'?'-':''}${money(x.amount)}</td></tr>`).join('')||'<tr><td colspan="4"><div class="tta-empty">No transactions are currently excluded.</div></td></tr>'}</tbody></table></div>
+      <div class="tta-ledgerwrap"><table class="tta-flowtable tta-compact-table" role="table" aria-label="Excluded transactions"><thead><tr><th>Event</th><th>Type</th><th>Reason</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows.map(x=>`<tr><td data-label="Event"><strong>${esc(x.title||x.category||'Financial activity')}</strong>${flowDetailText(x)?`<small>${esc(flowDetailText(x))}</small>`:''}<small>${esc(tctDateTimeStr(x.timestamp))} TCT \u00B7 ${esc(x.source||'')}</small><button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(x._financialKey)}">Include in calculations</button></td><td data-label="Type">${esc(x._financialTypeLabel||financialTypeLabel(x))}</td><td data-label="Reason"><span class="tta-excludedbadge">${esc(x._financialReason||'Excluded')}</span></td><td data-label="Amount" class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':''}">${x.direction==='in'?'+':x.direction==='out'?'-':''}${money(x.amount)}</td></tr>`).join('')||'<tr><td colspan="4"><div class="tta-empty">No transactions are currently excluded.</div></td></tr>'}</tbody></table></div>
     </div>`;
   }
 
@@ -1876,7 +1876,7 @@
     const activeRules=Object.keys(rules).filter(k=>rules[k]).length,manual=Object.values(overrides).filter(v=>v==='exclude').length,forced=Object.values(overrides).filter(v=>v==='include').length;
     const rows=options.map(o=>{
       const excluded=!!rules[o.key];
-      return `<div class="tta-exclusion-rule"><div><strong>${esc(o.label)}</strong><small>${qty(o.count)} recorded interaction${o.count===1?'':'s'} · ${excluded?'Excluded by default':'Included by default'}</small></div><button class="tta-rule-toggle ${excluded?'active':''}" data-act="toggleFinancialRule" data-fin-type="${esc(o.key)}" aria-pressed="${excluded?'true':'false'}">${excluded?'Excluded':'Included'}</button></div>`;
+      return `<div class="tta-exclusion-rule"><div><strong>${esc(o.label)}</strong><small>${qty(o.count)} recorded interaction${o.count===1?'':'s'} \u00B7 ${excluded?'Excluded by default':'Included by default'}</small></div><button class="tta-rule-toggle ${excluded?'active':''}" data-act="toggleFinancialRule" data-fin-type="${esc(o.key)}" aria-pressed="${excluded?'true':'false'}">${excluded?'Excluded':'Included'}</button></div>`;
     }).join('');
 
     return `<section class="tta-fin-section tta-exclusion-settings"><div class="tta-sectionhead"><div><small>Calculations</small><h3>Financial exclusions</h3></div><button class="tta-btn secondary" data-act="excluded">View excluded transactions</button></div>
@@ -1925,10 +1925,10 @@
       <div class="tta-ledgerwrap"><table class="tta-flowtable tta-sales-table tta-compact-table" role="table" aria-label="Latest sales"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Sale</th><th role="columnheader" scope="col">Source</th><th role="columnheader" scope="col">Qty</th><th role="columnheader" scope="col">Net proceeds</th><th role="columnheader" scope="col">FIFO profit</th></tr></thead><tbody role="rowgroup">${rows.slice(0,limit).map(row=>{
         const key=row._financialKey||financialRecordKey(row),excluded=!!row._financialExcluded;
         const action=excluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(key)}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(key)}">Exclude</button>`;
-        const note=excluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+        const note=excluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
         const profit=Number(row.realizedProfit)||0;
         return `<tr role="row" class="${excluded?'tta-fin-excluded':''}">
-        <td role="cell" data-label="Sale"><strong>${esc(row.itemName)}</strong><small>${esc(tctDateTimeStr(row.timestamp))} TCT</small><small>#${row.itemId}${row.tradeId?' / trade #'+row.tradeId:''}</small><small class="tta-sales-compact-source">${esc(row.source)} · ${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small>${note}${action}</td>
+        <td role="cell" data-label="Sale"><strong>${esc(row.itemName)}</strong><small>${esc(tctDateTimeStr(row.timestamp))} TCT</small><small>#${row.itemId}${row.tradeId?' / trade #'+row.tradeId:''}</small><small class="tta-sales-compact-source">${esc(row.source)} \u00B7 ${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small>${note}${action}</td>
         <td role="cell" data-label="Source">${esc(row.source)}<small>${row.proceedsKnown===false?'Value unavailable':row.estimated?'Allocated estimate':'Recorded cash'}</small></td>
         <td role="cell" data-label="Qty" class="num">${qty(row.qty)}</td>
         <td role="cell" data-label="Net proceeds" class="num">${row.proceedsKnown===false?'Unavailable':money(row.netTotal??row.total)}</td>
@@ -1940,7 +1940,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.1',label:'Current',items:['Added a dedicated Transactions workspace showing recent recognized financial activity in one compact, searchable ledger.','Added compact filters for date range, flow direction, category and calculation status, plus stronger visual emphasis for incoming, outgoing and transfer rows.','Individual Include / Exclude controls are available directly on transaction rows; excluded rows remain visible and dimmed while Net Worth continues using complete history.']},
+      {version:'0.5.2',label:'Current',items:['Fixed Torn PDA character corruption in separators, transaction prefixes and other UI symbols by replacing runtime Unicode literals with encoding-safe escape sequences.','Scanned the full runtime source and removed every remaining raw non-ASCII character that could be mangled before JavaScript executes.','Added a build-time encoding guard so future releases fail validation if raw non-ASCII characters are reintroduced into runtime source, styles or metadata.']},
+      {version:'0.5.1',items:['Added a dedicated Transactions workspace showing recent recognized financial activity in one compact, searchable ledger.','Added compact filters for date range, flow direction, category and calculation status, plus stronger visual emphasis for incoming, outgoing and transfer rows.','Individual Include / Exclude controls are available directly on transaction rows; excluded rows remain visible and dimmed while Net Worth continues using complete history.']},
       {version:'0.5.0',items:['Added financial exclusion rules by transaction type plus per-transaction Include / Exclude overrides.','Excluded records stay visible for audit, are removed from Dashboard, Cash Flow, Trade Analysis, Acquisitions and related analytics, and can be reviewed from a dedicated Excluded Transactions workspace.','Net Worth deliberately ignores exclusion settings and continues using the complete stored financial history.']},
       {version:'0.4.4',items:['TCFA can now load and browse locally stored history in multiple Torn tabs while keeping sync/recovery writes exclusive to one tab.','Other tabs refresh durable Torn PDA/IndexedDB history after the active tab finishes syncing, importing a backup or resetting data, with focus/visibility refresh as a fallback.','During a Full Resync, secondary tabs show the last safe recovery snapshot instead of an empty or partially rebuilt history.']},
       {version:'0.4.3',items:['Added adaptive recovery for Torn User Log pages that return 99 dense records without a safe continuation cursor.','Ambiguous multi-log batches are split into smaller independent batches and restarted safely, while single-log boundaries receive an inclusive date verification before completion is accepted.','The analyzer still pauses rather than guessing if a 99-row boundary cannot be independently proven complete.']},
@@ -1957,7 +1958,7 @@
       {version:'0.3.1',items:['Restored the classic blue-green glass visual theme while keeping the v0.3.0 analysis fixes.']},
       {version:'0.3.0',label:'Major rebuild',items:['Rebuilt Trade Analysis around a single FIFO engine and clearer acquisition-attributed profit.','Added stronger data-quality diagnostics, freshness checks and transparent warnings for incomplete, inferred or unavailable values.','Reorganized the source into maintainable modules with automated validation and safer sync behavior.']}
     ];
-    return `${header("What's New",`Updates since v0.3.0 · current v${VERSION}`,true)}<div class="tta-content tta-updates"><div class="tta-update-intro"><strong>Release history</strong><p>This page highlights user-facing changes from the v0.3.0 rebuild onward. It focuses on behavior you can notice in the analyzer rather than internal refactors.</p></div><div class="tta-update-list">${releases.map(r=>`<section class="tta-update-release"><div class="tta-update-version"><b>v${esc(r.version)}</b>${r.label?`<span>${esc(r.label)}</span>`:''}</div><ul>${r.items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></section>`).join('')}</div></div>`;
+    return `${header("What's New",`Updates since v0.3.0 \u00B7 current v${VERSION}`,true)}<div class="tta-content tta-updates"><div class="tta-update-intro"><strong>Release history</strong><p>This page highlights user-facing changes from the v0.3.0 rebuild onward. It focuses on behavior you can notice in the analyzer rather than internal refactors.</p></div><div class="tta-update-list">${releases.map(r=>`<section class="tta-update-release"><div class="tta-update-version"><b>v${esc(r.version)}</b>${r.label?`<span>${esc(r.label)}</span>`:''}</div><ul>${r.items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></section>`).join('')}</div></div>`;
   }
 
 
