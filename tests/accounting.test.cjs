@@ -42,3 +42,51 @@ test('crime reward items and money project independently without counting quanti
 test('profit attribution stays on acquisition date, sold quantity stays on sale date',()=>{
   const now=Math.floor(Date.now()/1000),{app}=harness({stored:{catalog:[item],transactions:[tx('a','buy',now-10*86400,2,100),tx('b','sell',now-100,1,100)]}});app.state.dateMode='7d';const sum=app.summaryFor(206);assert.equal(sum.sold,1);assert.equal(sum.profit,0);assert.equal(app.acquisitionLedgerRows()[0].realizedProfit,50);
 });
+
+
+test('one received-money transaction can be excluded without excluding the others',()=>{
+  const flows=[
+    {id:'r1',timestamp:100,direction:'in',amount:1000,category:'Player Transfers',source:'Torn Log',title:'Money received from A'},
+    {id:'r2',timestamp:110,direction:'in',amount:2000,category:'Player Transfers',source:'Torn Log',title:'Money received from B'}
+  ];
+  const {app}=harness({stored:{cashFlows:flows}});
+  assert.equal(app.cashFlowSummary(0,1000).earned,3000);
+  app.setFinancialOverride('cash:r1','exclude');
+  const annotated=app.allCashFlows();
+  assert.equal(annotated.find(x=>x.id==='r1')._financialExcluded,true);
+  assert.equal(annotated.find(x=>x.id==='r2')._financialExcluded,false);
+  assert.equal(app.cashFlowSummary(0,1000).earned,2000);
+  const excluded=app.excludedFinancialRecords();
+  assert.equal(excluded.length,1);
+  assert.equal(excluded[0]._financialKey,'cash:r1');
+  assert.equal(excluded[0]._financialReason,'Excluded manually');
+});
+
+test('type exclusion can be overridden for one matching transaction',()=>{
+  const flows=[
+    {id:'r1',timestamp:100,direction:'in',amount:1000,category:'Player Transfers',source:'Torn Log',title:'Money received from A'},
+    {id:'r2',timestamp:110,direction:'in',amount:2000,category:'Player Transfers',source:'Torn Log',title:'Money received from B'}
+  ];
+  const {app}=harness({stored:{cashFlows:flows}});
+  app.setFinancialRule('player_money_received',true);
+  assert.equal(app.cashFlowSummary(0,1000).earned,0);
+  app.setFinancialOverride('cash:r2','include');
+  assert.equal(app.cashFlowSummary(0,1000).earned,2000);
+  const r1=app.financialExclusionStatus(flows[0]),r2=app.financialExclusionStatus(flows[1]);
+  assert.equal(r1.excluded,true);
+  assert.match(r1.reason,/Excluded by setting/);
+  assert.equal(r2.excluded,false);
+  assert.equal(r2.reason,'Manually included');
+});
+
+test('trade and acquisition analytics honor exclusions while raw Net Worth accounting keeps the full history',()=>{
+  const rows=[tx('a','buy',100,2,100),tx('b','sell',200,1,100)];
+  const {app}=harness({stored:{catalog:[item],transactions:rows}});
+  assert.equal(app.acquisitionLedgerRows().length,1);
+  assert.equal(app.rawAcquisitionLedgerRows().length,1);
+  app.setFinancialOverride('tx:a','exclude');
+  assert.equal(app.acquisitionLedgerRows().length,0);
+  assert.equal(app.rawAcquisitionLedgerRows().length,1);
+  assert.equal(app.analyzerPortfolio().acquiredCost,0);
+  assert.equal(app.analyzerPortfolio(true).acquiredCost,100);
+});
