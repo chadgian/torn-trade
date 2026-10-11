@@ -129,12 +129,16 @@
 
   function financialExclusionTypeOptions(records=[]) {
     const map=new Map(Object.entries(FINANCIAL_TYPE_LABELS).map(([key,label])=>[key,{key,label,count:0}]));
-    for(const record of records||[]){
-      const key=financialTypeKey(record),label=financialTypeLabel(key),row=map.get(key)||{key,label,count:0};row.count++;map.set(key,row);
-    }
-    for(const t of effectiveTransactions()){
-      const key=financialTypeKey(t),label=financialTypeLabel(key),row=map.get(key)||{key,label,count:0};row.count++;map.set(key,row);
-    }
+    const seen=new Set();
+    const add=record=>{
+      const typeKey=financialTypeKey(record);
+      const recordKey=financialRecordKey(record)||('anon:'+typeKey+':'+String(record?.timestamp||'')+':'+String(record?.amount??record?.total??''));
+      const unique=typeKey+'|'+recordKey;if(seen.has(unique))return;seen.add(unique);
+      const label=financialTypeLabel(typeKey),row=map.get(typeKey)||{key:typeKey,label,count:0};
+      row.count++;map.set(typeKey,row);
+    };
+    for(const record of records||[])add(record);
+    for(const t of effectiveTransactions())add(t);
     return [...map.values()].filter(x=>x.count>0||state.financialExclusionRules?.[x.key]).sort((a,b)=>a.label.localeCompare(b.label));
   }
 
