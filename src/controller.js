@@ -23,7 +23,7 @@
   }
   function navigate(view,options={}) {
     for(const key of ['searchTimer','ledgerSearchTimer','legacySearchTimer'])clearTimeout(perfCache[key]);
-    return withTransition('Opening '+({cash:'Cash Flow',trade:'Trade Analysis',networth:'Net Worth',ledger:'Acquisition Ledger',diagnostics:'Data Quality',dashboard:'Dashboard',settings:'Settings',help:'Help',updates:"What's New",insights:'Insights'}[view]||'view'),()=>{
+    return withTransition('Opening '+({cash:'Cash Flow',trade:'Trade Analysis',networth:'Net Worth',ledger:'Acquisition Ledger',excluded:'Excluded Transactions',diagnostics:'Data Quality',dashboard:'Dashboard',settings:'Settings',help:'Help',updates:"What's New",insights:'Insights'}[view]||'view'),()=>{
       state.view=view;if(view==='ledger')state.ledgerLimit=200;state.search='';render({preserveScroll:false,...options});
     });
   }
@@ -72,7 +72,7 @@
     root.classList.add('show');root.setAttribute('aria-hidden','false');
     const wasDemo=state.demo;state.demo=!hasApiKey()&&![state.transactions,state.cashFlows,state.playerTrades,state.financialSnapshots,state.tracked].some(rows=>rows.length);if(wasDemo!==state.demo)resetAnalyticsCache();
     if(state.demo&&!state.catalog.length)state.catalog=demoCatalog();
-    const html=state.view==='diagnostics'?diagnosticsHtml():state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='help'?helpHtml():state.view==='updates'?updatesHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='insights'?insightsHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml();
+    const html=state.view==='diagnostics'?diagnosticsHtml():state.view==='add'?addItemHtml():state.view==='settings'?settingsHtml():state.view==='help'?helpHtml():state.view==='updates'?updatesHtml():state.view==='ledger'?ledgerHtml():state.view==='cash'?cashFlowHtml():state.view==='excluded'?excludedTransactionsHtml():state.view==='insights'?insightsHtml():state.view==='networth'?netWorthHtml():state.view==='trade'?tradeHtml():dashboardHtml();
     const content=html.replace(/(<div class="tta-content[^"]*">)/,`$1${state.view==='diagnostics'?'':qualityHtml()}`);
     root.innerHTML=`<div class="tta-shell">${content}</div>${loadingHtml()}${transitionHtml()}<div id="tta-toast" role="status" class="tta-toast ${state.toast?'show':''}">${esc(state.toast||'')}</div>`;
     state.renderPending=false;
@@ -147,12 +147,18 @@
       if(act==='close'){cancelTransition();state.open=false;if(!state.syncing)setBusy(false);render();}
       else if(act==='minimizeSync'){cancelTransition();state.open=false;render();}
       else if(act==='back'){await navigate(state.view==='ledger'?'trade':state.view==='updates'?'settings':'dashboard');}
-      else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth'].includes(act)){await navigate(act);}
+      else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth','excluded'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}
       else if(act==='clearDiagnostics'){state.notices=[];save('notices',[]);render();}
       else if(act==='tradeTab'){await withTransition('Updating Trade Analysis',()=>{state.tradeTab=el.dataset.tab;render();});}
       else if(act==='salesMore'){state.salesLimit=(state.salesLimit||100)+100;await withTransition('Loading sales',()=>render());}
       else if(act==='cashMore'){state.cashLimit=(state.cashLimit||200)+200;await withTransition('Loading cash activity',()=>render());}
+      else if(act==='excludedFilter'){state.excludedViewFilter=String(el.dataset.filter||'all');save('excludedViewFilter',state.excludedViewFilter);render();}
+      else if(act==='toggleFinancialRule'){const key=String(el.dataset.finType||'');if(key){setFinancialRule(key,!state.financialExclusionRules?.[key]);render();toast(state.financialExclusionRules?.[key]?'Financial type excluded from analytics.':'Financial type restored to analytics.');}}
+      else if(act==='clearFinancialRules'){clearFinancialRules();render();toast('Financial type exclusions cleared.');}
+      else if(act==='clearFinancialOverrides'){clearFinancialOverrides();render();toast('Individual financial overrides cleared.');}
+      else if(act==='excludeFinancial'){const key=String(el.dataset.finKey||'');if(key){setFinancialOverride(key,'exclude');render();toast('Transaction excluded from financial calculations.');}}
+      else if(act==='includeFinancial'){const key=String(el.dataset.finKey||'');if(key){setFinancialOverride(key,'include');render();toast('Transaction included in financial calculations.');}}
       else if(act==='cashflow'){await navigate('cash');}
       else if(act==='netWorthToday'){state.netWorthDate=tctInputDate(nowSec());save('netWorthDate',state.netWorthDate);await withTransition('Updating Net Worth',()=>render({preserveScroll:true}));}
       else if(act==='refreshFinancial'){const snap=await withBusy('Refreshing finances','Loading current Torn money and net-worth snapshots\u2026',async()=>refreshFinancialSnapshot());render();toast(snap?'Financial snapshot updated. See Data Quality for any missing fields.':'Snapshot unavailable. See Data Quality.');}
@@ -207,7 +213,7 @@
       }
       else if(act==='resetData'&&confirm('Reset all Torn Cash Flow Analyzer financial history, trade history and local snapshots?')){
         await clearFullResyncBackup();
-        await clearStoredKeys(['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','catalog','catalogVersion','catalogUpdatedAt','logTypes','logTypesUpdatedAt','pinnedIds','hiddenIds','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir']);state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();announceCrossTabUpdate('reset');render();toast('Analyzer data reset.');
+        await clearStoredKeys(['tracked','transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','goals','financialSnapshots','sync','syncJob','syncCache','fullResyncBackup','catalog','catalogVersion','catalogUpdatedAt','logTypes','logTypesUpdatedAt','pinnedIds','hiddenIds','financialExclusionRules','financialOverrides','excludedViewFilter','itemSearch','sortMode','ledgerSearch','ledgerSource','ledgerStatus','ledgerRange','ledgerSort','ledgerSortDir']);state.tracked=[];state.transactions=[];state.cashFlows=[];state.playerTransfers=[];state.playerTrades=[];state.itemConsumptions=[];state.unrecognizedFinancial=[];state.goals=[];state.financialSnapshots=[];state.pinnedIds=[];state.hiddenIds=[];state.financialExclusionRules={};state.financialOverrides={};state.excludedViewFilter='all';state.itemSearch='';state.sortMode='recent';state.ledgerSearch='';state.ledgerSource='all';state.ledgerStatus='all';state.ledgerRange='all';state.ledgerSort='acquiredAt';state.ledgerSortDir='desc';state.ledgerLimit=200;state.sync={lastSync:0,firstSyncComplete:false};state.logTypesUpdatedAt=0;state.expanded=null;syncCacheMem=null;resetAnalyticsCache();announceCrossTabUpdate('reset');render();toast('Analyzer data reset.');
       }
       }catch(error){diagnosticFromError(error);setBusy(false);render();toast('Action failed. See Data Quality for details.');}
     });

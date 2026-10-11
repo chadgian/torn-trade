@@ -490,3 +490,30 @@
   #tta-root .tta-nw-actions{display:flex}
   #tta-root .tta-nw-actions .tta-btn{width:auto}
 }
+
+
+/* Financial exclusions */
+.tta-fin-excluded{opacity:.52}
+.tta-fin-excluded td{background:color-mix(in srgb,var(--panel,#111827) 84%,transparent)}
+.tta-excludedbadge{display:inline-flex;align-items:center;width:max-content;max-width:100%;margin-top:5px;padding:3px 7px;border:1px solid rgba(245,158,11,.38);border-radius:999px;background:rgba(245,158,11,.10);color:#f6c86a;font-size:10px;font-weight:700;line-height:1.2}
+.tta-rowaction{display:inline-flex;align-items:center;justify-content:center;margin-top:6px;padding:5px 8px;border:1px solid rgba(148,163,184,.34);border-radius:8px;background:rgba(15,23,42,.55);color:#dbe7ef;font-size:10px;font-weight:700;cursor:pointer}
+.tta-rowaction:hover,.tta-rowaction:focus-visible{border-color:rgba(56,189,248,.62);color:#fff;outline:none}
+.tta-inline-link{display:inline;padding:0;border:0;background:transparent;color:#7dd3fc;text-decoration:underline;text-underline-offset:2px;font:inherit;cursor:pointer}
+.tta-exclusion-settings .tta-note strong{color:#dff8ec}
+.tta-exclusion-stats{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
+.tta-exclusion-stats span{padding:5px 8px;border:1px solid rgba(148,163,184,.2);border-radius:999px;background:rgba(15,23,42,.45);color:#aebfca;font-size:10px}
+.tta-exclusion-rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.tta-exclusion-rule{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:10px;border:1px solid rgba(148,163,184,.20);border-radius:11px;background:rgba(15,23,42,.38)}
+.tta-exclusion-rule>div{min-width:0}
+.tta-exclusion-rule strong,.tta-exclusion-rule small{display:block}
+.tta-exclusion-rule strong{color:#edf6fa;font-size:11px}
+.tta-exclusion-rule small{margin-top:2px;color:#8fa3b0;font-size:9px;line-height:1.35}
+.tta-rule-toggle{flex:0 0 auto;min-width:76px;padding:6px 8px;border:1px solid rgba(74,222,128,.30);border-radius:9px;background:rgba(34,197,94,.10);color:#9ee6b8;font-size:10px;font-weight:800;cursor:pointer}
+.tta-rule-toggle.active{border-color:rgba(248,113,113,.42);background:rgba(239,68,68,.12);color:#ffaaaa}
+.tta-excluded-page .tta-ledgerwrap{margin-top:10px}
+.tta-excluded-page .tta-flowtable td small{display:block;margin-top:3px;color:#8fa3b0}
+@media(max-width:700px){
+  .tta-exclusion-rules{grid-template-columns:1fr}
+  .tta-exclusion-rule{padding:9px}
+  .tta-rule-toggle{min-width:70px}
+}

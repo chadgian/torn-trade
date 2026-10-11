@@ -5,10 +5,11 @@
   };
 
   function resetAnalyticsCache() {
-    perfCache.txRef=null;perfCache.byItem=new Map();perfCache.lastById=new Map();perfCache.itemIds=[];
+    perfCache.txRef=null;perfCache.rawTxRef=null;perfCache.exclusionSignature='';perfCache.byItem=new Map();perfCache.lastById=new Map();perfCache.itemIds=[];
     perfCache.fifo.clear();perfCache.summaries.clear();perfCache.series.clear();perfCache.overall.clear();
     perfCache.trackedTxRef=null;perfCache.trackedCatalogRef=null;perfCache.tracked=[];
     perfCache.ledgerTxRef=null;perfCache.ledgerRows=[];perfCache.ledgerByItem=new Map();
+    if(typeof rawFifoCache!=='undefined'){rawFifoCache.txRef=null;rawFifoCache.transferRef=null;rawFifoCache.consumeRef=null;rawFifoCache.rows.clear();}
   }
 
   function effectiveTransactions() {
@@ -17,9 +18,142 @@
     return demoTxCache;
   }
 
+  const FINANCIAL_TYPE_LABELS={
+    player_money_received:'Money received from players',
+    player_money_sent:'Money sent to players',
+    player_trades:'Player Trade interactions',
+    item_purchases:'Item / inventory purchases',
+    item_sales:'Item / market sales',
+    travel_trading:'Foreign market / travel trading',
+    fees_taxes:'Fees / taxes',
+    wages_job:'Wages / job income',
+    points:'Points market',
+    faction_income:'Faction income / payouts',
+    company_profit_loss:'Company profit / loss',
+    internal_transfers:'Internal transfers'
+  };
+
+  function financialSlug(value) {
+    return String(value||'other').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'other';
+  }
+
+  function transactionFinancialKey(t) {
+    if(!t)return '';
+    if(String(t.source||'')==='Player Trade'&&Number(t.tradeId)>0)return 'trade:'+String(t.tradeId);
+    return 'tx:'+String(t.id??'');
+  }
+
+  function financialRecordKey(record) {
+    if(!record)return '';
+    if(record._financialKey)return String(record._financialKey);
+    if(record.side)return transactionFinancialKey(record);
+    const id=String(record.id??'');
+    let m=id.match(/^txcash:(.*):(buy|sell|fee)$/);if(m)return 'tx:'+m[1];
+    m=id.match(/^tradecash:([^:]+):(in|out)$/);if(m)return 'trade:'+m[1];
+    return 'cash:'+id;
+  }
+
+  function financialTypeKey(record) {
+    if(!record)return 'other';
+    const source=String(record.source||'');
+    const category=String(record.category||'');
+    const direction=String(record.direction||'');
+    const side=String(record.side||'');
+
+    if(source==='Player Trade'||category==='Player Trades')return 'player_trades';
+    if(category==='Player Transfers')return direction==='in'?'player_money_received':direction==='out'?'player_money_sent':'category:player-transfers';
+    if(category==='Item Purchases')return 'item_purchases';
+    if(category==='Item Sales')return 'item_sales';
+    if(category==='Travel Trading')return 'travel_trading';
+    if(category==='Fees / Taxes')return 'fees_taxes';
+    if(category==='Wages / Job')return 'wages_job';
+    if(category==='Points')return 'points';
+    if(category==='Faction Income')return 'faction_income';
+    if(category==='Company Profit / Loss')return 'company_profit_loss';
+    if(direction.startsWith('transfer')||record.transfer)return 'internal_transfers';
+
+    if(side==='buy'){
+      if(source==='Foreign Market')return 'travel_trading';
+      return 'item_purchases';
+    }
+    if(side==='sell')return 'item_sales';
+
+    if(category)return 'category:'+financialSlug(category);
+    if(source)return 'source:'+financialSlug(source);
+    return 'other';
+  }
+
+  function financialTypeLabel(recordOrKey) {
+    const key=typeof recordOrKey==='string'?recordOrKey:financialTypeKey(recordOrKey);
+    if(FINANCIAL_TYPE_LABELS[key])return FINANCIAL_TYPE_LABELS[key];
+    if(key.startsWith('category:'))return key.slice(9).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):'').join(' ');
+    if(key.startsWith('source:'))return key.slice(7).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):'').join(' ');
+    return key==='other'?'Other financial activity':key;
+  }
+
+  function financialExclusionStatus(record) {
+    const key=financialRecordKey(record),typeKey=financialTypeKey(record),overrides=state.financialOverrides||{},rules=state.financialExclusionRules||{};
+    const override=String(overrides[key]||'');
+    if(override==='include')return {excluded:false,key,typeKey,label:financialTypeLabel(typeKey),reason:'Manually included',override};
+    if(override==='exclude')return {excluded:true,key,typeKey,label:financialTypeLabel(typeKey),reason:'Excluded manually',override};
+    if(rules[typeKey])return {excluded:true,key,typeKey,label:financialTypeLabel(typeKey),reason:'Excluded by setting: '+financialTypeLabel(typeKey),override:''};
+    return {excluded:false,key,typeKey,label:financialTypeLabel(typeKey),reason:'Included',override:''};
+  }
+
+  function annotateFinancialRecord(record) {
+    const status=financialExclusionStatus(record);
+    return {...record,_financialKey:status.key,_financialType:status.typeKey,_financialTypeLabel:status.label,_financialExcluded:status.excluded,_financialReason:status.reason,_financialOverride:status.override};
+  }
+
+  function setFinancialOverride(key,mode) {
+    key=String(key||'');if(!key)return;
+    const next={...(state.financialOverrides||{})};
+    if(mode==='include'||mode==='exclude')next[key]=mode;else delete next[key];
+    state.financialOverrides=next;save('financialOverrides',next);resetAnalyticsCache();
+  }
+
+  function setFinancialRule(typeKey,excluded) {
+    typeKey=String(typeKey||'');if(!typeKey)return;
+    const next={...(state.financialExclusionRules||{})};
+    if(excluded)next[typeKey]=true;else delete next[typeKey];
+    state.financialExclusionRules=next;save('financialExclusionRules',next);resetAnalyticsCache();
+  }
+
+  function clearFinancialOverrides() {
+    state.financialOverrides={};save('financialOverrides',{});resetAnalyticsCache();
+  }
+
+  function clearFinancialRules() {
+    state.financialExclusionRules={};save('financialExclusionRules',{});resetAnalyticsCache();
+  }
+
+  function financialExclusionTypeOptions(records=[]) {
+    const map=new Map(Object.entries(FINANCIAL_TYPE_LABELS).map(([key,label])=>[key,{key,label,count:0}]));
+    const seen=new Set();
+    const add=record=>{
+      const typeKey=financialTypeKey(record);
+      const recordKey=financialRecordKey(record)||('anon:'+typeKey+':'+String(record?.timestamp||'')+':'+String(record?.amount??record?.total??''));
+      const unique=typeKey+'|'+recordKey;if(seen.has(unique))return;seen.add(unique);
+      const label=financialTypeLabel(typeKey),row=map.get(typeKey)||{key:typeKey,label,count:0};
+      row.count++;map.set(typeKey,row);
+    };
+    for(const record of records||[])add(record);
+    for(const t of effectiveTransactions())add(t);
+    return [...map.values()].filter(x=>x.count>0||state.financialExclusionRules?.[x.key]).sort((a,b)=>a.label.localeCompare(b.label));
+  }
+
+  function analysisTransactions() {
+    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded);
+  }
+
+  function financialExclusionSignature() {
+    return JSON.stringify([state.financialExclusionRules||{},state.financialOverrides||{}]);
+  }
+
   function ensureTxIndex() {
-    const tx=effectiveTransactions();
-    if(perfCache.txRef===tx)return perfCache;
+    const raw=effectiveTransactions(),signature=financialExclusionSignature();
+    if(perfCache.rawTxRef===raw&&perfCache.exclusionSignature===signature)return perfCache;
+    const tx=analysisTransactions();
     const byItem=new Map(),lastById=new Map();
     for(const t of tx){
       const id=Number(t?.itemId);if(!(id>0))continue;
@@ -28,7 +162,7 @@
       const ts=Number(t?.timestamp)||0;if(ts>(lastById.get(id)||0))lastById.set(id,ts);
     }
     for(const rows of byItem.values())rows.sort((a,b)=>a.timestamp-b.timestamp||String(a.id).localeCompare(String(b.id)));
-    perfCache.txRef=tx;perfCache.byItem=byItem;perfCache.lastById=lastById;perfCache.itemIds=[...byItem.keys()];
+    perfCache.txRef=tx;perfCache.rawTxRef=raw;perfCache.exclusionSignature=signature;perfCache.byItem=byItem;perfCache.lastById=lastById;perfCache.itemIds=[...byItem.keys()];
     perfCache.fifo.clear();perfCache.summaries.clear();perfCache.series.clear();perfCache.overall.clear();
     perfCache.trackedTxRef=null;perfCache.trackedCatalogRef=null;perfCache.tracked=[];
     return perfCache;
@@ -141,6 +275,35 @@
     const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));perfCache.fifo.set(id,result);return result;
   }
 
+  const rawFifoCache={txRef:null,transferRef:null,consumeRef:null,rows:new Map()};
+  function rawFifoAnalytics(itemId) {
+    const txRef=effectiveTransactions(),transferRef=state.playerTransfers,consumeRef=state.itemConsumptions;
+    if(rawFifoCache.txRef!==txRef||rawFifoCache.transferRef!==transferRef||rawFifoCache.consumeRef!==consumeRef){rawFifoCache.txRef=txRef;rawFifoCache.transferRef=transferRef;rawFifoCache.consumeRef=consumeRef;rawFifoCache.rows.clear();}
+    const id=Number(itemId);if(rawFifoCache.rows.has(id))return rawFifoCache.rows.get(id);
+    const tx=txRef.filter(x=>Number(x?.itemId)===id);
+    const sent=(state.playerTransfers||[]).filter(x=>x?.type==='item'&&x?.direction==='out'&&Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`transfer:${x.id}`,side:'transfer-out',total:0,netTotal:0,source:'Player Transfer'}));
+    const consumed=(state.itemConsumptions||[]).filter(x=>Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`consume:${x.id}`,side:'consume-out',total:0,netTotal:0,source:'Item Use'}));
+    const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));rawFifoCache.rows.set(id,result);return result;
+  }
+
+  function rawAcquisitionLedgerRows() {
+    const itemIds=new Set(effectiveTransactions().map(x=>Number(x?.itemId)).filter(x=>x>0));
+    for(const t of state.playerTransfers||[])if(t?.type==='item'&&t?.direction==='out'&&Number(t.itemId)>0)itemIds.add(Number(t.itemId));
+    for(const t of state.itemConsumptions||[])if(Number(t?.itemId)>0)itemIds.add(Number(t.itemId));
+    const rows=[];for(const id of itemIds)rows.push(...rawFifoAnalytics(id).ledger);
+    return rows.sort((a,b)=>b.acquiredAt-a.acquiredAt||String(b.id).localeCompare(String(a.id)));
+  }
+
+  function excludedAcquisitionLedgerRows() {
+    const rows=[];
+    for(const row of rawAcquisitionLedgerRows()){
+      const probe={id:row.id,side:'buy',source:row.source,title:row.title,itemId:row.itemId,timestamp:row.acquiredAt,total:row.costTotal};
+      const status=financialExclusionStatus(probe);if(!status.excluded)continue;
+      rows.push({...row,_financialExcluded:true,_financialKey:status.key,_financialType:status.typeKey,_financialTypeLabel:status.label,_financialReason:status.reason,_financialOverride:status.override});
+    }
+    return rows;
+  }
+
   function acquisitionMethod(t) {
     const source=String(t?.source||''),text=`${source} ${t?.title||''}`.toLowerCase();
     if(source==='Player Trade')return 'Player Trade';
@@ -184,7 +347,7 @@
 
   function filteredLedgerRows() {
     const q=String(state.ledgerSearch||'').trim().toLowerCase(),source=String(state.ledgerSource||'all'),status=String(state.ledgerStatus||'all'),range=ledgerRangeBounds();
-    const rows=acquisitionLedgerRows().filter(row=>{
+    const rows=[...acquisitionLedgerRows(),...excludedAcquisitionLedgerRows()].filter(row=>{
       if(row.acquiredAt<range.from||row.acquiredAt>range.to)return false;
       if(source!=='all'&&row.method!==source)return false;
       if(status!=='all'&&row.status!==status)return false;
@@ -204,16 +367,18 @@
   }
 
   function ledgerSortArrow(key){return state.ledgerSort===key?(state.ledgerSortDir==='asc'?' \u2191':' \u2193'):'';}
-  function ledgerMethodOptions(){return [...new Set(acquisitionLedgerRows().map(x=>x.method).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
-  function ledgerSummary(rows){return {lots:rows.length,qty:rows.reduce((n,x)=>n+x.qty,0),sold:rows.reduce((n,x)=>n+x.soldQty,0),profit:rows.reduce((n,x)=>n+x.realizedProfit,0)};}
+  function ledgerMethodOptions(){return [...new Set([...acquisitionLedgerRows(),...excludedAcquisitionLedgerRows()].map(x=>x.method).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
+  function ledgerSummary(rows){const included=rows.filter(x=>!x._financialExcluded);return {lots:included.length,qty:included.reduce((n,x)=>n+x.qty,0),sold:included.reduce((n,x)=>n+x.soldQty,0),profit:included.reduce((n,x)=>n+x.realizedProfit,0)};}
 
   function ledgerRowHtml(row) {
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
     const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
-    return `<tr role="row">
+    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+    const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Exclude</button>`;
+    return `<tr role="row" class="${row._financialExcluded?'tta-fin-excluded':''}">
       <td role="cell" data-label="Date / time"><strong>${esc(dateTimeStr(row.acquiredAt))}</strong></td>
-      <td role="cell" data-label="Item" class="tta-ledgeritem"><strong>${esc(row.itemName)}</strong><small>#${row.itemId} \u00B7 ${esc(row.itemType)}</small><small class="tta-ledger-compact-meta">${esc(dateTimeStr(row.acquiredAt))} \u00B7 ${esc(row.method)}</small><small class="tta-ledger-mobile-status"><span class="tta-statuspill ${row.status}">${row.status==='sold'?'Sold':row.status==='transferred'?'Transferred':row.status==='consumed'?'Consumed':row.status==='depleted'?'Depleted':row.status==='partial'?'Partial':'Unsold'}</span> \u00B7 Sold ${qty(row.soldQty)}/${qty(row.qty)}${row.soldQty?' \u00B7 '+esc(money(row.soldProceeds)):''}</small></td>
+      <td role="cell" data-label="Item" class="tta-ledgeritem"><strong>${esc(row.itemName)}</strong><small>#${row.itemId} \u00B7 ${esc(row.itemType)}</small><small class="tta-ledger-compact-meta">${esc(dateTimeStr(row.acquiredAt))} \u00B7 ${esc(row.method)}</small><small class="tta-ledger-mobile-status"><span class="tta-statuspill ${row.status}">${row.status==='sold'?'Sold':row.status==='transferred'?'Transferred':row.status==='consumed'?'Consumed':row.status==='depleted'?'Depleted':row.status==='partial'?'Partial':'Unsold'}</span> \u00B7 Sold ${qty(row.soldQty)}/${qty(row.qty)}${row.soldQty?' \u00B7 '+esc(money(row.soldProceeds)):''}</small>${exclusionNote}${exclusionAction}</td>
       <td role="cell" data-label="Qty" class="num">${qty(row.qty)}</td>
       <td role="cell" data-label="Acquired via" class="tta-ledgermethod"><strong>${esc(row.method)}</strong><small>${esc(row.source||row.title||'Recorded acquisition')}</small></td>
       <td role="cell" data-label="Bought for" class="num">${esc(costText)}<br><small>${row.qty?esc(money(row.unitCost))+'/ea':''}</small></td>
@@ -247,7 +412,7 @@
     const rows=filteredLedgerRows(),sum=ledgerSummary(rows),methods=ledgerMethodOptions(),limit=Math.max(1,Number(state.ledgerLimit)||200),shown=Math.min(limit,rows.length);
     const sortTh=(key,label)=>`<th scope="col" role="columnheader"><button data-act="ledgerSort" data-key="${key}" data-label="${esc(label)}" class="${state.ledgerSort===key?'active':''}">${esc(label)}${ledgerSortArrow(key)}</button></th>`;
     return `${header('Acquisition History','FIFO lot ledger \u00B7 cached acquisition and sale history',true)}<div class="tta-content">
-      <div class="tta-ledgerintro"><div><strong>Acquisition ledger</strong><small>Each row is one recorded acquisition lot. Later sales are matched back to it using the same FIFO method as the dashboard. Realized profit is attributed to this acquisition date, not the later sale date.</small></div></div>
+      <div class="tta-ledgerintro"><div><strong>Acquisition ledger</strong><small>Each row is one included acquisition lot. Excluded transactions are removed from FIFO calculations and remain available in Excluded Transactions. Later sales are matched back to it using the same FIFO method as the dashboard. Realized profit is attributed to this acquisition date, not the later sale date.</small></div></div>
       <div class="tta-ledgerfilters"><div class="tta-searchwrap tta-ledgersearch"><span class="tta-searchglyph">\u2315</span><input id="tta-ledger-search" class="tta-history-search" placeholder="Search item, ID, source or sale method\u2026" value="${esc(state.ledgerSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearLedgerSearch" aria-label="Clear ledger search" ${state.ledgerSearch?'':'hidden'}>\u00D7</button></div><select data-ledger-filter="source"><option value="all">All acquisition types</option>${methods.map(x=>`<option value="${esc(x)}" ${state.ledgerSource===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select data-ledger-filter="status"><option value="all" ${state.ledgerStatus==='all'?'selected':''}>All sale statuses</option><option value="sold" ${state.ledgerStatus==='sold'?'selected':''}>Sold</option><option value="partial" ${state.ledgerStatus==='partial'?'selected':''}>Partial</option><option value="unsold" ${state.ledgerStatus==='unsold'?'selected':''}>Unsold</option><option value="consumed" ${state.ledgerStatus==='consumed'?'selected':''}>Consumed</option><option value="depleted" ${state.ledgerStatus==='depleted'?'selected':''}>Depleted</option></select><select data-ledger-filter="range"><option value="all" ${state.ledgerRange==='all'?'selected':''}>All cached history</option><option value="7d" ${state.ledgerRange==='7d'?'selected':''}>Last 7 days</option><option value="14d" ${state.ledgerRange==='14d'?'selected':''}>Last 14 days</option><option value="30d" ${state.ledgerRange==='30d'?'selected':''}>Last 30 days</option><option value="dashboard" ${state.ledgerRange==='dashboard'?'selected':''}>Dashboard period</option></select></div>
       <div class="tta-ledgersummary"><div class="tta-ministat"><small>Acquisition lots</small><b id="tta-ledger-lots">${qty(sum.lots)}</b></div><div class="tta-ministat"><small>Items acquired</small><b id="tta-ledger-qty">${qty(sum.qty)}</b></div><div class="tta-ministat"><small>FIFO units sold</small><b id="tta-ledger-sold">${qty(sum.sold)}</b></div><div class="tta-ministat"><small>Realized profit</small><b id="tta-ledger-profit" class="${sum.profit>=0?'pos':'neg'}">${money(sum.profit,true)}</b></div></div>
       <div class="tta-ledgermeta"><span id="tta-ledger-meta">Showing ${qty(shown)} of ${qty(rows.length)} acquisition lots</span><span>Tap a column heading to sort</span></div>

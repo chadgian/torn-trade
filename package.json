@@ -1,6 +1,6 @@
 {
   "name": "torn-cash-flow-analyzer",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "build": "node tools/build.cjs",
@@ -8,5 +8,7 @@
     "test": "node --test",
     "preview": "node tools/preview.cjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

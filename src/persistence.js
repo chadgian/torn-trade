@@ -1,4 +1,4 @@
-  const BACKUP_KEYS=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','sync','dateMode','customFrom','customTo','granularity','netWorthDate','netWorthTrackingStartedAt'];
+  const BACKUP_KEYS=['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','goals','tracked','pinnedIds','hiddenIds','financialExclusionRules','financialOverrides','excludedViewFilter','sync','dateMode','customFrom','customTo','granularity','netWorthDate','netWorthTrackingStartedAt'];
   const IMPORT_CLEAR_KEYS=['syncJob','syncCache','fullResyncBackup'];
   let historyRecoveryReady=Promise.resolve();
   let historyRecoveryFailed=false;
