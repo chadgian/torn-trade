@@ -374,7 +374,7 @@
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
     const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
-    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} · not included in calculations</span>`:'';
+    const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
     const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Exclude</button>`;
     return `<tr role="row" class="${row._financialExcluded?'tta-fin-excluded':''}">
       <td role="cell" data-label="Date / time"><strong>${esc(dateTimeStr(row.acquiredAt))}</strong></td>
