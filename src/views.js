@@ -42,7 +42,7 @@
   }
 
   function header(title, sub, back=false) {
-    const views=[['dashboard','Overview','dashboard','\u2302'],['cash','Cash Flow','cashflow','\u2195'],['trade','Trade Analysis','trade','\u25C7'],['ledger','Acquisitions','ledger','\u2637'],['excluded','Excluded','excluded','\u2298'],['networth','Net Worth','networth','\u25C8'],['insights','Insights & Goals','insights','\u25CE']];
+    const views=[['dashboard','Overview','dashboard','\u2302'],['transactions','Transactions','transactions','\u2630'],['cash','Cash Flow','cashflow','\u2195'],['trade','Trade Analysis','trade','\u25C7'],['ledger','Acquisitions','ledger','\u2637'],['excluded','Excluded','excluded','\u2298'],['networth','Net Worth','networth','\u25C8'],['insights','Insights & Goals','insights','\u25CE']];
     const primary=views.some(([view])=>state.view===view);
     const nav=primary?`<nav class="tta-workspaces" aria-label="Financial workspaces">${views.map(([view,label,action,icon])=>`<button data-act="${action}" aria-current="${state.view===view?'page':'false'}"><span class="tta-navicon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav>`:'';
     return `<div class="tta-header ${primary?'primary':'utility'}">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">\u2039</button>':''}<div class="tta-brand"><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div><button class="tta-iconbtn" data-act="help" aria-label="Help and guide" title="Help">?</button><button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">\u2699</button><button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">\u00D7</button></div>${nav}`;
@@ -218,6 +218,78 @@
       const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(status)} · not included in calculations</span>`:'';
       return `<tr role="row" class="${excluded?'tta-fin-excluded':''}"><td role="cell" data-label="Event"><span class="tta-flowtitle">${esc(x.title||x.category)}</span><span class="tta-cash-compact-flow tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span>${detail?`<span class="tta-flowmeta">${esc(detail)}</span>`:''}<span class="tta-flowmeta">${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category)}</span>${excludedNote}${action}</td><td role="cell" data-label="Flow"><span class="tta-flowbadge ${x.direction.startsWith('transfer')?'transfer':x.direction}">${x.direction.startsWith('transfer')?'Transfer':x.direction==='in'?'Incoming':'Outgoing'}</span></td><td role="cell" data-label="Category">${esc(x.category)}</td><td role="cell" data-label="Amount" class="num ${x.direction==='in'?'pos':x.direction==='out'?'neg':'tta-transfer'}">${x.direction==='in'?'+':x.direction==='out'?'-':'↔ '}${money(x.amount)}</td></tr>`;
     }).join('')||'<tr role="row"><td role="cell" colspan="4"><div class="tta-empty">No recognized cash flows match this period.</div></td></tr>';
+  }
+
+
+  function transactionRangeBounds() {
+    const to=nowSec(),mode=String(state.transactionRange||'30d');
+    const days=mode==='7d'?7:mode==='14d'?14:mode==='30d'?30:mode==='90d'?90:0;
+    return {from:days?Math.max(0,to-days*86400):0,to};
+  }
+
+  function filteredTransactionRows() {
+    const bounds=transactionRangeBounds(),q=String(state.transactionSearch||'').trim().toLowerCase();
+    const flow=String(state.transactionFlow||'all'),category=String(state.transactionCategory||'all'),status=String(state.transactionStatus||'all');
+    return allCashFlows().filter(x=>{
+      const ts=Number(x.timestamp)||0;if(ts<bounds.from||ts>bounds.to)return false;
+      const direction=String(x.direction||'');
+      if(flow==='in'&&direction!=='in')return false;
+      if(flow==='out'&&direction!=='out')return false;
+      if(flow==='transfer'&&!direction.startsWith('transfer'))return false;
+      if(category!=='all'&&String(x.category||'')!==category)return false;
+      if(status==='included'&&x._financialExcluded)return false;
+      if(status==='excluded'&&!x._financialExcluded)return false;
+      if(q){
+        const hay=[x.title,flowDetailText(x),x.itemName,x.itemId,x.category,x.source,x.counterpartyName,x.counterpartyId,x.tradeId,x.amount,x.id].filter(v=>v!==undefined&&v!==null).join(' ').toLowerCase();
+        if(!hay.includes(q))return false;
+      }
+      return true;
+    });
+  }
+
+  function transactionFlowInfo(x) {
+    const direction=String(x?.direction||'');
+    if(direction.startsWith('transfer'))return {cls:'transfer',label:'Transfer',prefix:'↔ '};
+    if(direction==='in')return {cls:'in',label:'Incoming',prefix:'+'};
+    return {cls:'out',label:'Outgoing',prefix:'−'};
+  }
+
+  function transactionRowsHtml(rows,limit=150) {
+    return rows.slice(0,limit).map(x=>{
+      const excluded=!!x._financialExcluded,key=x._financialKey||financialRecordKey(x),flow=transactionFlowInfo(x),detail=flowDetailText(x);
+      const counterparty=x.counterpartyName?`${x.counterpartyName}${x.counterpartyId?` [${x.counterpartyId}]`:''}`:'';
+      const action=excluded
+        ? `<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(key)}">Include</button>`
+        : `<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(key)}">Exclude</button>`;
+      const excludedNote=excluded?`<span class="tta-excludedbadge">${esc(x._financialReason||'Excluded')} · not included in calculations</span>`:'';
+      return `<tr role="row" class="tta-transaction-row tta-tx-${flow.cls} ${excluded?'tta-fin-excluded':''}">
+        <td role="cell" data-label="Transaction"><div class="tta-transaction-head"><span class="tta-flowbadge ${flow.cls}">${flow.label}</span><strong>${esc(x.title||x.category||'Financial activity')}</strong></div>
+          ${detail?`<small>${esc(detail)}</small>`:''}${counterparty?`<small>${esc(counterparty)}</small>`:''}<small>${esc(tctDateTimeStr(x.timestamp))} TCT · ${esc(x.source||x.category||'')}</small>
+          <span class="tta-transaction-category-inline">${esc(x.category||'Other')}</span>${excludedNote}${action}</td>
+        <td role="cell" data-label="Category"><span class="tta-transaction-category">${esc(x.category||'Other')}</span></td>
+        <td role="cell" data-label="Amount" class="num"><strong class="tta-transaction-amount ${flow.cls==='in'?'pos':flow.cls==='out'?'neg':'tta-transfer'}">${flow.prefix}${money(x.amount)}</strong></td>
+      </tr>`;
+    }).join('')||'<tr role="row"><td role="cell" colspan="3"><div class="tta-empty">No transactions match these filters.</div></td></tr>';
+  }
+
+  function transactionsHtml() {
+    const all=allCashFlows(),rows=filteredTransactionRows(),limit=Math.max(1,Number(state.transactionLimit)||150);
+    const categories=[...new Set(all.map(x=>String(x.category||'Other')).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const included=rows.filter(x=>!x._financialExcluded).length,excluded=rows.length-included;
+    const range=String(state.transactionRange||'30d'),flow=String(state.transactionFlow||'all'),category=String(state.transactionCategory||'all'),status=String(state.transactionStatus||'all');
+    return `${header('Transactions','Recent recognized financial activity',true)}<div class="tta-content tta-transactions-page">
+      <div class="tta-transaction-toolbar" aria-label="Transaction filters">
+        <div class="tta-searchwrap tta-transaction-searchwrap"><input id="tta-transaction-search" class="tta-history-search" placeholder="Search transactions…" value="${esc(state.transactionSearch||'')}" autocomplete="off"><button class="tta-clearsearch" data-act="clearTransactionSearch" aria-label="Clear transaction search" ${state.transactionSearch?'':'hidden'}>×</button></div>
+        <select id="tta-transaction-range" class="tta-history-search" aria-label="Transaction date range"><option value="7d" ${range==='7d'?'selected':''}>7 days</option><option value="14d" ${range==='14d'?'selected':''}>14 days</option><option value="30d" ${range==='30d'?'selected':''}>30 days</option><option value="90d" ${range==='90d'?'selected':''}>90 days</option><option value="all" ${range==='all'?'selected':''}>All history</option></select>
+        <select id="tta-transaction-flow" class="tta-history-search" aria-label="Transaction direction"><option value="all" ${flow==='all'?'selected':''}>All flows</option><option value="in" ${flow==='in'?'selected':''}>Incoming</option><option value="out" ${flow==='out'?'selected':''}>Outgoing</option><option value="transfer" ${flow==='transfer'?'selected':''}>Transfers</option></select>
+        <select id="tta-transaction-category" class="tta-history-search" aria-label="Transaction category"><option value="all">All categories</option>${categories.map(c=>`<option value="${esc(c)}" ${category===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+        <select id="tta-transaction-status" class="tta-history-search" aria-label="Calculation status"><option value="all" ${status==='all'?'selected':''}>All statuses</option><option value="included" ${status==='included'?'selected':''}>Included</option><option value="excluded" ${status==='excluded'?'selected':''}>Excluded</option></select>
+      </div>
+      <div class="tta-transaction-meta"><strong>${qty(rows.length)} matching transaction${rows.length===1?'':'s'}</strong><span>${qty(included)} included · ${qty(excluded)} excluded</span></div>
+      <div class="tta-ledgerwrap tta-transaction-ledger"><table class="tta-flowtable tta-transaction-table tta-compact-table" role="table" aria-label="Recent transactions"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Transaction</th><th role="columnheader" scope="col">Category</th><th role="columnheader" scope="col" style="text-align:right">Amount</th></tr></thead><tbody role="rowgroup">${transactionRowsHtml(rows,limit)}</tbody></table></div>
+      <div class="tta-morehint">Showing ${qty(Math.min(rows.length,limit))} of ${qty(rows.length)} matching transactions ${rows.length>limit?'<button class="tta-btn secondary" data-act="transactionsMore">Load more</button>':''}</div>
+      <div class="tta-note">Excluded transactions stay visible here but are omitted from financial analytics. Net Worth still uses the complete stored history. <button class="tta-inline-link" data-act="excluded">Review excluded transactions</button></div>
+    </div>`;
   }
 
   function dashboardHtml() {
