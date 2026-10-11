@@ -9,6 +9,7 @@
     perfCache.fifo.clear();perfCache.summaries.clear();perfCache.series.clear();perfCache.overall.clear();
     perfCache.trackedTxRef=null;perfCache.trackedCatalogRef=null;perfCache.tracked=[];
     perfCache.ledgerTxRef=null;perfCache.ledgerRows=[];perfCache.ledgerByItem=new Map();
+    if(typeof rawFifoCache!=='undefined'){rawFifoCache.txRef=null;rawFifoCache.transferRef=null;rawFifoCache.consumeRef=null;rawFifoCache.rows.clear();}
   }
 
   function effectiveTransactions() {
@@ -17,9 +18,138 @@
     return demoTxCache;
   }
 
+  const FINANCIAL_TYPE_LABELS={
+    player_money_received:'Money received from players',
+    player_money_sent:'Money sent to players',
+    player_trades:'Player Trade interactions',
+    item_purchases:'Item / inventory purchases',
+    item_sales:'Item / market sales',
+    travel_trading:'Foreign market / travel trading',
+    fees_taxes:'Fees / taxes',
+    wages_job:'Wages / job income',
+    points:'Points market',
+    faction_income:'Faction income / payouts',
+    company_profit_loss:'Company profit / loss',
+    internal_transfers:'Internal transfers'
+  };
+
+  function financialSlug(value) {
+    return String(value||'other').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'other';
+  }
+
+  function transactionFinancialKey(t) {
+    if(!t)return '';
+    if(String(t.source||'')==='Player Trade'&&Number(t.tradeId)>0)return 'trade:'+String(t.tradeId);
+    return 'tx:'+String(t.id??'');
+  }
+
+  function financialRecordKey(record) {
+    if(!record)return '';
+    if(record._financialKey)return String(record._financialKey);
+    if(record.side)return transactionFinancialKey(record);
+    const id=String(record.id??'');
+    let m=id.match(/^txcash:(.*):(buy|sell|fee)$/);if(m)return 'tx:'+m[1];
+    m=id.match(/^tradecash:([^:]+):(in|out)$/);if(m)return 'trade:'+m[1];
+    return 'cash:'+id;
+  }
+
+  function financialTypeKey(record) {
+    if(!record)return 'other';
+    const source=String(record.source||'');
+    const category=String(record.category||'');
+    const direction=String(record.direction||'');
+    const side=String(record.side||'');
+
+    if(source==='Player Trade'||category==='Player Trades')return 'player_trades';
+    if(category==='Player Transfers')return direction==='in'?'player_money_received':direction==='out'?'player_money_sent':'category:player-transfers';
+    if(category==='Item Purchases')return 'item_purchases';
+    if(category==='Item Sales')return 'item_sales';
+    if(category==='Travel Trading')return 'travel_trading';
+    if(category==='Fees / Taxes')return 'fees_taxes';
+    if(category==='Wages / Job')return 'wages_job';
+    if(category==='Points')return 'points';
+    if(category==='Faction Income')return 'faction_income';
+    if(category==='Company Profit / Loss')return 'company_profit_loss';
+    if(direction.startsWith('transfer')||record.transfer)return 'internal_transfers';
+
+    if(side==='buy'){
+      if(source==='Foreign Market')return 'travel_trading';
+      return 'item_purchases';
+    }
+    if(side==='sell')return 'item_sales';
+
+    if(category)return 'category:'+financialSlug(category);
+    if(source)return 'source:'+financialSlug(source);
+    return 'other';
+  }
+
+  function financialTypeLabel(recordOrKey) {
+    const key=typeof recordOrKey==='string'?recordOrKey:financialTypeKey(recordOrKey);
+    if(FINANCIAL_TYPE_LABELS[key])return FINANCIAL_TYPE_LABELS[key];
+    if(key.startsWith('category:'))return key.slice(9).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):'').join(' ');
+    if(key.startsWith('source:'))return key.slice(7).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):'').join(' ');
+    return key==='other'?'Other financial activity':key;
+  }
+
+  function financialExclusionStatus(record) {
+    const key=financialRecordKey(record),typeKey=financialTypeKey(record),overrides=state.financialOverrides||{},rules=state.financialExclusionRules||{};
+    const override=String(overrides[key]||'');
+    if(override==='include')return {excluded:false,key,typeKey,label:financialTypeLabel(typeKey),reason:'Manually included',override};
+    if(override==='exclude')return {excluded:true,key,typeKey,label:financialTypeLabel(typeKey),reason:'Excluded manually',override};
+    if(rules[typeKey])return {excluded:true,key,typeKey,label:financialTypeLabel(typeKey),reason:'Excluded by setting: '+financialTypeLabel(typeKey),override:''};
+    return {excluded:false,key,typeKey,label:financialTypeLabel(typeKey),reason:'Included',override:''};
+  }
+
+  function annotateFinancialRecord(record) {
+    const status=financialExclusionStatus(record);
+    return {...record,_financialKey:status.key,_financialType:status.typeKey,_financialTypeLabel:status.label,_financialExcluded:status.excluded,_financialReason:status.reason,_financialOverride:status.override};
+  }
+
+  function setFinancialOverride(key,mode) {
+    key=String(key||'');if(!key)return;
+    const next={...(state.financialOverrides||{})};
+    if(mode==='include'||mode==='exclude')next[key]=mode;else delete next[key];
+    state.financialOverrides=next;save('financialOverrides',next);resetAnalyticsCache();
+  }
+
+  function setFinancialRule(typeKey,excluded) {
+    typeKey=String(typeKey||'');if(!typeKey)return;
+    const next={...(state.financialExclusionRules||{})};
+    if(excluded)next[typeKey]=true;else delete next[typeKey];
+    state.financialExclusionRules=next;save('financialExclusionRules',next);resetAnalyticsCache();
+  }
+
+  function clearFinancialOverrides() {
+    state.financialOverrides={};save('financialOverrides',{});resetAnalyticsCache();
+  }
+
+  function clearFinancialRules() {
+    state.financialExclusionRules={};save('financialExclusionRules',{});resetAnalyticsCache();
+  }
+
+  function financialExclusionTypeOptions(records=[]) {
+    const map=new Map(Object.entries(FINANCIAL_TYPE_LABELS).map(([key,label])=>[key,{key,label,count:0}]));
+    for(const record of records||[]){
+      const key=financialTypeKey(record),label=financialTypeLabel(key),row=map.get(key)||{key,label,count:0};row.count++;map.set(key,row);
+    }
+    for(const t of effectiveTransactions()){
+      const key=financialTypeKey(t),label=financialTypeLabel(key),row=map.get(key)||{key,label,count:0};row.count++;map.set(key,row);
+    }
+    return [...map.values()].filter(x=>x.count>0||state.financialExclusionRules?.[x.key]).sort((a,b)=>a.label.localeCompare(b.label));
+  }
+
+  function analysisTransactions() {
+    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded);
+  }
+
+  function financialExclusionSignature() {
+    return JSON.stringify([state.financialExclusionRules||{},state.financialOverrides||{}]);
+  }
+
   function ensureTxIndex() {
-    const tx=effectiveTransactions();
-    if(perfCache.txRef===tx)return perfCache;
+    const raw=effectiveTransactions(),signature=financialExclusionSignature();
+    if(perfCache.rawTxRef===raw&&perfCache.exclusionSignature===signature)return perfCache;
+    const tx=analysisTransactions();
     const byItem=new Map(),lastById=new Map();
     for(const t of tx){
       const id=Number(t?.itemId);if(!(id>0))continue;
@@ -28,7 +158,7 @@
       const ts=Number(t?.timestamp)||0;if(ts>(lastById.get(id)||0))lastById.set(id,ts);
     }
     for(const rows of byItem.values())rows.sort((a,b)=>a.timestamp-b.timestamp||String(a.id).localeCompare(String(b.id)));
-    perfCache.txRef=tx;perfCache.byItem=byItem;perfCache.lastById=lastById;perfCache.itemIds=[...byItem.keys()];
+    perfCache.txRef=tx;perfCache.rawTxRef=raw;perfCache.exclusionSignature=signature;perfCache.byItem=byItem;perfCache.lastById=lastById;perfCache.itemIds=[...byItem.keys()];
     perfCache.fifo.clear();perfCache.summaries.clear();perfCache.series.clear();perfCache.overall.clear();
     perfCache.trackedTxRef=null;perfCache.trackedCatalogRef=null;perfCache.tracked=[];
     return perfCache;
@@ -139,6 +269,25 @@
     const sent=(state.playerTransfers||[]).filter(x=>x?.type==='item'&&x?.direction==='out'&&Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`transfer:${x.id}`,side:'transfer-out',total:0,netTotal:0,source:'Player Transfer'}));
     const consumed=(state.itemConsumptions||[]).filter(x=>Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`consume:${x.id}`,side:'consume-out',total:0,netTotal:0,source:'Item Use'}));
     const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));perfCache.fifo.set(id,result);return result;
+  }
+
+  const rawFifoCache={txRef:null,transferRef:null,consumeRef:null,rows:new Map()};
+  function rawFifoAnalytics(itemId) {
+    const txRef=effectiveTransactions(),transferRef=state.playerTransfers,consumeRef=state.itemConsumptions;
+    if(rawFifoCache.txRef!==txRef||rawFifoCache.transferRef!==transferRef||rawFifoCache.consumeRef!==consumeRef){rawFifoCache.txRef=txRef;rawFifoCache.transferRef=transferRef;rawFifoCache.consumeRef=consumeRef;rawFifoCache.rows.clear();}
+    const id=Number(itemId);if(rawFifoCache.rows.has(id))return rawFifoCache.rows.get(id);
+    const tx=txRef.filter(x=>Number(x?.itemId)===id);
+    const sent=(state.playerTransfers||[]).filter(x=>x?.type==='item'&&x?.direction==='out'&&Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`transfer:${x.id}`,side:'transfer-out',total:0,netTotal:0,source:'Player Transfer'}));
+    const consumed=(state.itemConsumptions||[]).filter(x=>Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`consume:${x.id}`,side:'consume-out',total:0,netTotal:0,source:'Item Use'}));
+    const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));rawFifoCache.rows.set(id,result);return result;
+  }
+
+  function rawAcquisitionLedgerRows() {
+    const itemIds=new Set(effectiveTransactions().map(x=>Number(x?.itemId)).filter(x=>x>0));
+    for(const t of state.playerTransfers||[])if(t?.type==='item'&&t?.direction==='out'&&Number(t.itemId)>0)itemIds.add(Number(t.itemId));
+    for(const t of state.itemConsumptions||[])if(Number(t?.itemId)>0)itemIds.add(Number(t.itemId));
+    const rows=[];for(const id of itemIds)rows.push(...rawFifoAnalytics(id).ledger);
+    return rows.sort((a,b)=>b.acquiredAt-a.acquiredAt||String(b.id).localeCompare(String(a.id)));
   }
 
   function acquisitionMethod(t) {
