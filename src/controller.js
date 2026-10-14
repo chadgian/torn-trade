@@ -196,7 +196,7 @@
       else if(act==='confirmAdd'){await withTransition('Opening Trade Analysis',()=>addTracked(Number(el.dataset.id)));}
       else if(act==='removeItem'){removeTracked(Number(el.dataset.id));}
       else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick',resetDiagnostics:true});}
-      else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full'});}
+      else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full',resetDiagnostics:true});}
       else if(act==='cancelSync'){state.syncCancel=true;setSyncProgress('Stopping after the current API request\u2026');}
       else if(act==='createApiKey'){
         state.open=false;window.location.href=ANALYZER_CUSTOM_KEY_URL;return;
