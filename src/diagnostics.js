@@ -101,6 +101,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Accounting rules were updated. Full Resync reparses historical cash events, including exact bounty placement costs and fees.',{source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
     const requested=dateRange();
     if(state.sync?.coverageFrom!=null&&requested.from<Number(state.sync.coverageFrom))add('RANGE_NOT_COVERED','The selected period begins before the checked history.',{from:requested.from,to:state.sync.coverageFrom});
