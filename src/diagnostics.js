@@ -167,13 +167,22 @@
       el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;
     }catch(_){try{el.value=value;return true;}catch(__){return false;}}
   }
+  function setSupportEditableText(el,value) {
+    if(!el)return false;
+    try{
+      el.textContent='';
+      const lines=String(value||'').split('\n');
+      lines.forEach((line,index)=>{if(index)el.appendChild(document.createElement('br'));el.appendChild(document.createTextNode(line));});
+      el.dispatchEvent(new Event('input',{bubbles:true}));return true;
+    }catch(_){return false;}
+  }
   function setSupportBodyValue(root,value) {
     const iframe=document.querySelector('#mailcompose_ifr, iframe[id*="mailcompose"], iframe[title*="Rich Text" i]');
-    try{const body=iframe?.contentDocument?.body;if(body){body.textContent=value;body.dispatchEvent(new Event('input',{bubbles:true}));return true;}}catch(_){}
+    try{const body=iframe?.contentDocument?.body;if(body)return setSupportEditableText(body,value);}catch(_){}
     const scope=root||document,textarea=scope.querySelector?.('textarea[name="message"],textarea[name="body"],textarea');
     if(textarea)return setSupportFieldValue(textarea,value);
     const editable=scope.querySelector?.('[contenteditable="true"]');
-    if(editable){editable.textContent=value;editable.dispatchEvent(new Event('input',{bubbles:true}));return true;}
+    if(editable)return setSupportEditableText(editable,value);
     return false;
   }
   async function prefillPendingSupportTornMail() {
