@@ -49,6 +49,7 @@
       HISTORY_MISSING:'Run Quick Sync for current activity. Use Full Resync if you also need older acquisition history.',
       HISTORY_PARTIAL:'Run Full Resync and let it finish so older FIFO acquisitions can be verified.',
       HISTORY_COVERAGE_RECHECK:'Run Full Resync once with the current analyzer version to re-verify older pagination boundaries.',
+      PARSER_UPDATED:'Run Full Resync once so older financial events are reparsed with the current accounting rules, including exact bounty placement costs and fee breakdowns.',
       HISTORY_STALE:'Run Quick Sync to check recent activity.',
       RANGE_NOT_COVERED:'Run Full Resync if you need data from before the currently verified history range.',
       LOG_SCOPE:'Create or save an API key with unrestricted User Log access and the required analyzer selections, then sync again.',
