@@ -14,10 +14,10 @@
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     purgeBogusCrimeCashRows();
     repairCashFlowAccountingRows();
-    if(state.transactions.length&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
+    if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Cached history was parsed by an older version. Full Resync rechecks historical amounts and trade details.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Accounting rules were updated. Full Resync reparses historical cash events, including exact bounty placement costs and fees.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
