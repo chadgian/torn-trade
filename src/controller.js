@@ -149,7 +149,7 @@
       else if(act==='back'){await navigate(state.view==='ledger'?'trade':state.view==='updates'?'settings':'dashboard');}
       else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth','excluded','transactions'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}
-      else if(act==='clearDiagnostics'){state.notices=[];save('notices',[]);render();}
+      else if(act==='clearDiagnostics'){clearRecordedDiagnostics();render();}
       else if(act==='tradeTab'){await withTransition('Updating Trade Analysis',()=>{state.tradeTab=el.dataset.tab;render();});}
       else if(act==='salesMore'){state.salesLimit=(state.salesLimit||100)+100;await withTransition('Loading sales',()=>render());}
       else if(act==='cashMore'){state.cashLimit=(state.cashLimit||200)+200;await withTransition('Loading cash activity',()=>render());}
@@ -195,7 +195,7 @@
       else if(act==='clearItemSearch'){state.itemSearch='';save('itemSearch','');const input=document.getElementById('tta-history-search');if(input){input.value='';input.focus();}await withTransition('Filtering items',()=>renderItemList());}
       else if(act==='confirmAdd'){await withTransition('Opening Trade Analysis',()=>addTracked(Number(el.dataset.id)));}
       else if(act==='removeItem'){removeTracked(Number(el.dataset.id));}
-      else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick'});}
+      else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick',resetDiagnostics:true});}
       else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full'});}
       else if(act==='cancelSync'){state.syncCancel=true;setSyncProgress('Stopping after the current API request\u2026');}
       else if(act==='createApiKey'){
