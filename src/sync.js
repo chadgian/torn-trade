@@ -280,13 +280,13 @@
   function resetActiveLogBatchState(job) {
     const p=job.logScanPeriod||job.period;job.logCursorTo=p.to;job.logPage=0;job.logPreviousSignature='';job.logPageParams=null;job.logPageSeen=[];job.logLastPageIds=[];
   }
-  async function createResumableSyncJob(syncMode='quick',background=false) {
+  async function createResumableSyncJob(syncMode='quick',background=false,manual=false) {
     stripSyncRunMarkers();
     const mode=syncMode==='full'?'full':'quick',now=nowSec(),last=Number(state.sync?.lastSync)||0;
     const initialFrom=mode==='full'?0:(last>0?Math.min(last,now):tctDayStart(now));
     const period={from:initialFrom,to:now},periodText=mode==='full'?'all available history':`${tctDateTimeStr(initialFrom)} \u2013 ${tctDateTimeStr(now)} TCT`;
     const scan={from:period.from,to:period.to,incremental:mode==='quick',recheck:false,missingDays:0};
-    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logBatches:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
+    const job={schema:SYNC_JOB_SCHEMA_VERSION,background:!!background,manual:!!manual,id:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`,syncMode:mode,active:true,cancelled:false,createdAt:now,updatedAt:now,period,periodText,logScanPeriod:{...scan},tradeScanPeriod:{...scan},phase:'setup',progress:mode==='full'?`Preparing full resync from the beginning\u2026`:`Preparing quick sync from ${tctDateTimeStr(initialFrom)} TCT\u2026`,resumedCount:0,logTypeIds:[],logBatches:[],logMode:'filtered',logBatchIndex:0,logCursorTo:period.to,logPage:0,logPreviousSignature:'',userId:0,diagnostics:null,tradeHeaders:[],tradeListParams:null,tradeListSeen:[],tradeDetailIndex:0,verifiedTradeIds:[],verifiedTradeTimes:{},progressPercent:0,progressActiveMs:0,progressClockAt:Date.now(),progressEtaMs:0};
     await checkpointSyncJob(job,job.progress);return job;
   }
 
@@ -640,8 +640,8 @@
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
-    if(!job.background&&job.syncMode==='quick')nextSync.lastManualQuickSync=serverNow;
-    if(!job.background&&job.syncMode==='full')nextSync.lastFullResync=serverNow;
+    if(job.manual&&job.syncMode==='quick')nextSync.lastManualQuickSync=serverNow;
+    if(job.manual&&job.syncMode==='full')nextSync.lastFullResync=serverNow;
     if(job.repairWindow)nextSync.lastRepairSync=serverNow;
     if(job.syncMode==='full'){nextSync.accountingVersion=ACCOUNTING_VERSION;nextSync.historyPaginationVersion=HISTORY_PAGINATION_VERSION;}
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
@@ -779,7 +779,7 @@
     if(job?.cancelled){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&job.syncMode!==requestedMode){await discardStaleSyncJob(job);job=null;}
     if(job&&!options?.job&&syncJobIsStale(job)){await discardStaleSyncJob(job);job=null;}
-    if(!job)job=await createResumableSyncJob(requestedMode,background);
+    if(!job)job=await createResumableSyncJob(requestedMode,background,!!options?.manual);
     if(background)job.background=true;
     return runResumableSync(job,!!options?.resume||Number(job.resumedCount)>0||job.phase!=='setup',{background});
   }
