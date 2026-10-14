@@ -281,8 +281,9 @@
 #tta-root .tta-diagnostic-guidance{margin:10px 0;padding:10px 12px;border-left:3px solid var(--tta-blue);border-radius:8px;background:#91cdf70d;color:var(--tta-text)!important}
 #tta-root .tta-diagnostic-guidance>strong{display:block;font-size:12px}
 #tta-root .tta-diagnostic-guidance p{margin:4px 0;color:var(--tta-muted)!important;font-size:12px;line-height:1.55}
-#tta-root .tta-diagnostic-contact{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
-#tta-root .tta-diagnostic-contact small{color:var(--tta-faint)!important;font-size:11px;flex:1;min-width:180px}
+#tta-root .tta-diagnostic-contact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+#tta-root .tta-diagnostic-contact .tta-btn{min-height:32px;padding:5px 9px;font-size:11px}
+#tta-root .tta-diagnostic-contact small{color:var(--tta-faint)!important;font-size:11px;flex:1 1 100%;min-width:180px;line-height:1.45}
 #tta-root .tta-update-intro{padding:4px 0 14px;border-bottom:1px solid var(--tta-line)}
 #tta-root .tta-update-intro strong{font-size:18px}
 #tta-root .tta-update-intro p{margin:6px 0 0;color:var(--tta-muted)!important;line-height:1.6}
