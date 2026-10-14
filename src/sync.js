@@ -743,6 +743,10 @@
   async function syncAll(options={}) {
     await historyRecoveryReady;
     if(historyRecoveryFailed)throw new AnalyzerError('REBUILD_RECOVERY','Restore the recovery copy before syncing. Free browser storage and reload.',{source:'storage'});
+    if(!options.background&&options.resetDiagnostics===true){
+      clearRecordedDiagnostics();
+      queueAnalyticsRender();
+    }
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
