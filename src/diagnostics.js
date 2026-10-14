@@ -192,8 +192,9 @@
     if(!payload||nowSec()-Number(payload.createdAt||0)>600){try{localStorage.removeItem(SUPPORT_MAIL_KEY);}catch(_){}return false;}
     for(let attempt=0;attempt<60;attempt++){
       const subject=document.querySelector('input[name="subject"],input.subject,input[placeholder*="subject" i]');
-      const scope=subject?.closest('form')||document;
-      const subjectDone=subject?setSupportFieldValue(subject,String(payload.subject||'')):false;
+      if(!subject){await sleep(250);continue;}
+      const scope=subject.closest('form')||document;
+      const subjectDone=setSupportFieldValue(subject,String(payload.subject||''));
       const bodyDone=setSupportBodyValue(scope,String(payload.body||''));
       if(subjectDone&&bodyDone){try{localStorage.removeItem(SUPPORT_MAIL_KEY);}catch(_){}return true;}
       await sleep(250);
