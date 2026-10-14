@@ -1,6 +1,6 @@
-  const VERSION = '0.5.4';
+  const VERSION = '0.5.5';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.4';
+  const ACCOUNTING_VERSION = '0.5.5';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -97,7 +97,7 @@
     ledgerSort: load('ledgerSort', 'acquiredAt'),
     ledgerSortDir: load('ledgerSortDir', 'desc'),
     ledgerLimit: 200,
-    sync: load('sync', { lastSync: 0, firstSyncComplete: false }),
+    sync: load('sync', { lastSync: 0, lastManualQuickSync: 0, lastFullResync: 0, firstSyncComplete: false }),
     dateMode: load('dateMode', '30d'),
     customFrom: load('customFrom', ''),
     customTo: load('customTo', ''),
