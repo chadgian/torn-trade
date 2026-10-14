@@ -2,7 +2,7 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.3.** Manual Quick Sync and Full Resync now start a fresh Data Quality diagnostic cycle by clearing previously recorded notices only when the manual sync actually begins. Persistent problems are recorded again during the new sync, while resolved notices stay gone. Background Quick Syncs and automatic resume do not clear the notice history.
+**Source version: 0.5.4.** Bounty accounting now uses Torn's explicit bounty log semantics: placements are outgoing at the exact recorded `cost`, claims are incoming at `bounty_reward`, and non-cash bounty notifications are not double-counted. Placement details identify the standard 50% listing fee and the additional 50% anonymous-listing fee when applicable.
 
 ## Features
 
@@ -10,6 +10,7 @@ A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO tra
 - Dedicated Transactions workspace with compact search, date/flow/category/status filters, highlighted incoming/outgoing/transfer rows and progressive loading.
 - Torn PDA-safe UI symbol encoding: runtime source uses ASCII-safe Unicode escapes, with a build guard preventing raw non-ASCII characters from reaching production.
 - Data Quality notices automatically reset at the start of a manual Quick Sync or Full Resync, so resolved historical errors disappear while persistent issues are recorded again.
+- Bounty accounting distinguishes placement cost, bounty-claim income and refunds; placement rows show listing/anonymous fees when Torn's payload provides the required values.
 - Searchable Cash Flow ledger, category filters, progressive loading and interactive charts.
 - Financial exclusions by transaction type or individual record, with manual include overrides, dimmed audit rows and a dedicated Excluded Transactions workspace.
 - Net Worth ignores financial exclusions so Torn snapshots and analyzer portfolio reconciliation continue using complete stored history.
