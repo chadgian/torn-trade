@@ -743,10 +743,6 @@
   async function syncAll(options={}) {
     await historyRecoveryReady;
     if(historyRecoveryFailed)throw new AnalyzerError('REBUILD_RECOVERY','Restore the recovery copy before syncing. Free browser storage and reload.',{source:'storage'});
-    if(!options.background&&options.resetDiagnostics===true){
-      clearRecordedDiagnostics();
-      queueAnalyticsRender();
-    }
     if(!options.background&&state.backgroundSyncing){if(!await yieldBackgroundSyncForManual())return;}
     if(typeof navigator!=='undefined'&&navigator.locks?.request){
       return navigator.locks.request('torn-cash-flow-sync',{ifAvailable:true},async lock=>{
@@ -754,8 +750,7 @@
         resolveDiagnostic('SYNC_OTHER_TAB');return syncWithLocalState(options);
       });
     }
-    reportDiagnostic('SYNC_LOCK_UNAVAILABLE','info','This browser cannot coordinate syncs across Torn tabs. Keep only one analyzer tab syncing.',{source:'sync'});
-    return syncWithLocalState(options);
+    return syncWithLocalState({...options,lockUnavailable:true});
   }
   async function syncWithLocalState(options={}) {
     const background=!!options?.background;
@@ -769,6 +764,11 @@
       }finally{manualSyncTakeover=false;}
     }
     if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings \u2192 API Key to sync real history.');}return;}
+    if(!background&&options.resetDiagnostics===true){
+      clearRecordedDiagnostics();
+      queueAnalyticsRender();
+    }
+    if(options.lockUnavailable===true)reportDiagnostic('SYNC_LOCK_UNAVAILABLE','info','This browser cannot coordinate syncs across Torn tabs. Keep only one analyzer tab syncing.',{source:'sync'});
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
     if(load('fullResyncBackup',null)&&!job?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
