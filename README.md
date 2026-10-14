@@ -2,15 +2,16 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.4.** Bounty accounting now uses Torn's explicit bounty log semantics: placements are outgoing at the exact recorded `cost`, claims are incoming at `bounty_reward`, and non-cash bounty notifications are not double-counted. Placement details identify the standard 50% listing fee and the additional 50% anonymous-listing fee when applicable.
+**Source version: 0.5.5.** Data Quality warnings and errors can now open a prefilled Torn Mail draft to the developer or copy a sanitized troubleshooting package. TCFA records separate successful Manual Quick Sync and Full Resync timestamps, includes runtime/device/storage/sync context in individual diagnostics, and never sends a Torn message automatically. Legacy bounty placements that may still contain only the listed reward are flagged until reparsed so cash flow uses Torn's total placement cost.
 
 ## Features
 
 - TCT daily overview: money in, money out, net flow and financial position.
 - Dedicated Transactions workspace with compact search, date/flow/category/status filters, highlighted incoming/outgoing/transfer rows and progressive loading.
 - Torn PDA-safe UI symbol encoding: runtime source uses ASCII-safe Unicode escapes, with a build guard preventing raw non-ASCII characters from reaching production.
-- Data Quality notices automatically reset at the start of a manual Quick Sync or Full Resync, so resolved historical errors disappear while persistent issues are recorded again.
-- Bounty accounting distinguishes placement cost, bounty-claim income and refunds; placement rows show listing/anonymous fees when Torn's payload provides the required values.
+- Data Quality notices automatically reset at the start of a manual Quick Sync or Full Resync, so resolved historical errors disappear while persistent issues are recorded again.\n- Individual Data Quality warnings/errors can open a prefilled Torn Mail draft or copy sanitized troubleshooting details; the player must manually press Send.
+- Successful Manual Quick Sync and Full Resync timestamps are tracked separately from background sync activity.
+- Bounty accounting distinguishes placement cost, bounty-claim income and refunds; placement rows use Torn's total `cost` and show listing/anonymous fees, while legacy reward-only cached rows are flagged for reparse.
 - Searchable Cash Flow ledger, category filters, progressive loading and interactive charts.
 - Financial exclusions by transaction type or individual record, with manual include overrides, dimmed audit rows and a dedicated Excluded Transactions workspace.
 - Net Worth ignores financial exclusions so Torn snapshots and analyzer portfolio reconciliation continue using complete stored history.
