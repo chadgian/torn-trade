@@ -1,6 +1,6 @@
-  const VERSION = '0.5.3';
+  const VERSION = '0.5.4';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.3.3';
+  const ACCOUNTING_VERSION = '0.5.4';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -43,7 +43,17 @@
     [4102,{direction:'out',label:'Item sent'}],
     [4103,{direction:'in',label:'Item received'}],
   ]);
-  const FORCE_FINANCE_LOG_IDS = new Set([...EXPLICIT_CASH_LOGS.keys(),...PLAYER_ITEM_LOGS.keys()]);
+  const BOUNTY_LOGS = new Map([
+    [6700,{kind:'place',direction:'out',label:'Bounty placed'}],
+    [6701,{kind:'place_receive',direction:null,label:'Bounty placed on you'}],
+    [6705,{kind:'expire',direction:null,label:'Bounty expired'}],
+    [6706,{kind:'expire_receive',direction:null,label:'Bounty on you expired'}],
+    [6708,{kind:'refund',direction:'in',label:'Bounty refund'}],
+    [6710,{kind:'claim',direction:'in',label:'Bounty claimed'}],
+    [6711,{kind:'claim_lister',direction:null,label:'Your bounty was claimed'}],
+    [6712,{kind:'claim_target',direction:null,label:'Bounty on you was claimed'}],
+  ]);
+  const FORCE_FINANCE_LOG_IDS = new Set([...EXPLICIT_CASH_LOGS.keys(),...PLAYER_ITEM_LOGS.keys(),6700,6708,6710,6711]);
 
   const storageIssues = [];
   const state = {
