@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.2
+// @version      0.5.3
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -250,7 +250,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.2';
+  const VERSION = '0.5.3';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.3.3';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -467,6 +467,10 @@
     for(const key of [savedApiKey(),injectedApiKey()])if(key)text=text.split(key).join('[redacted]');
     return text.slice(0,300);
   }
+  function clearRecordedDiagnostics() {
+    state.notices=[];
+    try{localStorage.setItem(NS+'notices','[]');}catch(_){}
+  }
   function reportDiagnostic(code,severity,message,context={}) {
     if(!Array.isArray(state.notices))state.notices=[];
     const safe=safeDiagnosticContext(context),id=`${code}:${safe.source||''}:${safe.itemId||safe.tradeId||safe.logId||''}`;
@@ -579,7 +583,7 @@
     const backend=st.backend==='pda'?'Torn PDA native storage':st.backend==='indexeddb'?'Browser IndexedDB':'Browser localStorage fallback';
     const usage=st.quota>0?((st.used/1048576).toFixed(1)+' / '+(st.quota/1048576).toFixed(1)+' MB'):(st.backend==='localStorage'?'Shared browser quota':'Available');
     const storageHtml=`<section class="tta-fin-section"><h3>Storage</h3><div class="tta-fin-row"><span>History backend</span><b>${esc(backend)}</b></div><div class="tta-fin-row"><span>Usage</span><b>${esc(usage)}</b></div>${st.migrated?'<div class="tta-note">'+qty(st.migrated)+' legacy data sets were moved safely from localStorage during this session.</div>':''}</section>`;
-    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p>${diagnosticGuidanceHtml(n)}<pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
+    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div><div class="tta-note"><strong>Fresh diagnostic cycle:</strong> Starting a manual Quick Sync or Full Resync clears previously recorded notices before the new check begins. If an issue still exists, TCFA records it again; if it has been fixed, the old notice stays gone. Background syncs do not clear notices.</div>${notices.map(n=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p>${diagnosticGuidanceHtml(n)}<pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>History checked through</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
@@ -1940,7 +1944,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.2',label:'Current',items:['Fixed Torn PDA character corruption in separators, transaction prefixes and other UI symbols by replacing runtime Unicode literals with encoding-safe escape sequences.','Scanned the full runtime source and removed every remaining raw non-ASCII character that could be mangled before JavaScript executes.','Added a build-time encoding guard so future releases fail validation if raw non-ASCII characters are reintroduced into runtime source, styles or metadata.']},
+      {version:'0.5.3',label:'Current',items:['Manual Quick Sync and Full Resync now begin a fresh Data Quality diagnostic cycle by clearing previously recorded notices.','If an issue persists during the new sync, TCFA records it again; resolved errors and warnings no longer remain simply because they were recorded by an older sync.','Background Quick Syncs and automatic resume do not clear notices, and a manual sync will not erase notices if it cannot actually start because another tab owns the sync lock.']},
+      {version:'0.5.2',items:['Fixed Torn PDA character corruption in separators, transaction prefixes and other UI symbols by replacing runtime Unicode literals with encoding-safe escape sequences.','Scanned the full runtime source and removed every remaining raw non-ASCII character that could be mangled before JavaScript executes.','Added a build-time encoding guard so future releases fail validation if raw non-ASCII characters are reintroduced into runtime source, styles or metadata.']},
       {version:'0.5.1',items:['Added a dedicated Transactions workspace showing recent recognized financial activity in one compact, searchable ledger.','Added compact filters for date range, flow direction, category and calculation status, plus stronger visual emphasis for incoming, outgoing and transfer rows.','Individual Include / Exclude controls are available directly on transaction rows; excluded rows remain visible and dimmed while Net Worth continues using complete history.']},
       {version:'0.5.0',items:['Added financial exclusion rules by transaction type plus per-transaction Include / Exclude overrides.','Excluded records stay visible for audit, are removed from Dashboard, Cash Flow, Trade Analysis, Acquisitions and related analytics, and can be reviewed from a dedicated Excluded Transactions workspace.','Net Worth deliberately ignores exclusion settings and continues using the complete stored financial history.']},
       {version:'0.4.4',items:['TCFA can now load and browse locally stored history in multiple Torn tabs while keeping sync/recovery writes exclusive to one tab.','Other tabs refresh durable Torn PDA/IndexedDB history after the active tab finishes syncing, importing a backup or resetting data, with focus/visibility refresh as a fallback.','During a Full Resync, secondary tabs show the last safe recovery snapshot instead of an empty or partially rebuilt history.']},
@@ -2114,7 +2119,7 @@
       else if(act==='back'){await navigate(state.view==='ledger'?'trade':state.view==='updates'?'settings':'dashboard');}
       else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth','excluded','transactions'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}
-      else if(act==='clearDiagnostics'){state.notices=[];save('notices',[]);render();}
+      else if(act==='clearDiagnostics'){clearRecordedDiagnostics();render();}
       else if(act==='tradeTab'){await withTransition('Updating Trade Analysis',()=>{state.tradeTab=el.dataset.tab;render();});}
       else if(act==='salesMore'){state.salesLimit=(state.salesLimit||100)+100;await withTransition('Loading sales',()=>render());}
       else if(act==='cashMore'){state.cashLimit=(state.cashLimit||200)+200;await withTransition('Loading cash activity',()=>render());}
@@ -2160,8 +2165,8 @@
       else if(act==='clearItemSearch'){state.itemSearch='';save('itemSearch','');const input=document.getElementById('tta-history-search');if(input){input.value='';input.focus();}await withTransition('Filtering items',()=>renderItemList());}
       else if(act==='confirmAdd'){await withTransition('Opening Trade Analysis',()=>addTracked(Number(el.dataset.id)));}
       else if(act==='removeItem'){removeTracked(Number(el.dataset.id));}
-      else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick'});}
-      else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full'});}
+      else if(act==='sync'||act==='syncQuick'){await syncAll({mode:'quick',resetDiagnostics:true});}
+      else if(act==='syncFull'){if(confirm('Full Resync rebuilds all available history. Your previous history can be restored if you stop the rebuild. Continue?'))await syncAll({mode:'full',resetDiagnostics:true});}
       else if(act==='cancelSync'){state.syncCancel=true;setSyncProgress('Stopping after the current API request\u2026');}
       else if(act==='createApiKey'){
         state.open=false;window.location.href=ANALYZER_CUSTOM_KEY_URL;return;
@@ -3483,8 +3488,7 @@
         resolveDiagnostic('SYNC_OTHER_TAB');return syncWithLocalState(options);
       });
     }
-    reportDiagnostic('SYNC_LOCK_UNAVAILABLE','info','This browser cannot coordinate syncs across Torn tabs. Keep only one analyzer tab syncing.',{source:'sync'});
-    return syncWithLocalState(options);
+    return syncWithLocalState({...options,lockUnavailable:true});
   }
   async function syncWithLocalState(options={}) {
     const background=!!options?.background;
@@ -3498,6 +3502,11 @@
       }finally{manualSyncTakeover=false;}
     }
     if(!hasApiKey()){if(!background){state.demo=true;toast('Add a Torn API key in Settings \u2192 API Key to sync real history.');}return;}
+    if(!background&&options.resetDiagnostics===true){
+      clearRecordedDiagnostics();
+      queueAnalyticsRender();
+    }
+    if(options.lockUnavailable===true)reportDiagnostic('SYNC_LOCK_UNAVAILABLE','info','This browser cannot coordinate syncs across Torn tabs. Keep only one analyzer tab syncing.',{source:'sync'});
     const requestedMode=options?.mode==='full'?'full':'quick';
     let job=options?.job||loadSyncJob();
     if(load('fullResyncBackup',null)&&!job?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
