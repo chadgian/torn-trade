@@ -92,5 +92,5 @@
     .finally(()=>{historyRecoveryFinished=true;});
 
   setupCrossTabRefresh();
-  const boot=async()=>{if(document.body){await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
+  const boot=async()=>{if(document.body){void prefillPendingSupportTornMail();await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
   setInterval(()=>{if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);
