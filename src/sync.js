@@ -640,6 +640,8 @@
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
     const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
+    if(!job.background&&job.syncMode==='quick')nextSync.lastManualQuickSync=serverNow;
+    if(!job.background&&job.syncMode==='full')nextSync.lastFullResync=serverNow;
     if(job.repairWindow)nextSync.lastRepairSync=serverNow;
     if(job.syncMode==='full'){nextSync.accountingVersion=ACCOUNTING_VERSION;nextSync.historyPaginationVersion=HISTORY_PAGINATION_VERSION;}
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
