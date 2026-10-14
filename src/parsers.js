@@ -255,7 +255,7 @@
     if(meta.kind==='place'){
       const cost=Math.abs(Number(payload?.cost)||0);if(!(cost>0))return [];
       const targetId=Number(payload?.target)||0,breakdown=bountyPlacementBreakdown(payload,cost);
-      return [{id:`cashlog:${entry.id}`,timestamp,direction:'out',amount:cost,category:'Bounties',source:'Torn Log',title:targetId?`Bounty placed on #${targetId}`:'Bounty placed',detail:breakdown.detail,logId:logTypeId,field:'cost',transfer:false,counterpartyId:targetId,counterpartyName:'',bountyReward:breakdown.rewardTotal,bountyListingFee:breakdown.listingFee,bountyAnonymousFee:breakdown.anonymousFee,bountyAnonymous:breakdown.anonymous}];
+      return [{id:`cashlog:${entry.id}`,timestamp,direction:'out',amount:cost,category:'Bounties',source:'Torn Log',title:targetId?`Bounty placed on #${targetId}`:'Bounty placed',detail:breakdown.detail,logId:logTypeId,field:'cost',transfer:false,counterpartyId:targetId,counterpartyName:'',bountyReward:breakdown.rewardTotal,bountyListingFee:breakdown.listingFee,bountyAnonymousFee:breakdown.anonymousFee,bountyAnonymous:breakdown.anonymous,bountyCostVerified:true}];
     }
     if(meta.kind==='claim'){
       const amount=Math.abs(Number(payload?.bounty_reward)||0);if(!(amount>0))return [];
@@ -412,7 +412,10 @@
       let x=row;
       if([6701,6705,6706,6711,6712].includes(id)){changed=true;continue;}
       if(id===6700){
-        if(row.direction!=='out'||row.category!=='Bounties'||row.transfer){x={...row,direction:'out',category:'Bounties',transfer:false};changed=true;}
+        const verified=row.bountyCostVerified===true||String(row.field||'')==='cost';
+        const legacyDetail='Legacy bounty placement amount may exclude Torn listing fees. Run Full Resync to recover the exact recorded cost.';
+        const needsChange=row.direction!=='out'||row.category!=='Bounties'||row.transfer||(!verified&&(row.bountyCostVerified!==false||row.detail!==legacyDetail));
+        if(needsChange){x={...row,direction:'out',category:'Bounties',transfer:false,...(!verified?{bountyCostVerified:false,detail:legacyDetail}:{})};changed=true;}
       }else if(id===6708||id===6710){
         if(row.direction!=='in'||row.category!=='Bounties'||row.transfer){x={...row,direction:'in',category:'Bounties',transfer:false};changed=true;}
       }else if(id===8155||/\byou mugged\b/i.test(title)){
