@@ -14,6 +14,10 @@
     for(const key of [savedApiKey(),injectedApiKey()])if(key)text=text.split(key).join('[redacted]');
     return text.slice(0,300);
   }
+  function clearRecordedDiagnostics() {
+    state.notices=[];
+    try{localStorage.setItem(NS+'notices','[]');}catch(_){}
+  }
   function reportDiagnostic(code,severity,message,context={}) {
     if(!Array.isArray(state.notices))state.notices=[];
     const safe=safeDiagnosticContext(context),id=`${code}:${safe.source||''}:${safe.itemId||safe.tradeId||safe.logId||''}`;
