@@ -4,7 +4,7 @@
     for(const [key,value] of Object.entries(context)) {
       if(!DIAGNOSTIC_CONTEXT.has(key))continue;
       if(typeof value==='number'&&Number.isFinite(value))result[key]=value;
-      else if(key==='source'||key==='phase')result[key]=redactText(String(value)).slice(0,100);
+      else if(key==='source'||key==='phase'||key==='status')result[key]=redactText(String(value)).slice(0,100);
       else if((key==='cursor'||key==='nextCursor')&&/^\d{1,30}$/.test(String(value)))result[key]=String(value);
     }
     return result;
@@ -61,7 +61,8 @@
       viewport:(globalThis.innerWidth&&globalThis.innerHeight)?globalThis.innerWidth+'x'+globalThis.innerHeight:'Not exposed',
       screen:(globalThis.screen?.width&&globalThis.screen?.height)?globalThis.screen.width+'x'+globalThis.screen.height:'Not exposed',
       devicePixelRatio:Number(globalThis.devicePixelRatio)||1,
-      storageBackend:String(durableStorageState?.backend||'unknown')
+      storageBackend:String(durableStorageState?.backend||'unknown'),
+      page:String(globalThis.location?.pathname||'Not exposed').slice(0,120)
     };
   }
   function diagnosticTime(ts) {
@@ -105,6 +106,7 @@
       'Screen: '+env.screen,
       'Device pixel ratio: '+env.devicePixelRatio,
       'Storage backend: '+env.storageBackend,
+      'Torn page: '+env.page,
       'Storage usage: '+(st.quota>0?((Number(st.used)||0)/1048576).toFixed(1)+' / '+((Number(st.quota)||0)/1048576).toFixed(1)+' MB':'Not reported'),
       '',
       'Latest completed sync counters:',
@@ -126,7 +128,12 @@
         'Started: '+diagnosticTime(job.createdAt),
         'Last checkpoint: '+diagnosticTime(job.updatedAt),
         'Paused / failed: '+(job.lastError?'Yes':'No'),
-        'Last error code: '+redactText(job.lastErrorCode||'None')
+        'Last error code: '+redactText(job.lastErrorCode||'None'),
+        'Current raw log rows: '+(Number(job.diagnostics?.rawRows)||0),
+        'Current log pages: '+(Number(job.diagnostics?.pages)||0),
+        'Current trade list pages: '+(Number(job.diagnostics?.tradeListPages)||0),
+        'Current trade details: '+(Number(job.diagnostics?.tradeDetails)||0),
+        'Current deferred trade details: '+(Number(job.diagnostics?.tradeDetailsDeferred)||0)
       );
       const jobContext=safeDiagnosticContext(job.lastErrorContext||{});
       if(Object.keys(jobContext).length)lines.push('Last error context: '+JSON.stringify(jobContext));
