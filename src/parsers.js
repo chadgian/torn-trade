@@ -173,7 +173,7 @@
     if(/withdraw/.test(s)&&/(bank|vault|faction|company|cayman|piggy|property)/.test(s))return 'transfer-in';
     if(/mugged you|you were mugged|mugged by/.test(s))return 'out';
     if(/you mugged/.test(s))return 'in';
-    if(/money_lost|cash_spent|money_sent|cash_sent|sent|spent|cost|fee|tax|expense|loss|lost|paid|payment|purchase|bought|buy|rehab|rent|donat|bounty placed|loan repayment/.test(s))return 'out';
+    if(/money_lost|cash_spent|money_sent|cash_sent|sent|spent|cost|fee|tax|expense|loss|lost|paid|payment|purchase|bought|buy|rehab|rent|donat|bounty plac(?:e|ed|ing)|loan repayment/.test(s))return 'out';
     if(/money_gained|money_received|cash_received|received|gained|earned|income|wage|salary|interest|dividend|winnings|payout|reward|profit|sold|sale|win|won/.test(s))return 'in';
     if(/mug/.test(s))return 'in';
     return null;
@@ -212,6 +212,68 @@
     const direct=Number(nestedValue(payload,meta?.field));if(Number.isFinite(direct)&&direct!==0)return Math.abs(direct);
     const f=bestMoneyField(payload,meta?.label||'');return f?Math.abs(Number(f.value)||0):0;
   }
+
+  function bountyAnonymousFlag(value) {
+    if(value==null||value==='')return null;
+    if(value===true||value===1)return true;
+    if(value===false||value===0)return false;
+    const text=String(value).trim().toLowerCase();
+    if(['1','true','yes','anonymous'].includes(text))return true;
+    if(['0','false','no','public'].includes(text))return false;
+    return null;
+  }
+  function bountyPlacementBreakdown(payload,cost) {
+    const rewardEach=Math.abs(Number(payload?.bounty_reward)||0);
+    const quantity=Math.max(1,Math.floor(Number(payload?.quantity)||1));
+    if(!(rewardEach>0))return {detail:`Recorded bounty cost ${money(cost)}`,rewardTotal:0,listingFee:0,anonymousFee:0,anonymous:null};
+    const candidates=[rewardEach*quantity,rewardEach].filter((v,i,a)=>v>0&&a.indexOf(v)===i);
+    const flag=bountyAnonymousFlag(payload?.anonymous);
+    let rewardTotal=candidates[0];
+    const score=base=>{
+      const expectedPublic=base*1.5,expectedAnonymous=base*2;
+      if(flag===true)return Math.abs(cost-expectedAnonymous);
+      if(flag===false)return Math.abs(cost-expectedPublic);
+      return Math.min(Math.abs(cost-expectedPublic),Math.abs(cost-expectedAnonymous));
+    };
+    for(const candidate of candidates)if(score(candidate)<score(rewardTotal))rewardTotal=candidate;
+    const tolerance=Math.max(1,cost*.001);
+    const publicMatch=Math.abs(cost-rewardTotal*1.5)<=tolerance;
+    const anonymousMatch=Math.abs(cost-rewardTotal*2)<=tolerance;
+    const anonymous=flag===true||anonymousMatch?true:flag===false||publicMatch?false:null;
+    const listingFee=rewardTotal*.5;
+    const anonymousFee=anonymous===true?rewardTotal*.5:0;
+    const quantityText=quantity>1&&rewardTotal===rewardEach*quantity?`${quantity} bounties x ${money(rewardEach)} reward`:`Reward ${money(rewardTotal)}`;
+    if(publicMatch||anonymousMatch){
+      return {detail:`${quantityText} \u00B7 50% listing fee ${money(listingFee)}${anonymous===true?` \u00B7 50% anonymous fee ${money(anonymousFee)}`:''} \u00B7 total cost ${money(cost)}`,rewardTotal,listingFee,anonymousFee,anonymous};
+    }
+    const fees=Math.max(0,cost-rewardTotal);
+    return {detail:`${quantityText} \u00B7 recorded fees ${money(fees)} \u00B7 total cost ${money(cost)}`,rewardTotal,listingFee:fees,anonymousFee:0,anonymous};
+  }
+  function parseBountyCashFlowEntry(entry,payload,meta) {
+    if(!meta)return [];
+    const logTypeId=Number(entry?.details?.id)||0,timestamp=Number(entry?.timestamp)||0;
+    if(meta.kind==='place'){
+      const cost=Math.abs(Number(payload?.cost)||0);if(!(cost>0))return [];
+      const targetId=Number(payload?.target)||0,breakdown=bountyPlacementBreakdown(payload,cost);
+      return [{id:`cashlog:${entry.id}`,timestamp,direction:'out',amount:cost,category:'Bounties',source:'Torn Log',title:targetId?`Bounty placed on #${targetId}`:'Bounty placed',detail:breakdown.detail,logId:logTypeId,field:'cost',transfer:false,counterpartyId:targetId,counterpartyName:'',bountyReward:breakdown.rewardTotal,bountyListingFee:breakdown.listingFee,bountyAnonymousFee:breakdown.anonymousFee,bountyAnonymous:breakdown.anonymous}];
+    }
+    if(meta.kind==='claim'){
+      const amount=Math.abs(Number(payload?.bounty_reward)||0);if(!(amount>0))return [];
+      const targetId=Number(payload?.target)||0,listerId=Number(payload?.lister)||0;
+      const detail=targetId?`Hospitalized #${targetId} \u00B7 bounty reward ${money(amount)}`:`Bounty reward ${money(amount)}`;
+      return [{id:`cashlog:${entry.id}`,timestamp,direction:'in',amount,category:'Bounties',source:'Torn Log',title:'Bounty claimed',detail,logId:logTypeId,field:'bounty_reward',transfer:false,counterpartyId:targetId,counterpartyName:'',bountyListerId:listerId,bountyAnonymous:bountyAnonymousFlag(payload?.anonymous)}];
+    }
+    if(meta.kind==='refund'){
+      const preferred=['cost','refund','money','amount','bounty_reward'].map(k=>({path:k,value:Number(payload?.[k])})).find(x=>Number.isFinite(x.value)&&x.value!==0);
+      const field=preferred||bestMoneyField(payload,meta.label);if(!field)return [];
+      const amount=Math.abs(Number(field.value)||0);if(!(amount>0))return [];
+      const targetId=Number(payload?.target)||0;
+      return [{id:`cashlog:${entry.id}`,timestamp,direction:'in',amount,category:'Bounties',source:'Torn Log',title:'Bounty refund',detail:targetId?`Refund for bounty on #${targetId}`:'Bounty placement refund',logId:logTypeId,field:field.path,transfer:false,counterpartyId:targetId,counterpartyName:''}];
+    }
+    // Related bounty notifications do not move this player's cash.
+    return [];
+  }
+
   function strictCrimeCashField(payload,title='') {
     const rows=flattenNumericFields(payload),t=String(title||'').toLowerCase();
     const incoming=/(^|\.)(money_gained|money_received|money_earned|money_reward|money_rewarded|cash_gained|cash_received|cash_earned|cash_reward|cash_rewarded)$/i;
@@ -256,7 +318,8 @@
     if(itemRowsOwnCashMovement&&!crimeContext)return[];
     const logTypeId=Number(entry?.details?.id)||0,title=entryTitle;
     if(isNonCashCompanyAdminLog(title))return[];
-    const payload={...(entry?.params||{}),...(entry?.data||{})},explicit=EXPLICIT_CASH_LOGS.get(logTypeId);
+    const payload={...(entry?.params||{}),...(entry?.data||{})},bountyMeta=BOUNTY_LOGS.get(logTypeId),explicit=EXPLICIT_CASH_LOGS.get(logTypeId);
+    if(bountyMeta)return parseBountyCashFlowEntry(entry,payload,bountyMeta);
     if(explicit){
       const amount=explicitCashAmount(payload,explicit);if(!(amount>0))return[];
       const cp=extractCounterparty(payload,explicit.direction),suffix=cp.name?` ${explicit.direction==='out'?'to':'from'} ${cp.name}`:cp.id?` ${explicit.direction==='out'?'to':'from'} #${cp.id}`:'';
@@ -314,7 +377,7 @@
   }
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
-    if(isNonCashCompanyAdminLog(title)||!financialTitleContext(`${title} ${category}`)||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
+    if(isNonCashCompanyAdminLog(title)||!financialTitleContext(`${title} ${category}`)||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);if(!field)return null;
     return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:category||'Financial',field:field.path,amount:Math.abs(Number(field.value)||0)};
   }
@@ -347,7 +410,12 @@
       if(!row)continue;const id=Number(row.logId)||0,title=String(row.title||'');
       if(isNonCashCompanyAdminLog(title)||(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))){changed=true;continue;}
       let x=row;
-      if(id===8155||/\byou mugged\b/i.test(title)){
+      if([6701,6705,6706,6711,6712].includes(id)){changed=true;continue;}
+      if(id===6700){
+        if(row.direction!=='out'||row.category!=='Bounties'||row.transfer){x={...row,direction:'out',category:'Bounties',transfer:false};changed=true;}
+      }else if(id===6708||id===6710){
+        if(row.direction!=='in'||row.category!=='Bounties'||row.transfer){x={...row,direction:'in',category:'Bounties',transfer:false};changed=true;}
+      }else if(id===8155||/\byou mugged\b/i.test(title)){
         if(row.direction!=='in'||row.category!=='Crime / Mugging'||row.transfer){x={...row,direction:'in',category:'Crime / Mugging',transfer:false};changed=true;}
       }else if(id===8156||/\bmugged you\b|\byou were mugged\b|\bmugged by\b/i.test(title)){
         if(row.direction!=='out'||row.category!=='Crime / Mugging'||row.transfer){x={...row,direction:'out',category:'Crime / Mugging',transfer:false};changed=true;}
