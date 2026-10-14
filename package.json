@@ -1,6 +1,6 @@
 {
   "name": "torn-cash-flow-analyzer",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "scripts": {
     "build": "node tools/build.cjs",
