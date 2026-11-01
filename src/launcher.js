@@ -53,11 +53,19 @@
 
   function updateFabState() {
     const fab=document.getElementById('tta-fab');if(!fab)return;
-    const syncing=!!state.syncing;
-    fab.classList.toggle('syncing',syncing);
-    fab.setAttribute('aria-label',syncing?'Cash Flow Analyzer syncing':'Cash Flow Analyzer');
-    fab.title=syncing?'Financial history sync is running \u00B7 tap to reopen':'Open Cash Flow Analyzer';
-    fab.innerHTML=syncing?'<span class="tta-fabspinner" aria-hidden="true"></span>':fabIconSvg();
+    const activity=getSyncActivity(),owned=activity?.tabId===TAB_SYNC_ID;
+    const status=owned?'own':activity?'other':'idle';
+    const mode=activity?.mode==='full'?'Full Resync':activity?.background?'Background Quick Sync':'Quick Sync';
+    fab.classList.toggle('syncing',!!activity);
+    fab.classList.toggle('syncing-other',status==='other');
+    const description=activity?mode+' running in '+(owned?'this tab':'another tab'):'Open Cash Flow Analyzer';
+    fab.setAttribute('aria-label',description);
+    fab.title=description+(activity?.progress?' \u00B7 '+activity.progress:'');
+    if(fab.dataset.syncStatus!==status){
+      fab.innerHTML=owned?'<span class="tta-fabspinner" aria-hidden="true"></span>':
+        status==='other'?fabIconSvg()+'<span class="tta-fab-other" aria-hidden="true">\u25A3</span>':fabIconSvg();
+      fab.dataset.syncStatus=status;
+    }
     fab.style.display=state.open?'none':'inline-flex';
     requestAnimationFrame(()=>applyFabPosition(fab));
   }
