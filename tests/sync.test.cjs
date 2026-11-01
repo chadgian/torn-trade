@@ -50,7 +50,7 @@ test('Data Quality provides suggested actions and developer contact for non-user
   const html=app.diagnosticsHtml(),report=app.diagnosticReport(),row=report.notices.find(n=>n.code==='API_SCHEMA');
   assert.equal(html.includes('Suggested action'),true);
   assert.equal(html.includes('https://www.torn.com/profiles.php?XID=4325416'),true);
-  assert.equal(html.includes('v0.5.0'),true);
+  assert.match(html,/v0\.5\.\d+/);
   assert.equal(row.supportDetail.includes('API_SCHEMA'),true);
   assert.equal(row.suggestedAction.length>20,true);
   assert.equal(JSON.stringify(report).includes('https://'),false);
