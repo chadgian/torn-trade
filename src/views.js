@@ -45,12 +45,12 @@
     const activity=getSyncActivity(),owned=activity?.tabId===TAB_SYNC_ID;
     const mode=activity?.mode==='full'?'Full Resync':activity?.background?'Background Quick Sync':'Quick Sync';
     const title=activity?mode+' running in '+(owned?'this tab':'another tab')+(activity.progress?' \u00B7 '+activity.progress:''):'No sync running';
-    return '<span id="tta-sync-activity" class="tta-sync-activity '+(activity?(owned?'own':'other'):'idle')+'"'+
-      ' data-sync-signature="'+esc(syncActivitySignature())+'" role="status" aria-live="polite"'+
+    return '<button type="button" id="tta-sync-activity" data-act="syncActivityDetails" class="tta-sync-activity '+(activity?(owned?'own':'other'):'idle')+'"'+
+      ' data-sync-signature="'+esc(syncActivitySignature())+'" aria-live="polite"'+
       ' aria-label="'+esc(title)+'" title="'+esc(title)+'" '+(activity?'':'hidden')+'>'+
       '<span class="tta-sync-activity-icon" aria-hidden="true">'+(owned?'<span class="tta-spinner"></span>':'\u25A3')+'</span>'+
       '<span class="tta-sync-activity-label">'+(owned?'This tab':'Other tab')+'</span>'+
-      '<span class="tta-sync-activity-mode">'+esc(mode)+'</span></span>';
+      '<span class="tta-sync-activity-mode">'+esc(mode)+'</span></button>';
   }
 
   function header(title, sub, back=false) {
