@@ -9,6 +9,7 @@ test('this tab publishes Quick Sync activity and clears it after completion',()=
   assert.equal(active.mode,'quick');
   assert.equal(active.background,true);
   assert.match(app.syncActivityIndicatorHtml(),/This tab/);
+  assert.match(app.syncActivityIndicatorHtml(),/data-act="syncActivityDetails"/);
   assert.match(app.syncActivityIndicatorHtml(),/Background Quick Sync/);
   app.updateSyncActivityProgress('Checking history page 2');
   app.publishSyncActivity(true);
