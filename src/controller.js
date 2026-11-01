@@ -46,10 +46,17 @@
 
   function setSyncProgress(msg) {
     const value=String(msg||'');
-    if(state.backgroundSyncing){state.backgroundSyncProgress=value;return;}
+    if(state.backgroundSyncing){state.backgroundSyncProgress=value;updateSyncActivityProgress(value);return;}
     state.syncProgress=value;
     const text=document.getElementById('tta-sync-progress-text');if(text)text.textContent=state.syncProgress;
     if(state.syncing)setBusyDetail(state.syncProgress);
+    updateSyncActivityProgress(value);
+  }
+
+  function updateSyncStatusDom() {
+    const marker=document.getElementById('tta-sync-activity');
+    if(marker&&marker.getAttribute('data-sync-signature')!==syncActivitySignature())marker.outerHTML=syncActivityIndicatorHtml();
+    updateFabState();
   }
 
   async function openAnalyzer() {
