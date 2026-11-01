@@ -562,7 +562,7 @@
 }
 
 /* A lightweight, live cross-tab sync indicator; no full analytics rerender on heartbeat. */
-#tta-root .tta-sync-activity{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:225px;min-height:30px;padding:4px 8px;border:1px solid #79dfb347;border-radius:9px;background:#79dfb310;color:var(--tta-green)!important;font-size:10px;font-weight:700;line-height:1.2;cursor:help}
+#tta-root .tta-sync-activity{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:225px;min-height:30px;padding:4px 8px;border:1px solid #79dfb347;border-radius:9px;background:#79dfb310;color:var(--tta-green)!important;font-size:10px;font-weight:700;line-height:1.2;cursor:pointer}
 #tta-root .tta-sync-activity[hidden]{display:none!important}
 #tta-root .tta-sync-activity.other{border-color:#f0cc7854;background:#f0cc7810;color:var(--tta-yellow)!important}
 #tta-root .tta-sync-activity-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;min-width:15px;height:16px;font-size:15px}
