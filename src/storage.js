@@ -7,6 +7,82 @@
   const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
   function crossTabSignalKey(){return NS+'crossTabSignal';}
 
+  // Sync activity is only a short-lived UI signal. Web Locks remain authoritative for writes.
+  const TAB_SYNC_ID=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  const SYNC_ACTIVITY_TTL_MS=90000;
+  let localSyncActivity=null,peerSyncActivity=null,syncActivityTimer=0,lastSyncActivityPublish=0;
+  function crossTabSyncKey(){return NS+'syncActivity';}
+  function validSyncActivity(value) {
+    if(!value||typeof value!=='object'||typeof value.tabId!=='string'||!value.tabId||value.tabId.length>100)return null;
+    const updatedAt=Number(value.updatedAt)||0;
+    if(!updatedAt||updatedAt>Date.now()+10000||Date.now()-updatedAt>SYNC_ACTIVITY_TTL_MS)return null;
+    return {tabId:value.tabId,mode:value.mode==='full'?'full':'quick',background:value.background===true,
+      startedAt:Number(value.startedAt)||updatedAt,updatedAt,progress:String(value.progress||'').slice(0,220)};
+  }
+  function getSyncActivity() {
+    if(localSyncActivity)return localSyncActivity;
+    try{
+      const raw=localStorage.getItem(crossTabSyncKey());
+      const saved=raw?validSyncActivity(JSON.parse(raw)):null;
+      return saved?.tabId===TAB_SYNC_ID?null:saved;
+    }catch(_){
+      const peer=validSyncActivity(peerSyncActivity);
+      return peer?.tabId===TAB_SYNC_ID?null:peer;
+    }
+  }
+  function syncActivitySignature() {
+    const a=getSyncActivity();
+    return a?[a.tabId,a.mode,a.background?'background':'manual',a.progress].join('|'):'';
+  }
+  function broadcastSyncActivity(activity) {
+    try{
+      if(typeof BroadcastChannel==='undefined')return;
+      const channel=new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+      channel.postMessage({type:'sync-status',activity});channel.close();
+    }catch(_){}
+  }
+  function publishSyncActivity(force=false) {
+    if(!localSyncActivity)return;
+    const now=Date.now();
+    if(!force&&now-lastSyncActivityPublish<3000)return;
+    lastSyncActivityPublish=now;
+    localSyncActivity.updatedAt=now;
+    try{localStorage.setItem(crossTabSyncKey(),JSON.stringify(localSyncActivity));}catch(_){}
+    broadcastSyncActivity(localSyncActivity);
+    updateSyncStatusDom();
+  }
+  function beginSyncActivity(job,background=false) {
+    const now=Date.now();
+    localSyncActivity={tabId:TAB_SYNC_ID,mode:job?.syncMode==='full'?'full':'quick',
+      background:!!background,startedAt:now,updatedAt:now,progress:String(job?.progress||'').slice(0,220)};
+    publishSyncActivity(true);
+    clearInterval(syncActivityTimer);
+    syncActivityTimer=setInterval(()=>publishSyncActivity(true),10000);
+  }
+  function updateSyncActivityProgress(progress) {
+    if(!localSyncActivity)return;
+    const value=String(progress||'').slice(0,220);
+    if(localSyncActivity.progress===value)return;
+    localSyncActivity.progress=value;
+    publishSyncActivity();
+  }
+  function endSyncActivity() {
+    if(!localSyncActivity)return;
+    clearInterval(syncActivityTimer);syncActivityTimer=0;
+    localSyncActivity=null;lastSyncActivityPublish=0;
+    try{
+      const raw=localStorage.getItem(crossTabSyncKey());
+      if(raw&&JSON.parse(raw)?.tabId===TAB_SYNC_ID)localStorage.removeItem(crossTabSyncKey());
+    }catch(_){}
+    broadcastSyncActivity(null);
+    updateSyncStatusDom();
+  }
+  function acceptSyncActivityMessage(message) {
+    if(message?.type!=='sync-status')return;
+    peerSyncActivity=message.activity?validSyncActivity(message.activity):null;
+    updateSyncStatusDom();
+  }
+
   function storageIssue(key) {
     try{if(typeof storageIssues!=='undefined'&&!storageIssues.includes(key))storageIssues.push(key);}catch(_){}
   }
