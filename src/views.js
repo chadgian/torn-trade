@@ -41,11 +41,23 @@
     return `<div class="tta-thumbwrap"><img class="tta-thumb" src="${esc(item.image)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="tta-thumbfallback">\u25C7</span></div>`;
   }
 
+  function syncActivityIndicatorHtml() {
+    const activity=getSyncActivity(),owned=activity?.tabId===TAB_SYNC_ID;
+    const mode=activity?.mode==='full'?'Full Resync':activity?.background?'Background Quick Sync':'Quick Sync';
+    const title=activity?mode+' running in '+(owned?'this tab':'another tab')+(activity.progress?' \u00B7 '+activity.progress:''):'No sync running';
+    return '<span id="tta-sync-activity" class="tta-sync-activity '+(activity?(owned?'own':'other'):'idle')+'"'+
+      ' data-sync-signature="'+esc(syncActivitySignature())+'" role="status" aria-live="polite"'+
+      ' aria-label="'+esc(title)+'" title="'+esc(title)+'" '+(activity?'':'hidden')+'>'+
+      '<span class="tta-sync-activity-icon" aria-hidden="true">'+(owned?'<span class="tta-spinner"></span>':'\u25A3')+'</span>'+
+      '<span class="tta-sync-activity-label">'+(owned?'This tab':'Other tab')+'</span>'+
+      '<span class="tta-sync-activity-mode">'+esc(mode)+'</span></span>';
+  }
+
   function header(title, sub, back=false) {
     const views=[['dashboard','Overview','dashboard','\u2302'],['transactions','Transactions','transactions','\u2630'],['cash','Cash Flow','cashflow','\u2195'],['trade','Trade Analysis','trade','\u25C7'],['ledger','Acquisitions','ledger','\u2637'],['excluded','Excluded','excluded','\u2298'],['networth','Net Worth','networth','\u25C8'],['insights','Insights & Goals','insights','\u25CE']];
     const primary=views.some(([view])=>state.view===view);
     const nav=primary?`<nav class="tta-workspaces" aria-label="Financial workspaces">${views.map(([view,label,action,icon])=>`<button data-act="${action}" aria-current="${state.view===view?'page':'false'}"><span class="tta-navicon" aria-hidden="true">${icon}</span><span>${label}</span></button>`).join('')}</nav>`:'';
-    return `<div class="tta-header ${primary?'primary':'utility'}">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">\u2039</button>':''}<div class="tta-brand"><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div><button class="tta-iconbtn" data-act="help" aria-label="Help and guide" title="Help">?</button><button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">\u2699</button><button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">\u00D7</button></div>${nav}`;
+    return `<div class="tta-header ${primary?'primary':'utility'}">${back?'<button class="tta-back" data-act="back" aria-label="Back" title="Back">\u2039</button>':''}<div class="tta-brand"><div class="tta-brandcopy"><div class="tta-title">${esc(title)}${state.demo?'<span class="tta-demo">DEMO</span>':''}</div><div class="tta-sub">${esc(sub)}</div></div></div>${syncActivityIndicatorHtml()}<button class="tta-iconbtn" data-act="help" aria-label="Help and guide" title="Help">?</button><button class="tta-iconbtn" data-act="settings" aria-label="Settings" title="Settings">\u2699</button><button class="tta-iconbtn" data-act="close" aria-label="Close cash flow analyzer" title="Close">\u00D7</button></div>${nav}`;
   }
 
   function pinnedCountFor(items) {
