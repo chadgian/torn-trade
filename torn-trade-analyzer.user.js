@@ -35,7 +35,7 @@
     const updatedAt=Number(value.updatedAt)||0;
     if(!updatedAt||updatedAt>Date.now()+10000||Date.now()-updatedAt>SYNC_ACTIVITY_TTL_MS)return null;
     return {tabId:value.tabId,mode:value.mode==='full'?'full':'quick',background:value.background===true,
-      startedAt:Number(value.startedAt)||updatedAt,updatedAt,progress:String(value.progress||'').slice(0,220)};
+      startedAt:Number(value.startedAt)||updatedAt,updatedAt,progress:redactText(value.progress||'').slice(0,220)};
   }
   function getSyncActivity() {
     if(localSyncActivity)return localSyncActivity;
@@ -72,14 +72,14 @@
   function beginSyncActivity(job,background=false) {
     const now=Date.now();
     localSyncActivity={tabId:TAB_SYNC_ID,mode:job?.syncMode==='full'?'full':'quick',
-      background:!!background,startedAt:now,updatedAt:now,progress:String(job?.progress||'').slice(0,220)};
+      background:!!background,startedAt:now,updatedAt:now,progress:redactText(job?.progress||'').slice(0,220)};
     publishSyncActivity(true);
     clearInterval(syncActivityTimer);
     syncActivityTimer=setInterval(()=>publishSyncActivity(true),10000);
   }
   function updateSyncActivityProgress(progress) {
     if(!localSyncActivity)return;
-    const value=String(progress||'').slice(0,220);
+    const value=redactText(progress||'').slice(0,220);
     if(localSyncActivity.progress===value)return;
     localSyncActivity.progress=value;
     publishSyncActivity();
