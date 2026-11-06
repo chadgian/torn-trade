@@ -59,17 +59,18 @@
     try{
       if(typeof BroadcastChannel!=='undefined'){
         crossTabChannel=new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
-        crossTabChannel.addEventListener('message',event=>{if(event?.data?.type==='history-updated')scheduleCrossTabRefresh(event.data.reason||'broadcast');});
+        crossTabChannel.addEventListener('message',event=>{if(event?.data?.type==='history-updated')scheduleCrossTabRefresh(event.data.reason||'broadcast');else if(event?.data?.type==='sync-status')acceptSyncActivityMessage(event.data);});
       }
     }catch(_){crossTabChannel=null;}
     const passiveKeys=new Set(['goals','tracked','pinnedIds','hiddenIds','apiKey','catalogUpdatedAt','logTypesUpdatedAt']);
     window.addEventListener('storage',event=>{
       if(event.key===crossTabSignalKey()){scheduleCrossTabRefresh('storage-signal');return;}
+      if(event.key===crossTabSyncKey()){updateSyncStatusDom();return;}
       if(!event.key?.startsWith(NS))return;
       const key=event.key.slice(NS.length);
       if(passiveKeys.has(key))scheduleCrossTabRefresh('storage');
     });
-    const refreshOnFocus=()=>{if(Date.now()-lastCrossTabRefreshAt>1500)scheduleCrossTabRefresh('focus',40);};
+    const refreshOnFocus=()=>{updateSyncStatusDom();if(Date.now()-lastCrossTabRefreshAt>1500)scheduleCrossTabRefresh('focus',40);};
     window.addEventListener('focus',refreshOnFocus);
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshOnFocus();});
   }
@@ -93,4 +94,4 @@
 
   setupCrossTabRefresh();
   const boot=async()=>{if(document.body){void prefillPendingSupportTornMail();await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
-  setInterval(()=>{if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);
+  setInterval(()=>{updateSyncStatusDom();if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);

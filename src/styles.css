@@ -560,3 +560,15 @@
   #tta-root .tta-transaction-searchwrap input{padding-right:34px}
   #tta-root .tta-transaction-meta{font-size:10px}
 }
+
+/* A lightweight, live cross-tab sync indicator; no full analytics rerender on heartbeat. */
+#tta-root .tta-sync-activity{display:inline-flex;align-items:center;flex:0 0 auto;gap:5px;max-width:225px;min-height:30px;padding:4px 8px;border:1px solid #79dfb347;border-radius:9px;background:#79dfb310;color:var(--tta-green)!important;font-size:10px;font-weight:700;line-height:1.2;cursor:pointer}
+#tta-root .tta-sync-activity[hidden]{display:none!important}
+#tta-root .tta-sync-activity.other{border-color:#f0cc7854;background:#f0cc7810;color:var(--tta-yellow)!important}
+#tta-root .tta-sync-activity-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;min-width:15px;height:16px;font-size:15px}
+#tta-root .tta-sync-activity-icon .tta-spinner{width:13px;height:13px;border-width:2px;border-top-color:var(--tta-green)}
+#tta-root .tta-sync-activity-mode{font-size:9px;font-weight:500;opacity:.88;max-width:98px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tta-fab .tta-fab-other{position:absolute;display:grid;place-items:center;bottom:-5px;right:-5px;width:19px;height:19px;border:1px solid #f0cc78;border-radius:6px;background:#382e1b;color:#f0cc78;font-size:15px;line-height:1;box-shadow:0 2px 9px #06131b99}
+#tta-fab.syncing-other{border-color:#f0cc78a8}
+@media(max-width:900px){#tta-root .tta-sync-activity-mode{display:none}}
+@media(max-width:420px){#tta-root .tta-sync-activity{gap:3px;padding:4px 5px;min-height:28px;font-size:9px}#tta-root .tta-sync-activity-icon{min-width:13px;width:13px}}

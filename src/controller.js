@@ -46,10 +46,17 @@
 
   function setSyncProgress(msg) {
     const value=String(msg||'');
-    if(state.backgroundSyncing){state.backgroundSyncProgress=value;return;}
+    if(state.backgroundSyncing){state.backgroundSyncProgress=value;updateSyncActivityProgress(value);return;}
     state.syncProgress=value;
     const text=document.getElementById('tta-sync-progress-text');if(text)text.textContent=state.syncProgress;
     if(state.syncing)setBusyDetail(state.syncProgress);
+    updateSyncActivityProgress(value);
+  }
+
+  function updateSyncStatusDom() {
+    const marker=document.getElementById('tta-sync-activity');
+    if(marker&&marker.getAttribute('data-sync-signature')!==syncActivitySignature())marker.outerHTML=syncActivityIndicatorHtml();
+    updateFabState();
   }
 
   async function openAnalyzer() {
@@ -146,6 +153,13 @@
       if(['resetData','importBackup','saveApiKey','clearApiKey'].includes(act)&&(state.syncing||state.backgroundSyncing)){toast('Stop the current sync before changing history or API keys.');return;}
       if(act==='close'){cancelTransition();state.open=false;if(!state.syncing)setBusy(false);render();}
       else if(act==='minimizeSync'){cancelTransition();state.open=false;render();}
+      else if(act==='syncActivityDetails'){
+        const activity=getSyncActivity();
+        if(activity){
+          const mode=activity.mode==='full'?'Full Resync':activity.background?'Background Quick Sync':'Quick Sync';
+          toast((activity.tabId===TAB_SYNC_ID?'This tab':'Other tab')+' \u00B7 '+mode+' \u00B7 '+(activity.progress||'Sync in progress'));
+        }
+      }
       else if(act==='back'){await navigate(state.view==='ledger'?'trade':state.view==='updates'?'settings':'dashboard');}
       else if(['dashboard','diagnostics','settings','help','updates','insights','trade','networth','excluded','transactions'].includes(act)){await navigate(act);}
       else if(act==='exportDiagnostics'){downloadTextFile('torn-data-quality.json',JSON.stringify(diagnosticReport(),null,2),'application/json');}

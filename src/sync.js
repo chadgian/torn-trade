@@ -207,7 +207,7 @@
     const text=String(progress||''),m=fullResyncProgressMetrics(job);if(!m)return text;const pc=Math.max(0,Math.min(99,Math.round(m.percent))),eta=m.etaNote||(m.etaMs!=null?`~${formatEtaDuration(m.etaMs)} left`:'estimating time left');return `${pc}% \u00B7 ${eta} \u00B7 ${text}`;
   }
   async function checkpointSyncJob(job,progress='') {
-    if(progress){job.progressRaw=String(progress);job.progress=decorateSyncProgress(job,job.progressRaw);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);}
+    if(progress){job.progressRaw=String(progress);job.progress=decorateSyncProgress(job,job.progressRaw);if(job?.background)state.backgroundSyncProgress=job.progress;else setSyncProgress(job.progress);updateSyncActivityProgress(job.progress);}
     await flushDurableStorage();
     if(!saveSyncJob(job))throw new AnalyzerError('STORAGE_WRITE','Unable to save the resumable sync checkpoint. Free some browser storage and try again.',{source:'syncJob',phase:job.phase});
   }
@@ -682,6 +682,7 @@
     const background=!!(options?.background||job?.background);
     if(state.syncing||state.backgroundSyncing)return;
     if(background)state.backgroundSyncing=true;else state.syncing=true;
+    beginSyncActivity(job,background);
     state.syncCancel=false;if(!background)updateFabState();
     if(resumed){const prior=String(job.progress||job.periodText).replace(/^Resumed after page reload \u00B7 /,'');job.resumedCount=(Number(job.resumedCount)||0)+1;job.progress=`Resumed after page reload \u00B7 ${prior}`;setSyncProgress(job.progress);}
     else setSyncProgress(job.progress||`Preparing historical scan for ${job.periodText}\u2026`);
@@ -724,6 +725,7 @@
     }
     finally{
       try{await flushDurableStorage();announceCrossTabUpdate(job?.active?'sync-checkpoint':'sync-complete');}catch(_){}
+      endSyncActivity();
       if(background){state.backgroundSyncing=false;queueAnalyticsRender();}
       else{state.syncing=false;updateFabState();setBusy(false);render();}
     }
