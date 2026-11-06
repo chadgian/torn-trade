@@ -54,15 +54,17 @@
   function updateFabState() {
     const fab=document.getElementById('tta-fab');if(!fab)return;
     const activity=getSyncActivity(),owned=activity?.tabId===TAB_SYNC_ID;
-    const status=owned?'own':activity?'other':'idle';
+    const status=owned?(activity?.background?'own-background':'own-manual'):activity?'other':'idle';
     const mode=activity?.mode==='full'?'Full Resync':activity?.background?'Background Quick Sync':'Quick Sync';
     fab.classList.toggle('syncing',!!activity);
     fab.classList.toggle('syncing-other',status==='other');
+    fab.classList.toggle('syncing-background',status==='own-background');
     const description=activity?mode+' running in '+(owned?'this tab':'another tab'):'Open Cash Flow Analyzer';
     fab.setAttribute('aria-label',description);
     fab.title=description+(activity?.progress?' \u00B7 '+activity.progress:'');
     if(fab.dataset.syncStatus!==status){
-      fab.innerHTML=owned?'<span class="tta-fabspinner" aria-hidden="true"></span>':
+      fab.innerHTML=status==='own-manual'?'<span class="tta-fabspinner" aria-hidden="true"></span>':
+        status==='own-background'?fabIconSvg()+'<span class="tta-fab-background" aria-hidden="true">\u21BB</span>':
         status==='other'?fabIconSvg()+'<span class="tta-fab-other" aria-hidden="true">\u25A3</span>':fabIconSvg();
       fab.dataset.syncStatus=status;
     }
