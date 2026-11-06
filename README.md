@@ -2,11 +2,11 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.7.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.8.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
 
 ## Features
 
-- Cross-tab sync activity indicators distinguish **This tab** (animated sync icon) from **Other tab** (monitor badge) in the header and floating launcher, with sync type/progress on hover or tap. A short-lived heartbeat clears abandoned status; the existing Web Lock continues to enforce exclusive synchronization where supported.
+- Cross-tab sync activity indicators distinguish **manual sync here** (animated icon), **background Quick Sync here** (static dark-green border and badge), and **sync in another tab** (yellow monitor badge) in the header and floating launcher, with sync type/progress on hover or tap. A short-lived heartbeat clears abandoned status; the existing Web Lock continues to enforce exclusive synchronization where supported.
 
 - TCT daily overview: money in, money out, net flow and financial position.
 - Dedicated Transactions workspace with compact search, date/flow/category/status filters, highlighted incoming/outgoing/transfer rows and progressive loading.
