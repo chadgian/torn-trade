@@ -61,3 +61,45 @@ test('BroadcastChannel activity still works if localStorage is unavailable',()=>
   app.acceptSyncActivityMessage({type:'sync-status',activity:null});
   assert.equal(app.getSyncActivity(),null);
 });
+
+test('background Quick Sync uses static dark-green badge while manual sync spins',()=>{
+  const {app,context,storage}=harness();
+  const classes=new Set();
+  const fab={
+    dataset:{},style:{},innerHTML:'',title:'',
+    classList:{toggle:(name,enabled)=>enabled?classes.add(name):classes.delete(name)},
+    setAttribute(name,value){this[name]=value;}
+  };
+  context.document.getElementById=id=>id==='tta-fab'?fab:null;
+  app.beginSyncActivity({syncMode:'quick',progress:'Checking logs'},true);
+  app.updateFabState();
+  assert.equal(fab.dataset.syncStatus,'own-background');
+  assert.match(fab.innerHTML,/tta-fabicon/);
+  assert.match(fab.innerHTML,/tta-fab-background/);
+  assert.doesNotMatch(fab.innerHTML,/tta-fabspinner/);
+  assert.equal(classes.has('syncing-background'),true);
+  assert.equal(classes.has('syncing-other'),false);
+  const header=app.syncActivityIndicatorHtml();
+  assert.match(header,/tta-sync-activity background/);
+  assert.doesNotMatch(header,/tta-spinner/);
+  assert.match(header,/Background Quick Sync/);
+  app.endSyncActivity();
+  app.beginSyncActivity({syncMode:'quick',progress:'Manual sync'},false);
+  app.updateFabState();
+  assert.equal(fab.dataset.syncStatus,'own-manual');
+  assert.match(fab.innerHTML,/tta-fabspinner/);
+  assert.doesNotMatch(fab.innerHTML,/tta-fab-background/);
+  assert.equal(classes.has('syncing-background'),false);
+  assert.match(app.syncActivityIndicatorHtml(),/tta-spinner/);
+  app.endSyncActivity();
+  assert.equal(fab.dataset.syncStatus,'idle');
+  assert.doesNotMatch(fab.innerHTML,/tta-fab-background|tta-fabspinner/);
+  storage.set('tta:v1:syncActivity',JSON.stringify({
+    tabId:'remote',mode:'quick',background:true,updatedAt:Date.now()
+  }));
+  app.updateFabState();
+  assert.equal(fab.dataset.syncStatus,'other');
+  assert.match(fab.innerHTML,/tta-fab-other/);
+  assert.equal(classes.has('syncing-other'),true);
+  assert.equal(classes.has('syncing-background'),false);
+});
