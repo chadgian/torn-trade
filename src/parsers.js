@@ -326,6 +326,7 @@
       return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction:explicit.direction,amount,category:explicit.category,source:explicit.category==='Player Transfers'?'Player Transfer':'Torn Log',title:`${title||explicit.label}${suffix}`,logId:logTypeId,field:explicit.field,transfer:false,counterpartyId:cp.id||0,counterpartyName:cp.name||''}];
     }
     if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return[];
+    if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return[];
     const domainRows=parseDomainCashFlowEntry(entry);if(domainRows!==null)return domainRows;
     if(!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
@@ -379,10 +380,12 @@
   }
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
+    if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
     const candidate=financialAuditCandidate(entry);if(!field&&!candidate)return null;
-    return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
+    const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
+    return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field&&!uncertainCurrency,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
     const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
