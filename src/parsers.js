@@ -325,7 +325,7 @@
       const cp=extractCounterparty(payload,explicit.direction),suffix=cp.name?` ${explicit.direction==='out'?'to':'from'} ${cp.name}`:cp.id?` ${explicit.direction==='out'?'to':'from'} #${cp.id}`:'';
       return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction:explicit.direction,amount,category:explicit.category,source:explicit.category==='Player Transfers'?'Player Transfer':'Torn Log',title:`${title||explicit.label}${suffix}`,logId:logTypeId,field:explicit.field,transfer:false,counterpartyId:cp.id||0,counterpartyName:cp.name||''}];
     }
-    if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return[];
+    if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return[];
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return[];
     const domainRows=parseDomainCashFlowEntry(entry);if(domainRows!==null)return domainRows;
     if(!financialTitleContext(title))return[];
@@ -381,7 +381,7 @@
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
-    if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
+    if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
     const candidate=financialAuditCandidate(entry);if(!field&&!candidate)return null;
     const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
