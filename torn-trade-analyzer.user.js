@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.8
+// @version      0.5.9
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -326,9 +326,9 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.8';
+  const VERSION = '0.5.9';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.5';
+  const ACCOUNTING_VERSION = '0.5.9';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -883,7 +883,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Accounting rules were updated. Full Resync reparses historical cash events, including exact bounty placement costs and fees.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Full Resync rechecks older cash events with verified directions and capital transfers.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
@@ -900,7 +900,9 @@
     if(unmatched)add('FIFO_UNMATCHED',`${qty(unmatched)} sold units have no earlier recorded acquisition and are excluded from profit.`,{qty:unmatched});
     if(unknown)add('FIFO_COST_UNKNOWN',`${qty(unknown)} sold units have unknown acquisition cost or proceeds and are excluded from profit.`,{qty:unknown});
     if(estimated)add('VALUATION_INFERRED',`${qty(estimated)} item rows use allocated values. Mixed trades are estimates.`,{count:estimated});
-    if(state.unrecognizedFinancial.length)add('UNCLASSIFIED_FINANCE',`${qty(state.unrecognizedFinancial.length)} financial events are excluded from totals. Review Insights.`,{count:state.unrecognizedFinancial.length});
+    if(state.unrecognizedFinancial.length)add('UNCLASSIFIED_FINANCE',`${qty(state.unrecognizedFinancial.length)} financial events are excluded from totals. Review the Unclassified Financial Logs section below.`,{count:state.unrecognizedFinancial.length});
+    const legacyPropertySales=(state.cashFlows||[]).filter(x=>/property.*(sale|sold|sell)/i.test(String(x?.title||''))&&x?.direction==='out'&&x?.field==='cost').length;
+    if(legacyPropertySales)add('PROPERTY_SALE_RECHECK',`${qty(legacyPropertySales)} older property sale record(s) may have the wrong cash direction. Full Resync rechecks these events.`,{count:legacyPropertySales,source:'migration'});
     if(state.catalog.length&&nowSec()-Number(state.catalogUpdatedAt||0)>21600)add('CATALOG_STALE','Market values are more than six hours old; valuations may be stale.',{timestamp:state.catalogUpdatedAt||0});
     const snap=latestFinancialSnapshot();
     if(snap&&nowSec()-Number(snap.timestamp)>3600)add('SNAPSHOT_STALE','The financial snapshot is more than an hour old.',{timestamp:snap.timestamp});
@@ -915,8 +917,10 @@
     const notices=dataQualityNotices(),d=state.sync?.diagnostics||{},st=durableStorageState||{};
     const backend=st.backend==='pda'?'Torn PDA native storage':st.backend==='indexeddb'?'Browser IndexedDB':'Browser localStorage fallback';
     const usage=st.quota>0?((st.used/1048576).toFixed(1)+' / '+(st.quota/1048576).toFixed(1)+' MB'):(st.backend==='localStorage'?'Shared browser quota':'Available');
+    const unknownRows=(state.unrecognizedFinancial||[]).slice(0,50);
+    const unknownHtml=`<section class="tta-fin-section"><h3>Unclassified Financial Logs (${qty((state.unrecognizedFinancial||[]).length)})</h3><p class="tta-note">These events are not included in personal cash flow because their amounts, directions or currencies cannot yet be verified. Only log ID, title, sanitized amount-field name and review reason are stored. No raw API responses or keys are kept.</p>${unknownRows.map(row=>`<div class="tta-fin-row"><span><strong>${esc(row.title||'Unknown log')}</strong> / ID ${Number(row.logId)||0} / ${esc(row.reason||'Needs manual verification')}<small>${esc(row.field||'No verified cash field')}</small></span><b>${row.amountKnown===false?'Review amount':money(row.amount||0)}</b></div>`).join('')||'<div class="tta-empty">No unclassified financial log entries saved.</div>'}${(state.unrecognizedFinancial||[]).length>unknownRows.length?`<p class="tta-note">Showing ${unknownRows.length} of ${(state.unrecognizedFinancial||[]).length} saved events.</p>`:''}</section>`;
     const storageHtml=`<section class="tta-fin-section"><h3>Storage</h3><div class="tta-fin-row"><span>History backend</span><b>${esc(backend)}</b></div><div class="tta-fin-row"><span>Usage</span><b>${esc(usage)}</b></div>${st.migrated?'<div class="tta-note">'+qty(st.migrated)+' legacy data sets were moved safely from localStorage during this session.</div>':''}</section>`;
-    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div><div class="tta-note"><strong>Fresh diagnostic cycle:</strong> Starting a manual Quick Sync or Full Resync clears previously recorded notices before the new check begins. If an issue still exists, TCFA records it again; if it has been fixed, the old notice stays gone. Background syncs do not clear notices.</div>${notices.map((n,index)=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p>${diagnosticGuidanceHtml(n,index)}<pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>Latest successful sync</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Manual Quick Sync</span><b>${state.sync.lastManualQuickSync?esc(tctDateTimeStr(state.sync.lastManualQuickSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Full Resync</span><b>${state.sync.lastFullResync?esc(tctDateTimeStr(state.sync.lastFullResync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
+    return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div><div class="tta-note"><strong>Fresh diagnostic cycle:</strong> Starting a manual Quick Sync or Full Resync clears previously recorded notices before the new check begins. If an issue still exists, TCFA records it again; if it has been fixed, the old notice stays gone. Background syncs do not clear notices.</div>${notices.map((n,index)=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p>${diagnosticGuidanceHtml(n,index)}<pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${unknownHtml}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>Latest successful sync</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Manual Quick Sync</span><b>${state.sync.lastManualQuickSync?esc(tctDateTimeStr(state.sync.lastManualQuickSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Full Resync</span><b>${state.sync.lastFullResync?esc(tctDateTimeStr(state.sync.lastFullResync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
@@ -924,7 +928,7 @@
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
     const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
-    return {app:'Torn Cash Flow Analyzer',version:VERSION,accountingVersion:ACCOUNTING_VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,lastManualQuickSync:Number(state.sync.lastManualQuickSync)||0,lastFullResync:Number(state.sync.lastFullResync)||0,historyComplete:!!state.sync.firstSyncComplete,environment:diagnosticEnvironment(),counts,pendingSync,notices:dataQualityNotices().map(n=>{const g=diagnosticGuidance(n);return {code:n.code,severity:n.severity,message:redactText(n.message),firstAt:Number(n.firstAt)||0,lastAt:Number(n.lastAt)||0,occurrences:Number(n.occurrences)||1,suggestedAction:redactText(g.text),supportDetail:diagnosticSupportDetail(n),context:safeDiagnosticContext(n.context)};})};
+    return {app:'Torn Cash Flow Analyzer',version:VERSION,accountingVersion:ACCOUNTING_VERSION,generatedAt:nowSec(),lastSync:Number(state.sync.lastSync)||0,lastManualQuickSync:Number(state.sync.lastManualQuickSync)||0,lastFullResync:Number(state.sync.lastFullResync)||0,historyComplete:!!state.sync.firstSyncComplete,environment:diagnosticEnvironment(),counts,pendingSync,unclassifiedFinance:(state.unrecognizedFinancial||[]).slice(0,100).map(row=>({logId:Number(row.logId)||0,title:redactText(row.title||''),category:redactText(row.category||''),field:redactText(row.field||''),amountKnown:row.amountKnown!==false,amount:row.amountKnown===false?null:Math.abs(Number(row.amount)||0),reason:redactText(row.reason||'Needs classification')})),notices:dataQualityNotices().map(n=>{const g=diagnosticGuidance(n);return {code:n.code,severity:n.severity,message:redactText(n.message),firstAt:Number(n.firstAt)||0,lastAt:Number(n.lastAt)||0,occurrences:Number(n.occurrences)||1,suggestedAction:redactText(g.text),supportDetail:diagnosticSupportDetail(n),context:safeDiagnosticContext(n.context)};})};
   }
 
 
@@ -1807,7 +1811,7 @@
     return out;
   }
   function allCashFlows() {
-    const map=new Map();for(const x of state.cashFlows||[])if(x?.id)map.set(String(x.id),x);for(const x of transactionCashFlows())map.set(String(x.id),x);
+    const map=new Map();for(const x of state.cashFlows||[])if(x?.id&&x?.nonPersonal!==true&&String(x?.source||'')!=='Company Daily Adjustment')map.set(String(x.id),x);for(const x of transactionCashFlows())map.set(String(x.id),x);
     return [...map.values()].map(annotateFinancialRecord).sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));
   }
   function cashFlowBoundsToday() {const now=nowSec();return {from:tctDayStart(now),to:now};}
@@ -1859,7 +1863,7 @@
     if(state.cashFlows.length!==beforeCompanyCleanup)save('cashFlows',state.cashFlows);
     if(!Number.isFinite(adjustment)||Math.abs(adjustment)<1){upsertCashFlowRow({id,amount:0});return null;}
     const direction=adjustment>0?'in':'out';
-    const row={id,timestamp:calculatedAt,direction,amount:Math.abs(adjustment),category:'Company Profit / Loss',source:'Company Daily Adjustment',title:`${String(profile?.name||'Company')} daily ${adjustment>0?'profit':'loss'}`,transfer:false,companyId,grossIncome,wages,advertisementBudget,netAdjustment:adjustment};
+    const row={id,timestamp:calculatedAt,direction,amount:Math.abs(adjustment),category:'Company Profit / Loss',source:'Company Daily Adjustment',title:`${String(profile?.name||'Company')} daily ${adjustment>0?'profit':'loss'}`,transfer:false,nonPersonal:true,companyId,grossIncome,wages,advertisementBudget,netAdjustment:adjustment};
     upsertCashFlowRow(row);return row;
   }
   function sumNumeric(obj){return Object.values(obj||{}).reduce((n,v)=>n+(typeof v==='number'&&Number.isFinite(v)?v:0),0);}
@@ -2040,7 +2044,7 @@
 
   function cashFlowHtml() {
     const {from,to}=cashFlowDateRange(),sum=cashFlowSummary(from,to),q=String(state.cashSearch||'').trim().toLowerCase(),cat=String(state.cashCategory||'all');let rows=allCashFlows().filter(x=>x.timestamp>=from&&x.timestamp<=to);if(cat!=='all')rows=rows.filter(x=>x.category===cat);if(q)rows=rows.filter(x=>`${x.title} ${flowDetailText(x)} ${x.itemName||''} ${x.itemId||''} ${x.category} ${x.source} ${x.counterpartyName||''} ${x.counterpartyId||''}`.toLowerCase().includes(q));const cats=[...new Set(allCashFlows().map(x=>x.category))].sort();
-    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div>${cashFlowChartHtml()}<div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow\u2026" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable tta-cashflow-table tta-compact-table" role="table" aria-label="Cash movements"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Event</th><th role="columnheader" scope="col">Flow</th><th role="columnheader" scope="col">Category</th><th role="columnheader" scope="col" style="text-align:right">Amount</th></tr></thead><tbody role="rowgroup">${cashFlowRowsHtml(rows,state.cashLimit||200)}</tbody></table></div><div class="tta-morehint">Showing ${qty(Math.min(rows.length,state.cashLimit||200))} of ${qty(rows.length)} movements ${rows.length>(state.cashLimit||200)?'<button class="tta-btn secondary" data-act="cashMore">Load more</button>':''}</div><div class="tta-note">Rows marked Excluded remain visible for audit but do not affect Dashboard, Cash Flow, Trade Analysis, Acquisitions or other financial analytics. Net Worth always uses the complete stored history. <button class="tta-inline-link" data-act="excluded">Review excluded transactions</button></div></div>`;
+    return `${header('Cash Flow','Every recognized incoming/outgoing money movement',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-cashhero"><div class="tta-cashcard"><small>Earned</small><b class="pos">${money(sum.earned)}</b></div><div class="tta-cashcard"><small>Spent</small><b class="neg">${money(sum.spent)}</b></div><div class="tta-cashcard main"><small>Net cash flow</small><b class="${sum.net>=0?'pos':'neg'}">${money(sum.net)}</b></div></div>${cashFlowChartHtml()}<div class="tta-fin-section"><h3>Category breakdown</h3>${cashBreakdownHtml(sum,20)}</div><div class="tta-listtools"><input id="tta-cash-search" class="tta-history-search" placeholder="Search cash flow\u2026" value="${esc(state.cashSearch||'')}"><select id="tta-cash-category" class="tta-history-search"><option value="all">All categories</option>${cats.map(c=>`<option value="${esc(c)}" ${cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div><div class="tta-ledgerwrap"><table class="tta-flowtable tta-cashflow-table tta-compact-table" role="table" aria-label="Cash movements"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Event</th><th role="columnheader" scope="col">Flow</th><th role="columnheader" scope="col">Category</th><th role="columnheader" scope="col" style="text-align:right">Amount</th></tr></thead><tbody role="rowgroup">${cashFlowRowsHtml(rows,state.cashLimit||200)}</tbody></table></div><div class="tta-morehint">Showing ${qty(Math.min(rows.length,state.cashLimit||200))} of ${qty(rows.length)} movements ${rows.length>(state.cashLimit||200)?'<button class="tta-btn secondary" data-act="cashMore">Load more</button>':''}</div><div class="tta-note">Stock/property capital movements and bank/check/loan principal transfers are shown separately from earned and spent totals. Company operating profit/loss is business performance, not money paid to your personal wallet. Rows marked Excluded remain visible for audit but do not affect Dashboard, Cash Flow, Trade Analysis, Acquisitions or other financial analytics. Net Worth always uses the complete stored history. <button class="tta-inline-link" data-act="excluded">Review excluded transactions</button></div></div>`;
   }
   function labeledKey(k){return String(k).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
   function moneyBreakdownHtml(obj){return Object.entries(obj||{}).map(([k,v])=>{if(typeof v==='object'&&v){const amount=Number(v.amount??v.money??0)||0;return `<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(amount)}</b></div>`;}return typeof v==='number'?`<div class="tta-fin-row"><span>${esc(labeledKey(k))}</span><b>${money(v)}</b></div>`:'';}).join('');}
@@ -2058,7 +2062,7 @@
   function currentGoalValue(goal) {const snap=latestFinancialSnapshot();if(goal.type==='networth')return Number(snap?.networth?.total)||0;if(goal.type==='cash')return sumMoneyTree(snap?.money)||0;if(goal.type==='dailyIncome'){const d=cashFlowBoundsToday();return cashFlowSummary(d.from,d.to).earned;}return 0;}
   function goalTypeLabel(type){return type==='networth'?'Net worth':type==='cash'?'Accessible cash':'Daily income';}
   function goalsHtml() {const cards=(state.goals||[]).map(g=>{const current=currentGoalValue(g),target=Math.max(1,Number(g.target)||1),pct=Math.max(0,Math.min(100,current/target*100));return `<div class="tta-goal"><div class="tta-goal-head"><div><strong>${esc(g.label||goalTypeLabel(g.type))}</strong><small>${esc(goalTypeLabel(g.type))} target</small></div><button class="tta-iconbtn tta-goal-remove" data-act="removeGoal" data-id="${esc(g.id)}" title="Remove goal">\u00D7</button></div><div class="tta-goal-values"><b>${money(current)}</b><span>of ${money(target)}</span></div><div class="tta-goal-track"><span style="width:${pct.toFixed(1)}%"></span></div><small>${pct.toFixed(1)}% complete</small></div>`;}).join('');return `<div class="tta-goal-form"><input id="tta-goal-label" class="tta-history-search" placeholder="Goal name (optional)"><select id="tta-goal-type" class="tta-history-search"><option value="networth">Net worth target</option><option value="cash">Accessible cash target</option><option value="dailyIncome">Daily income target</option></select><input id="tta-goal-target" class="tta-history-search" type="number" min="1" inputmode="numeric" placeholder="Target amount"><button class="tta-btn" data-act="addGoal">Add goal</button></div><div class="tta-goal-list">${cards||'<div class="tta-empty">No goals yet. Add a target to track progress from your latest synced data.</div>'}</div>`;}
-  function insightsHtml() {const spend=analyticsSummary('out'),income=analyticsSummary('in'),u=(state.unrecognizedFinancial||[]).slice(0,20),range=analysisRange(),rangeLabel=state.dateMode==='all'?'All cached history':`${tctDateStr(range.from)} \u2013 ${tctDateStr(range.to)}`;const largestSpend=spend.largest?`${flowActivityLabel(spend.largest)} \u00B7 ${money(spend.largest.amount)}`:'\u2014',largestIncome=income.largest?`${flowActivityLabel(income.largest)} \u00B7 ${money(income.largest.amount)}`:'\u2014';return `${header('Insights & Goals','Spending, income, coverage and targets',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-period"><div><small>Analytics period</small><strong>${esc(rangeLabel)}</strong></div></div><div class="tta-insight-grid"><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Expenses</small><h3>Spending analytics</h3></div></div><div class="tta-fin-grid"><div class="tta-stat"><label>Total spent</label><b class="neg">${money(spend.total)}</b></div><div class="tta-stat"><label>Average / day</label><b>${money(spend.avg)}</b></div><div class="tta-stat"><label>Largest expense</label><b title="${esc(largestSpend)}">${spend.largest?money(spend.largest.amount,true):'\u2014'}</b></div><div class="tta-stat"><label>vs previous period</label><b class="${spend.changePct==null?'':spend.changePct<=0?'pos':'neg'}">${spend.changePct==null?'\u2014':`${spend.changePct>=0?'+':''}${spend.changePct.toFixed(1)}%`}</b></div></div>${categoryAnalyticsHtml(spend,'spending')}<div class="tta-snapshot-note">Largest: ${esc(largestSpend)}</div></section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Income</small><h3>Income analytics</h3></div></div><div class="tta-fin-grid"><div class="tta-stat"><label>Total income</label><b class="pos">${money(income.total)}</b></div><div class="tta-stat"><label>Average / day</label><b>${money(income.avg)}</b></div><div class="tta-stat"><label>Largest income</label><b title="${esc(largestIncome)}">${income.largest?money(income.largest.amount,true):'\u2014'}</b></div><div class="tta-stat"><label>vs previous period</label><b class="${income.changePct==null?'':income.changePct>=0?'pos':'neg'}">${income.changePct==null?'\u2014':`${income.changePct>=0?'+':''}${income.changePct.toFixed(1)}%`}</b></div></div>${categoryAnalyticsHtml(income,'income')}<div class="tta-snapshot-note">Largest: ${esc(largestIncome)}</div></section></div><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Coverage diagnostics</small><h3>Unrecognized financial events</h3></div><span class="tta-sectionhint">${qty(state.unrecognizedFinancial.length)} cached</span></div>${u.length?`<div class="tta-unmapped-list">${u.map(x=>`<div class="tta-unmapped"><div><strong>${esc(x.title)}</strong><small>${esc(tctDateTimeStr(x.timestamp))} TCT \u00B7 log ${x.logId} \u00B7 ${esc(x.field||'money field')}</small></div><b>${money(x.amount||0)}</b></div>`).join('')}</div>`:'<div class="tta-empty">No currently unrecognized money-bearing logs are cached.</div>'}<div class="tta-note">These events are excluded from totals until the analyzer can classify them safely. Only normalized diagnostic details are stored; raw Torn logs are not retained.</div></section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Targets</small><h3>Financial goals</h3></div></div>${goalsHtml()}</section></div>`;}
+  function insightsHtml() {const spend=analyticsSummary('out'),income=analyticsSummary('in'),u=(state.unrecognizedFinancial||[]).slice(0,20),range=analysisRange(),rangeLabel=state.dateMode==='all'?'All cached history':`${tctDateStr(range.from)} \u2013 ${tctDateStr(range.to)}`;const largestSpend=spend.largest?`${flowActivityLabel(spend.largest)} \u00B7 ${money(spend.largest.amount)}`:'\u2014',largestIncome=income.largest?`${flowActivityLabel(income.largest)} \u00B7 ${money(income.largest.amount)}`:'\u2014';return `${header('Insights & Goals','Spending, income, coverage and targets',true)}<div class="tta-content">${periodChipsHtml()}<div class="tta-period"><div><small>Analytics period</small><strong>${esc(rangeLabel)}</strong></div></div><div class="tta-insight-grid"><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Expenses</small><h3>Spending analytics</h3></div></div><div class="tta-fin-grid"><div class="tta-stat"><label>Total spent</label><b class="neg">${money(spend.total)}</b></div><div class="tta-stat"><label>Average / day</label><b>${money(spend.avg)}</b></div><div class="tta-stat"><label>Largest expense</label><b title="${esc(largestSpend)}">${spend.largest?money(spend.largest.amount,true):'\u2014'}</b></div><div class="tta-stat"><label>vs previous period</label><b class="${spend.changePct==null?'':spend.changePct<=0?'pos':'neg'}">${spend.changePct==null?'\u2014':`${spend.changePct>=0?'+':''}${spend.changePct.toFixed(1)}%`}</b></div></div>${categoryAnalyticsHtml(spend,'spending')}<div class="tta-snapshot-note">Largest: ${esc(largestSpend)}</div></section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Income</small><h3>Income analytics</h3></div></div><div class="tta-fin-grid"><div class="tta-stat"><label>Total income</label><b class="pos">${money(income.total)}</b></div><div class="tta-stat"><label>Average / day</label><b>${money(income.avg)}</b></div><div class="tta-stat"><label>Largest income</label><b title="${esc(largestIncome)}">${income.largest?money(income.largest.amount,true):'\u2014'}</b></div><div class="tta-stat"><label>vs previous period</label><b class="${income.changePct==null?'':income.changePct>=0?'pos':'neg'}">${income.changePct==null?'\u2014':`${income.changePct>=0?'+':''}${income.changePct.toFixed(1)}%`}</b></div></div>${categoryAnalyticsHtml(income,'income')}<div class="tta-snapshot-note">Largest: ${esc(largestIncome)}</div></section></div><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Coverage diagnostics</small><h3>Unrecognized financial events</h3></div><span class="tta-sectionhint">${qty(state.unrecognizedFinancial.length)} cached</span></div>${u.length?`<div class="tta-unmapped-list">${u.map(x=>`<div class="tta-unmapped"><div><strong>${esc(x.title)}</strong><small>${esc(tctDateTimeStr(x.timestamp))} TCT \u00B7 log ${x.logId} \u00B7 ${esc(x.field||'cash field not confirmed')} \u00B7 ${esc(x.reason||'Needs classification')}</small></div><b>${x.amountKnown===false?'Pending review':money(x.amount||0)}</b></div>`).join('')}</div>`:'<div class="tta-empty">No currently unrecognized money-bearing logs are cached.</div>'}<div class="tta-note">These events are excluded from totals until the analyzer can classify them safely. Only normalized diagnostic details are stored; raw Torn logs are not retained.</div></section><section class="tta-fin-section"><div class="tta-sectionhead"><div><small>Targets</small><h3>Financial goals</h3></div></div>${goalsHtml()}</section></div>`;}
   function sumMoneyTree(v){if(typeof v==='number'&&Number.isFinite(v))return v;if(Array.isArray(v))return v.reduce((n,x)=>n+sumMoneyTree(x),0);if(v&&typeof v==='object')return Object.values(v).reduce((n,x)=>n+sumMoneyTree(x),0);return 0;}
   function netWorthHistoryPoints(){const {from,to}=selectedPeriodBoundsTct(nowSec()),byDay=new Map();for(const s of state.financialSnapshots||[]){const ts=Number(s?.networth?.timestamp||s?.timestamp)||0,total=Number(s?.networth?.total);if(!(ts>0)||!Number.isFinite(total)||(state.dateMode!=='all'&&(ts<from||ts>to)))continue;const day=tctDayStart(ts),prev=byDay.get(day);if(!prev||ts>prev.ts)byDay.set(day,{ts,total});}return [...byDay.values()].sort((a,b)=>a.ts-b.ts);}
   function netWorthTimelineHtml(){const pts=netWorthHistoryPoints();if(pts.length<2)return '<div class="tta-empty tta-nw-empty"><strong>Timeline starts after two TCT days are stored.</strong><small>Keep syncing normally; the analyzer keeps the latest snapshot for each day.</small></div>';const w=360,h=150,padL=53,padR=8,padT=12,padB=24,min=Math.min(...pts.map(x=>x.total)),max=Math.max(...pts.map(x=>x.total)),span=Math.max(1,max-min),x=i=>padL+(w-padL-padR)*(pts.length===1?0:i/(pts.length-1)),y=v=>padT+(h-padT-padB)*(1-(v-min)/span),line=pts.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(1)} ${y(p.total).toFixed(1)}`).join(' ');return `<div class="tta-nw-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Net worth history"><line class="tta-grid" x1="${padL}" y1="${padT}" x2="${padL}" y2="${h-padB}"/><line class="tta-grid" x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}"/><text class="tta-axis" x="2" y="${padT+4}">${esc(money(max,true))}</text><text class="tta-axis" x="2" y="${h-padB+4}">${esc(money(min,true))}</text><path class="tta-nw-line" d="${line}"/>${pts.map((p,i)=>`<circle class="tta-nw-point" cx="${x(i)}" cy="${y(p.total)}" r="2.4"><title>${esc(tctDateStr(p.ts))}: ${esc(money(p.total))}</title></circle>`).join('')}</svg><div class="tta-nw-chart-meta"><span>${esc(tctDateStr(pts[0].ts))}</span><b class="${pts[pts.length-1].total>=pts[0].total?'pos':'neg'}">${money(pts[pts.length-1].total-pts[0].total)}</b><span>${esc(tctDateStr(pts[pts.length-1].ts))}</span></div></div>`;}
@@ -2299,7 +2303,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.8',label:'Current',items:['Automatic background Quick Sync now keeps the normal TCFA launcher icon with a static dark-green border and corner badge instead of a manual-style spinner.','The in-app sync status also shows a static dark-green glyph for background Quick Sync on this tab; manual syncs retain their animated spinner, and other-tab syncs stay yellow.','Background/manual status transitions refresh correctly without restarting the analyzer or changing synchronization behavior.']},
+      {version:'0.5.9',label:'Current',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
+      {version:'0.5.8',items:['Automatic background Quick Sync now keeps the normal TCFA launcher icon with a static dark-green border and corner badge instead of a manual-style spinner.','The in-app sync status also shows a static dark-green glyph for background Quick Sync on this tab; manual syncs retain their animated spinner, and other-tab syncs stay yellow.','Background/manual status transitions refresh correctly without restarting the analyzer or changing synchronization behavior.']},
       {version:'0.5.7',items:['Active syncs now show a compact live badge in the header and floating launcher, distinguishing this tab from another Torn tab.','Quick Sync, background Quick Sync and Full Resync show their type and recent progress in the badge tooltip without interrupting the financial workspace.','Activity announcements use BroadcastChannel and local storage, with automatic expiry after interrupted tabs; the existing single-writer Web Lock remains authoritative.']},
       {version:'0.5.6',items:['Torn Mail diagnostic drafts now render as a compact HTML report with inline styling instead of a plain-text block.','The rich report keeps the error header, suggested action, TCFA/sync history, runtime/device/storage details, active sync progress and sanitized diagnostic context grouped into readable sections.','TCFA still only opens and fills the Torn compose screen; the player must review the draft and press Send manually. Copy troubleshooting details remains plain text for compatibility.']},
       {version:'0.5.5',items:['Warnings and errors in Data Quality now include an Open Torn Mail draft action that addresses the developer and prefills a troubleshooting subject and body without sending anything automatically.','Added Copy troubleshooting details plus runtime/device, storage, current sync state, last successful Manual Quick Sync and last successful Full Resync context for individual diagnostics.','Legacy bounty-placement rows that may still contain the listed reward instead of Torn\'s total cost are clearly flagged until a Quick Sync can reparse a recent event or a Full Resync rebuilds older history.']},
@@ -2671,7 +2676,7 @@
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     FORCE_FINANCE_LOG_IDS.forEach(id=>{if(!byId.has(id))byId.set(id,{id,title:EXPLICIT_CASH_LOGS.get(id)?.label||PLAYER_ITEM_LOGS.get(id)?.label||`Financial log ${id}`});});
@@ -2952,7 +2957,10 @@
       const cp=extractCounterparty(payload,explicit.direction),suffix=cp.name?` ${explicit.direction==='out'?'to':'from'} ${cp.name}`:cp.id?` ${explicit.direction==='out'?'to':'from'} #${cp.id}`:'';
       return [{id:`cashlog:${entry.id}`,timestamp:Number(entry.timestamp)||0,direction:explicit.direction,amount,category:explicit.category,source:explicit.category==='Player Transfers'?'Player Transfer':'Torn Log',title:`${title||explicit.label}${suffix}`,logId:logTypeId,field:explicit.field,transfer:false,counterpartyId:cp.id||0,counterpartyName:cp.name||''}];
     }
-    if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title)||!financialTitleContext(title))return[];
+    if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return[];
+    if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return[];
+    const domainRows=parseDomainCashFlowEntry(entry);if(domainRows!==null)return domainRows;
+    if(!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
     if(crimeContext){
       const field=strictCrimeCashField(payload,title);if(!field)return[];
@@ -3004,9 +3012,12 @@
   }
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
-    if(isNonCashCompanyAdminLog(title)||!financialTitleContext(`${title} ${category}`)||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||/\btrade\b/i.test(title))return null;
-    const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);if(!field)return null;
-    return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:category||'Financial',field:field.path,amount:Math.abs(Number(field.value)||0)};
+    if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
+    if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
+    const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
+    const candidate=financialAuditCandidate(entry);if(!field&&!candidate)return null;
+    const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
+    return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field&&!uncertainCurrency,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
     const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
@@ -3161,6 +3172,144 @@
 
   function isLegacyTradeLogTransaction(t) {
     return t?.source!=='Player Trade'&&/\btrade\b/i.test(String(t?.title||''));
+  }
+
+
+  // Source: financial-logs.js
+  // Monetary log titles are discovered from /torn/logtypes at runtime. Torn's
+  // public OpenAPI documents dynamic data/params, not a universal amount schema.
+  // Never assign undocumented numerical log IDs or equate points with dollars.
+  function financialDomain(title) {
+    const t=String(title||'').toLowerCase();
+    if(/\bgym\b/.test(t)&&/\b(member(?:ship)?|unloc(?:k|ked)|join(?:ed)?|purchas(?:e|ed)|bought|paid)\b/.test(t))return 'Gym Memberships';
+    if(/\b(?:education|course)\b/.test(t)&&/\b(?:start(?:ed)?|enrol(?:l|led|ment)?|register(?:ed)?|paid|purchas(?:e|ed)|fee)\b/.test(t))return 'Education';
+    if(/\b(?:racing|race|car|garage)\b/.test(t)&&/\b(?:upgrade|purchas(?:e|ed)|buy|bought|entry fee|registration fee|paid)\b/.test(t))return 'Racing';
+    if(/\b(?:casino|roulette|blackjack|poker|slots?|bookie|lottery|high.low|wheel of|keno|craps)\b/.test(t))return 'Gambling';
+    if(/\b(?:stock|shares?|dividend)\b/.test(t))return 'Stocks / Investing';
+    if(/\b(?:property|estate|rental|landlord|rent|upkeep)\b/.test(t))return 'Property';
+    if(/\b(?:bank|investment)\b/.test(t)&&/\b(?:interest|deposit|withdraw|invest|matur|renew|collect|received|paid|cash)\b/.test(t))return 'Banking';
+    if(/\bhunt(?:ing|ed)?\b/.test(t))return 'Hunting';
+    if(/\b(?:cashier.?s? check|cashier.?s? cheque|cheque|cashier check)\b/.test(t))return 'Checks';
+    if(/\bbail\b/.test(t))return 'Bail';
+    if(/\bloan\b/.test(t))return 'Loans';
+    if(/\bauction\b/.test(t))return 'Auction';
+    if(/\b(?:fortune teller|fortune-teller|church|service fee|subscription|consultation fee)\b/.test(t))return 'Services';
+    return '';
+  }
+
+  function financialCashField(payload,keys) {
+    for(const path of keys){
+      const value=nestedValue(payload,path);
+      if(value==null||typeof value==='boolean'||typeof value==='object')continue;
+      if(typeof value==='string'&&!/^-?\d+(?:\.\d+)?$/.test(value))continue;
+      const n=Number(value);
+      if(Number.isFinite(n)&&Math.abs(n)>0)return {path,value:Math.abs(n)};
+    }
+    return null;
+  }
+  const CASH_OUT_KEYS=['money_spent','cash_spent','money_paid','cash_paid','money_lost','cash_lost','amount_paid','cost_total','total_cost','cost_paid','price_paid','cost','fee'];
+  const CASH_IN_KEYS=['money_received','cash_received','money_gained','cash_gained','money_earned','cash_earned','money_won','cash_won','proceeds','sale_total','total_proceeds','payout','refund','interest'];
+
+  // A matched domain owns the event, including when no reliable amount can be read:
+  // this prevents older fuzzy generic rules from reversing a property sale or
+  // counting a race-point upgrade as a dollar expense.
+  function parseDomainCashFlowEntry(entry) {
+    const title=String(entry?.details?.title||''),domain=financialDomain(title);
+    if(!domain)return null;
+    const s=title.toLowerCase(),payload={...(entry?.params||{}),...(entry?.data||{})};
+    const logId=Number(entry?.details?.id)||0,base='cashlog:'+String(entry?.id||'');
+    const timestamp=Number(entry?.timestamp)||0,rows=[];
+    const out=keys=>financialCashField(payload,keys),incoming=keys=>financialCashField(payload,keys);
+    const add=(direction,field,category=domain,kind='cash')=>{
+      if(!field||!(field.value>0))return;
+      rows.push({id:base+':'+kind,timestamp,direction,amount:field.value,category,source:'Torn Log',
+        title,detail:(field.path.includes(' - ')?'Calculated from ':'Verified ')+field.path+' field',logId,field:field.path,
+        transfer:direction.startsWith('transfer')});
+    };
+    if(domain==='Gym Memberships'){
+      if(/\b(?:membership|unlock|join|purchase|bought|paid)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'price','amount'])); 
+    }else if(domain==='Education'){
+      if(!/\b(?:finish|complete|graduate|cancel)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'price','amount']));
+    }else if(domain==='Racing'){
+      // Racing points and car stat upgrades are not dollar flows without a cash field.
+      add('out',out(['money_spent','cash_spent','money_paid','cash_paid','amount_paid','price_paid','cash_cost']));
+    }else if(domain==='Gambling'){
+      const netOut=out(['money_lost','cash_lost','money_spent','cash_spent']);
+      const netIn=incoming(['money_gained','cash_gained','money_won','cash_won']);
+      if(netOut||netIn){add('out',netOut);add('in',netIn);}
+      else{
+        const stake=out(['bet','wager','stake','bet_amount','wager_amount']);
+        const gross=incoming(['payout','gross_payout','total_payout']);
+        if(stake&&gross){add('out',stake,domain,'stake');add('in',gross,domain,'payout');}
+        else if(stake&&/\b(?:bet placed|wager placed|lost|loss)\b/.test(s))add('out',stake);
+        // "winnings" may mean net profit rather than a gross payout; review.
+      }
+    }else if(domain==='Stocks / Investing'){
+      if(/\b(?:dividend|benefit)\b/.test(s))add('in',incoming([...CASH_IN_KEYS,'amount']),domain);
+      else if(/\b(?:sold|sell|sale)\b/.test(s))add('transfer-in',incoming(['money_received','cash_received','proceeds','sale_total','total_proceeds','amount_received','total_sale','sale_price']),domain);
+      else if(/\b(?:bought|buy|purchase|purchased)\b/.test(s))add('transfer-out',out([...CASH_OUT_KEYS,'amount_paid','total_price']),domain);
+    }else if(domain==='Property'){
+      if(/\b(?:sale|sold|sell)\b/.test(s)){
+        // A property-sale "cost" can be the listing fee or property valuation.
+        // Only explicitly incoming proceeds qualify as cash in.
+        add('transfer-in',incoming(['money_received','cash_received','proceeds','sale_total','total_proceeds','sale_price','amount_received']),domain);
+      }else if(/\b(?:purchase|purchased|bought|buy)\b/.test(s)){
+        add('transfer-out',out([...CASH_OUT_KEYS,'amount_paid','purchase_price']),domain);
+      }else if(/\b(?:upkeep|repair|staff fee|maintenance)\b/.test(s)){
+        add('out',out([...CASH_OUT_KEYS,'amount']),domain);
+      }else if(/\b(?:received|collected|earned|landlord|rental income|rent income)\b/.test(s)){
+        add('in',incoming(['rent','rent_received','money_received','cash_received','amount_received','payment_received']),domain);
+      }else if(/\b(?:paid|payment|charged|renting|rented)\b/.test(s)){
+        add('out',out(['rent','rent_paid',...CASH_OUT_KEYS,'amount_paid']),domain);
+      }
+    }else if(domain==='Banking'){
+      if(/\b(?:interest|matur|completed|expired)\b/.test(s)){
+        add('in',incoming(['interest','interest_earned','interest_paid','money_interest']),domain,'interest');
+        // Principal is money returned, not earnings. Require a separate principal field.
+        add('transfer-in',incoming(['principal_returned','principal_received','principal']),domain,'principal');
+      }else if(/\b(?:withdraw|collect)\b/.test(s)){
+        add('transfer-in',incoming(['money_received','cash_received','withdrawn','withdrawal','amount']),domain);
+      }else if(/\b(?:deposit|invest)\b/.test(s)){
+        add('transfer-out',out(['money_spent','cash_spent','deposit','invested','amount_paid','amount']),domain);
+      }
+    }else if(domain==='Hunting'){
+      add('out',out(['money_spent','cash_spent','money_paid','cash_paid','cost','fee']),domain,'cost');
+      add('in',incoming(['money_gained','cash_gained','money_received','cash_received','money_earned','cash_earned']),domain,'reward');
+    }else if(domain==='Checks'){
+      if(/\b(?:cash(?:ed|ing)|redeem(?:ed)?|receive(?:d)?)\b/.test(s))add('transfer-in',incoming(['money_received','cash_received','value','amount']),domain);
+      else if(/\b(?:issued|bought|purchase|created|sent|paid)\b/.test(s))add('transfer-out',out(['money_spent','cash_spent','cost','value','amount_paid','amount']),domain);
+    }else if(domain==='Bail'){
+      if(/\b(?:paid|payment|posted|posting)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'bail','amount']),domain);
+    }else if(domain==='Loans'){
+      if(/\b(?:repay(?:ment|ments|ing|ed)?|paid back|payment)\b/.test(s)){
+        const interest=out(['interest_paid','interest']);
+        const principal=out(['principal_paid','principal_repaid','principal']);
+        const total=out(['total_paid','repayment','money_spent','amount_paid','amount']);
+        if(interest)add('out',interest,domain,'interest');
+        if(principal)add('transfer-out',principal,domain,'principal');
+        else if(total&&interest&&total.value>=interest.value)
+          add('transfer-out',{path:total.path+' - '+interest.path,value:total.value-interest.value},domain,'principal');
+        else if(total&&!interest)add('transfer-out',total,domain,'principal');
+      }else if(/\b(?:borrowed|received|taken|issued)\b/.test(s)){
+        add('transfer-in',incoming(['money_received','cash_received','principal','amount_received','amount']),domain);
+      }
+    }else if(domain==='Auction'){
+      if(/\b(?:listing fee|auction fee|tax|commission)\b/.test(s))add('out',out(['fee','fees','listing_fee','commission','tax','money_spent','cash_spent','cost']),domain);
+      // Auction item buy/sell is already owned by the item/FIFO parser.
+    }else if(domain==='Services'){
+      if(/\b(?:paid|purchased|purchase|donat|fee|subscription)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'price','amount']),domain);
+    }
+    if(rows.length===1)rows[0].id=base;
+    return rows;
+  }
+
+  function financialAuditCandidate(entry) {
+    const title=String(entry?.details?.title||''),domain=financialDomain(title);
+    if(!domain)return false;
+    if(domain==='Gym Memberships'||domain==='Education'||domain==='Racing'||domain==='Stocks / Investing'||domain==='Loans'||domain==='Bail')return true;
+    const p={...(entry?.params||{}),...(entry?.data||{})};
+    return !!financialCashField(p,[...CASH_OUT_KEYS,...CASH_IN_KEYS,'rent','bet','stake','wager','amount','value','principal','winnings'])||
+      /\b(?:purchase|paid|fee|sale|sold|rent|interest|winnings|deposit|withdraw|payment|income)\b/i.test(title);
   }
 
 
@@ -3665,7 +3814,8 @@
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
-        cashLogIds.push(`cashlog:${r.id}`);
+        const cashBase=`cashlog:${r.id}`;
+        cashLogIds.push(cashBase,...['stake','payout','cost','reward','interest','principal','fee'].map(role=>cashBase+':'+role));
         if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
         // Multi-workspace projection: do not consume a raw event after the first match.
         // Item transactions, cash flow, transfers and consumption are independent views.
@@ -4019,7 +4169,7 @@
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Accounting rules were updated. Full Resync reparses historical cash events, including exact bounty placement costs and fees.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Full Resync rechecks older purchase, sale, interest, casino and service events with conservative cash rules; past totals may change.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
