@@ -11,7 +11,8 @@
   const TAB_SYNC_ID=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   // sessionStorage survives Reload, but belongs to this browser tab. Rotate the
   // token on fresh navigation so duplicated tabs do not inherit sync ownership.
-  const SYNC_TAB_SESSION_KEY=NS+'syncTabSession';
+  // This module loads before state.js declares NS; keep the storage key explicit.
+  const SYNC_TAB_SESSION_KEY='tta:v1:syncTabSession';
   const SYNC_TAB_NAVIGATION=(()=>{
     try{return typeof performance!=='undefined'?performance.getEntriesByType?.('navigation')?.[0]?.type||'':'';}catch(_){return '';}
   })();
