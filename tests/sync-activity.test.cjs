@@ -103,3 +103,72 @@ test('background Quick Sync uses static dark-green badge while manual sync spins
   assert.equal(classes.has('syncing-other'),true);
   assert.equal(classes.has('syncing-background'),false);
 });
+
+
+test('pagehide retires active background Quick Sync instead of leaving Other tab indicator',()=>{
+  const {app,storage,windowEvents}=harness();
+  app.setupSyncActivityLifecycle();
+  app.beginSyncActivity({syncMode:'quick',progress:'Page 3'},true);
+  assert.equal(windowEvents.has('pagehide'),true);
+  assert.equal(windowEvents.has('beforeunload'),true);
+  windowEvents.get('pagehide')[0]();
+  assert.equal(storage.has('tta:v1:syncActivity'),false);
+  assert.equal(app.getSyncActivity(),null);
+  assert.match(app.syncActivityIndicatorHtml(),/hidden/);
+  windowEvents.get('beforeunload')[0](); // teardown is idempotent
+});
+
+test('reload recovers from missed pagehide and clears only the retired document',()=>{
+  const session=new Map();
+  const first=harness({sessionState:session,navigationType:'navigate'});
+  first.app.beginSyncActivity({syncMode:'quick',progress:'In progress'},true);
+  const previous=JSON.parse(first.storage.get('tta:v1:syncActivity'));
+  assert.ok(previous.tabSessionId);
+  // Simulate a browser lifecycle where pagehide failed to fire.
+  const reloaded=harness({sessionState:session,navigationType:'reload',stored:{syncActivity:previous}});
+  assert.match(reloaded.app.syncActivityIndicatorHtml(),/Other tab/);
+  reloaded.app.setupSyncActivityLifecycle();
+  assert.equal(reloaded.storage.has('tta:v1:syncActivity'),false);
+  assert.match(reloaded.app.syncActivityIndicatorHtml(),/hidden/);
+  // A legitimately resumed manual job shows this tab, not the retired tab.
+  reloaded.app.beginSyncActivity({syncMode:'quick',progress:'Resumed'},false);
+  assert.match(reloaded.app.syncActivityIndicatorHtml(),/This tab/);
+  assert.doesNotMatch(reloaded.app.syncActivityIndicatorHtml(),/Other tab/);
+  reloaded.app.endSyncActivity();
+});
+
+test('reload never clears an active sync that belongs to another tab',()=>{
+  const session=new Map();
+  const first=harness({sessionState:session,navigationType:'navigate'});
+  const previousSession=session.get('tta:v1:syncTabSession');
+  const peer={tabId:'another-live-tab',tabSessionId:'different-session',mode:'full',background:false,updatedAt:Date.now(),progress:'Reading history'};
+  const reloaded=harness({sessionState:session,navigationType:'reload',stored:{syncActivity:peer}});
+  reloaded.app.setupSyncActivityLifecycle();
+  assert.deepEqual(JSON.parse(reloaded.storage.get('tta:v1:syncActivity')),peer);
+  assert.equal(session.get('tta:v1:syncTabSession'),previousSession);
+  assert.match(reloaded.app.syncActivityIndicatorHtml(),/Other tab/);
+  assert.match(reloaded.app.syncActivityIndicatorHtml(),/Full Resync/);
+});
+
+test('a newly opened tab rotates cloned session identity and keeps peer activity',()=>{
+  const originalSession=new Map();
+  const original=harness({sessionState:originalSession,navigationType:'navigate'});
+  original.app.beginSyncActivity({syncMode:'quick'},true);
+  const record=JSON.parse(original.storage.get('tta:v1:syncActivity'));
+  const duplicate=harness({sessionState:new Map(originalSession),navigationType:'navigate',stored:{syncActivity:record}});
+  duplicate.app.setupSyncActivityLifecycle();
+  assert.notEqual(duplicate.session.get('tta:v1:syncTabSession'),record.tabSessionId);
+  assert.equal(JSON.parse(duplicate.storage.get('tta:v1:syncActivity')).tabId,record.tabId);
+  assert.match(duplicate.app.syncActivityIndicatorHtml(),/Other tab/);
+});
+
+test('teardown must not remove or broadcast over a newer sync owner',()=>{
+  const {app,storage,windowEvents}=harness();
+  app.setupSyncActivityLifecycle();
+  app.beginSyncActivity({syncMode:'quick'},true);
+  const latest={tabId:'new-tab',tabSessionId:'new-session',mode:'full',background:false,updatedAt:Date.now()};
+  storage.set('tta:v1:syncActivity',JSON.stringify(latest));
+  windowEvents.get('pagehide')[0]();
+  assert.deepEqual(JSON.parse(storage.get('tta:v1:syncActivity')),latest);
+  assert.match(app.syncActivityIndicatorHtml(),/Other tab/);
+});

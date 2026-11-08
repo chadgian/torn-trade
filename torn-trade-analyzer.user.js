@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.9
+// @version      0.5.10
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -27,6 +27,21 @@
 
   // Sync activity is only a short-lived UI signal. Web Locks remain authoritative for writes.
   const TAB_SYNC_ID=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  // sessionStorage survives Reload, but belongs to this browser tab. Rotate the
+  // token on fresh navigation so duplicated tabs do not inherit sync ownership.
+  // This module loads before state.js declares NS; keep the storage key explicit.
+  const SYNC_TAB_SESSION_KEY='tta:v1:syncTabSession';
+  const SYNC_TAB_NAVIGATION=(()=>{
+    try{return typeof performance!=='undefined'?performance.getEntriesByType?.('navigation')?.[0]?.type||'':'';}catch(_){return '';}
+  })();
+  const TAB_SYNC_SESSION_ID=(()=>{
+    try{
+      const previous=sessionStorage.getItem(SYNC_TAB_SESSION_KEY);
+      const sessionId=SYNC_TAB_NAVIGATION==='reload'&&previous?previous:TAB_SYNC_ID;
+      sessionStorage.setItem(SYNC_TAB_SESSION_KEY,sessionId);
+      return sessionId;
+    }catch(_){return '';}
+  })();
   const SYNC_ACTIVITY_TTL_MS=90000;
   let localSyncActivity=null,peerSyncActivity=null,syncActivityTimer=0,lastSyncActivityPublish=0;
   function crossTabSyncKey(){return NS+'syncActivity';}
@@ -34,7 +49,8 @@
     if(!value||typeof value!=='object'||typeof value.tabId!=='string'||!value.tabId||value.tabId.length>100)return null;
     const updatedAt=Number(value.updatedAt)||0;
     if(!updatedAt||updatedAt>Date.now()+10000||Date.now()-updatedAt>SYNC_ACTIVITY_TTL_MS)return null;
-    return {tabId:value.tabId,mode:value.mode==='full'?'full':'quick',background:value.background===true,
+    return {tabId:value.tabId,tabSessionId:typeof value.tabSessionId==='string'&&value.tabSessionId.length<=100?value.tabSessionId:'',
+      mode:value.mode==='full'?'full':'quick',background:value.background===true,
       startedAt:Number(value.startedAt)||updatedAt,updatedAt,progress:redactText(value.progress||'').slice(0,220)};
   }
   function getSyncActivity() {
@@ -71,7 +87,7 @@
   }
   function beginSyncActivity(job,background=false) {
     const now=Date.now();
-    localSyncActivity={tabId:TAB_SYNC_ID,mode:job?.syncMode==='full'?'full':'quick',
+    localSyncActivity={tabId:TAB_SYNC_ID,tabSessionId:TAB_SYNC_SESSION_ID,mode:job?.syncMode==='full'?'full':'quick',
       background:!!background,startedAt:now,updatedAt:now,progress:redactText(job?.progress||'').slice(0,220)};
     publishSyncActivity(true);
     clearInterval(syncActivityTimer);
@@ -88,12 +104,39 @@
     if(!localSyncActivity)return;
     clearInterval(syncActivityTimer);syncActivityTimer=0;
     localSyncActivity=null;lastSyncActivityPublish=0;
+    let mayBroadcastClear=true;
     try{
       const raw=localStorage.getItem(crossTabSyncKey());
-      if(raw&&JSON.parse(raw)?.tabId===TAB_SYNC_ID)localStorage.removeItem(crossTabSyncKey());
+      if(raw){
+        if(JSON.parse(raw)?.tabId===TAB_SYNC_ID)localStorage.removeItem(crossTabSyncKey());
+        else mayBroadcastClear=false; // Another tab owns the latest activity.
+      }
     }catch(_){}
-    broadcastSyncActivity(null);
+    if(mayBroadcastClear)broadcastSyncActivity(null);
     updateSyncStatusDom();
+  }
+  function retireReloadedSyncActivity() {
+    // If pagehide/beforeunload was missed (e.g. webview lifecycle), the reloaded
+    // page can still identify its own dead document by its per-tab session ID.
+    // Never clear a record from a different tab or a current document.
+    if(SYNC_TAB_NAVIGATION!=='reload'||!TAB_SYNC_SESSION_ID)return false;
+    try{
+      const raw=localStorage.getItem(crossTabSyncKey());
+      const previous=raw?validSyncActivity(JSON.parse(raw)):null;
+      if(!previous||previous.tabId===TAB_SYNC_ID||previous.tabSessionId!==TAB_SYNC_SESSION_ID)return false;
+      localStorage.removeItem(crossTabSyncKey());
+      broadcastSyncActivity(null);
+      return true;
+    }catch(_){return false;}
+  }
+  function setupSyncActivityLifecycle() {
+    retireReloadedSyncActivity();
+    // A page reload terminates pending API work; it must not leave the retired
+    // document advertising a live background sync for the full heartbeat TTL.
+    if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+      window.addEventListener('pagehide',endSyncActivity);
+      window.addEventListener('beforeunload',endSyncActivity);
+    }
   }
   function acceptSyncActivityMessage(message) {
     if(message?.type!=='sync-status')return;
@@ -326,7 +369,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.9';
+  const VERSION = '0.5.10';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.5.9';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -2303,7 +2346,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.9',label:'Current',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
+      {version:'0.5.10',label:'Current',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
+      {version:'0.5.9',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
       {version:'0.5.8',items:['Automatic background Quick Sync now keeps the normal TCFA launcher icon with a static dark-green border and corner badge instead of a manual-style spinner.','The in-app sync status also shows a static dark-green glyph for background Quick Sync on this tab; manual syncs retain their animated spinner, and other-tab syncs stay yellow.','Background/manual status transitions refresh correctly without restarting the analyzer or changing synchronization behavior.']},
       {version:'0.5.7',items:['Active syncs now show a compact live badge in the header and floating launcher, distinguishing this tab from another Torn tab.','Quick Sync, background Quick Sync and Full Resync show their type and recent progress in the badge tooltip without interrupting the financial workspace.','Activity announcements use BroadcastChannel and local storage, with automatic expiry after interrupted tabs; the existing single-writer Web Lock remains authoritative.']},
       {version:'0.5.6',items:['Torn Mail diagnostic drafts now render as a compact HTML report with inline styling instead of a plain-text block.','The rich report keeps the error header, suggested action, TCFA/sync history, runtime/device/storage details, active sync progress and sanitized diagnostic context grouped into readable sections.','TCFA still only opens and fills the Torn compose screen; the player must review the draft and press Send manually. Copy troubleshooting details remains plain text for compatibility.']},
@@ -4244,6 +4288,7 @@
     .catch(()=>{historyRecoveryFailed=true;reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be loaded safely. Free browser storage and reload. Sync is blocked to protect the recovery copy.',{source:'storage'});})
     .finally(()=>{historyRecoveryFinished=true;});
 
+  setupSyncActivityLifecycle();
   setupCrossTabRefresh();
   const boot=async()=>{if(document.body){void prefillPendingSupportTornMail();await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
   setInterval(()=>{updateSyncStatusDom();if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);

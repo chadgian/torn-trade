@@ -92,6 +92,7 @@
     .catch(()=>{historyRecoveryFailed=true;reportDiagnostic('REBUILD_RECOVERY','error','Previous history could not be loaded safely. Free browser storage and reload. Sync is blocked to protect the recovery copy.',{source:'storage'});})
     .finally(()=>{historyRecoveryFinished=true;});
 
+  setupSyncActivityLifecycle();
   setupCrossTabRefresh();
   const boot=async()=>{if(document.body){void prefillPendingSupportTornMail();await historyRecoveryReady;mount();if(historyRecoveryFailed)return;try{await resumePendingSync();startBackgroundQuickSync();}catch(error){historyRecoveryFailed=!!load('fullResyncBackup',null);diagnosticFromError(error,'recovery');queueAnalyticsRender();}}else setTimeout(boot,250)}; boot();
   setInterval(()=>{updateSyncStatusDom();if(historyRecoveryFinished&&(!document.getElementById('tta-fab')||!document.getElementById('tta-root')))mount();},5000);
