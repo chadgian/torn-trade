@@ -9,6 +9,20 @@
 
   // Sync activity is only a short-lived UI signal. Web Locks remain authoritative for writes.
   const TAB_SYNC_ID=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  // sessionStorage survives Reload, but belongs to this browser tab. Rotate the
+  // token on fresh navigation so duplicated tabs do not inherit sync ownership.
+  const SYNC_TAB_SESSION_KEY=NS+'syncTabSession';
+  const SYNC_TAB_NAVIGATION=(()=>{
+    try{return typeof performance!=='undefined'?performance.getEntriesByType?.('navigation')?.[0]?.type||'':'';}catch(_){return '';}
+  })();
+  const TAB_SYNC_SESSION_ID=(()=>{
+    try{
+      const previous=sessionStorage.getItem(SYNC_TAB_SESSION_KEY);
+      const sessionId=SYNC_TAB_NAVIGATION==='reload'&&previous?previous:TAB_SYNC_ID;
+      sessionStorage.setItem(SYNC_TAB_SESSION_KEY,sessionId);
+      return sessionId;
+    }catch(_){return '';}
+  })();
   const SYNC_ACTIVITY_TTL_MS=90000;
   let localSyncActivity=null,peerSyncActivity=null,syncActivityTimer=0,lastSyncActivityPublish=0;
   function crossTabSyncKey(){return NS+'syncActivity';}
@@ -16,7 +30,8 @@
     if(!value||typeof value!=='object'||typeof value.tabId!=='string'||!value.tabId||value.tabId.length>100)return null;
     const updatedAt=Number(value.updatedAt)||0;
     if(!updatedAt||updatedAt>Date.now()+10000||Date.now()-updatedAt>SYNC_ACTIVITY_TTL_MS)return null;
-    return {tabId:value.tabId,mode:value.mode==='full'?'full':'quick',background:value.background===true,
+    return {tabId:value.tabId,tabSessionId:typeof value.tabSessionId==='string'&&value.tabSessionId.length<=100?value.tabSessionId:'',
+      mode:value.mode==='full'?'full':'quick',background:value.background===true,
       startedAt:Number(value.startedAt)||updatedAt,updatedAt,progress:redactText(value.progress||'').slice(0,220)};
   }
   function getSyncActivity() {
@@ -53,7 +68,7 @@
   }
   function beginSyncActivity(job,background=false) {
     const now=Date.now();
-    localSyncActivity={tabId:TAB_SYNC_ID,mode:job?.syncMode==='full'?'full':'quick',
+    localSyncActivity={tabId:TAB_SYNC_ID,tabSessionId:TAB_SYNC_SESSION_ID,mode:job?.syncMode==='full'?'full':'quick',
       background:!!background,startedAt:now,updatedAt:now,progress:redactText(job?.progress||'').slice(0,220)};
     publishSyncActivity(true);
     clearInterval(syncActivityTimer);
@@ -70,12 +85,39 @@
     if(!localSyncActivity)return;
     clearInterval(syncActivityTimer);syncActivityTimer=0;
     localSyncActivity=null;lastSyncActivityPublish=0;
+    let mayBroadcastClear=true;
     try{
       const raw=localStorage.getItem(crossTabSyncKey());
-      if(raw&&JSON.parse(raw)?.tabId===TAB_SYNC_ID)localStorage.removeItem(crossTabSyncKey());
+      if(raw){
+        if(JSON.parse(raw)?.tabId===TAB_SYNC_ID)localStorage.removeItem(crossTabSyncKey());
+        else mayBroadcastClear=false; // Another tab owns the latest activity.
+      }
     }catch(_){}
-    broadcastSyncActivity(null);
+    if(mayBroadcastClear)broadcastSyncActivity(null);
     updateSyncStatusDom();
+  }
+  function retireReloadedSyncActivity() {
+    // If pagehide/beforeunload was missed (e.g. webview lifecycle), the reloaded
+    // page can still identify its own dead document by its per-tab session ID.
+    // Never clear a record from a different tab or a current document.
+    if(SYNC_TAB_NAVIGATION!=='reload'||!TAB_SYNC_SESSION_ID)return false;
+    try{
+      const raw=localStorage.getItem(crossTabSyncKey());
+      const previous=raw?validSyncActivity(JSON.parse(raw)):null;
+      if(!previous||previous.tabId===TAB_SYNC_ID||previous.tabSessionId!==TAB_SYNC_SESSION_ID)return false;
+      localStorage.removeItem(crossTabSyncKey());
+      broadcastSyncActivity(null);
+      return true;
+    }catch(_){return false;}
+  }
+  function setupSyncActivityLifecycle() {
+    retireReloadedSyncActivity();
+    // A page reload terminates pending API work; it must not leave the retired
+    // document advertising a live background sync for the full heartbeat TTL.
+    if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+      window.addEventListener('pagehide',endSyncActivity);
+      window.addEventListener('beforeunload',endSyncActivity);
+    }
   }
   function acceptSyncActivityMessage(message) {
     if(message?.type!=='sync-status')return;
