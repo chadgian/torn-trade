@@ -3,7 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'src', name), 'utf8');
-const files = ['storage.js', 'state.js', 'diagnostics.js', 'persistence.js', 'launcher.js', 'fifo.js', 'accounting.js', 'views.js', 'settings.js', 'controller.js', 'parsers.js', 'fixtures.js', 'sync.js', 'bootstrap.js'];
+const files = ['storage.js', 'state.js', 'diagnostics.js', 'persistence.js', 'launcher.js', 'fifo.js', 'accounting.js', 'views.js', 'settings.js', 'controller.js', 'parsers.js', 'financial-logs.js', 'fixtures.js', 'sync.js', 'bootstrap.js'];
 const assertAscii = (name, content) => {
   for (const ch of content) {
     if (ch.codePointAt(0) > 127) throw new Error(`Raw non-ASCII character ${JSON.stringify(ch)} found in ${name}. Use an ASCII-safe Unicode escape such as \\uXXXX in runtime source.`);
