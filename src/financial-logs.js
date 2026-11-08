@@ -9,7 +9,7 @@
     if(/\b(?:casino|roulette|blackjack|poker|slots?|bookie|lottery|high.low|wheel of|keno|craps)\b/.test(t))return 'Gambling';
     if(/\b(?:stock|shares?|dividend)\b/.test(t))return 'Stocks / Investing';
     if(/\b(?:property|estate|rental|landlord|rent|upkeep)\b/.test(t))return 'Property';
-    if(/\b(?:bank|investment)\b/.test(t)&&/\b(?:interest|deposit|withdraw|invest|matur|renew|collect|received|paid|cash)\b/.test(t))return 'Banking';
+    if(/\b(?:bank|investment)\b/.test(t)&&/\b(?:interest|deposit|withdraw|invest|matur(?:e|ed|ing|ity)?|renew|collect|received|paid|cash)\b/.test(t))return 'Banking';
     if(/\bhunt(?:ing|ed)?\b/.test(t))return 'Hunting';
     if(/\b(?:cashier.?s? check|cashier.?s? cheque|cheque|cashier check)\b/.test(t))return 'Checks';
     if(/\bbail\b/.test(t))return 'Bail';
@@ -85,7 +85,7 @@
         add('out',out(['rent','rent_paid',...CASH_OUT_KEYS,'amount_paid']),domain);
       }
     }else if(domain==='Banking'){
-      if(/\b(?:interest|matur|completed|expired)\b/.test(s)){
+      if(/\b(?:interest|matur(?:e|ed|ing|ity)?|completed|expired)\b/.test(s)){
         add('in',incoming(['interest','interest_earned','interest_paid','money_interest']),domain,'interest');
         // Principal is money returned, not earnings. Require a separate principal field.
         add('transfer-in',incoming(['principal_returned','principal_received','principal']),domain,'principal');
