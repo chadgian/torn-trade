@@ -45,7 +45,7 @@
     const add=(direction,field,category=domain,kind='cash')=>{
       if(!field||!(field.value>0))return;
       rows.push({id:base+':'+kind,timestamp,direction,amount:field.value,category,source:'Torn Log',
-        title,detail:'Verified '+field.path+' field',logId,field:field.path,
+        title,detail:(field.path.includes(' - ')?'Calculated from ':'Verified ')+field.path+' field',logId,field:field.path,
         transfer:direction.startsWith('transfer')});
     };
     if(domain==='Gym Memberships'){
@@ -54,7 +54,7 @@
       if(!/\b(?:finish|complete|graduate|cancel)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'price','amount']));
     }else if(domain==='Racing'){
       // Racing points and car stat upgrades are not dollar flows without a cash field.
-      add('out',out([...CASH_OUT_KEYS,'price_paid','cash_cost']));
+      add('out',out(['money_spent','cash_spent','money_paid','cash_paid','amount_paid','price_paid','cash_cost']));
     }else if(domain==='Gambling'){
       const netOut=out(['money_lost','cash_lost','money_spent','cash_spent']);
       const netIn=incoming(['money_gained','cash_gained','money_won','cash_won']);
