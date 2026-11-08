@@ -1,4 +1,4 @@
-  const VERSION = '0.5.9';
+  const VERSION = '0.5.10';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.5.9';
   const HISTORY_PAGINATION_VERSION = 3;
