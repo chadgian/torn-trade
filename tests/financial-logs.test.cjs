@@ -64,6 +64,7 @@ test('property purchase treated as an asset transfer, not spending loss',()=>{
 test('rent collected and rent paid remain opposite cash directions',()=>{
   assert.equal(rows('Property rent collected',{rent:300000})[0].direction,'in');
   assert.equal(rows('Property rent paid',{rent:80000})[0].direction,'out');
+  assert.equal(rows('Property rented',{rent:80000}).length,0,'title alone does not identify rent payer');
 });
 test('bank matured principal is a transfer and interest is income',()=>{
   const r=rows('Bank investment matured',{principal:2000000,interest:200000});
