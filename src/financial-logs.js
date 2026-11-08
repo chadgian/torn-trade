@@ -103,7 +103,7 @@
     }else if(domain==='Bail'){
       if(/\b(?:paid|payment|posted|posting)\b/.test(s))add('out',out([...CASH_OUT_KEYS,'bail','amount']),domain);
     }else if(domain==='Loans'){
-      if(/\b(?:repay|paid back|payment)\b/.test(s)){
+      if(/\b(?:repay(?:ment|ments|ing|ed)?|paid back|payment)\b/.test(s)){
         const interest=out(['interest_paid','interest']);
         const principal=out(['principal_paid','principal_repaid','principal']);
         const total=out(['total_paid','repayment','money_spent','amount_paid','amount']);
