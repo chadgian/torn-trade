@@ -5,7 +5,7 @@ const {harness}=require('./harness.cjs');
 function log(title,data={},id=99001,category='General'){
   return {id:'sample-'+title,details:{id,title,category},timestamp:1762600000,data,params:{}};
 }
-function rows(title,data,category){return harness().app.parseCashFlowEntry(log(title,data,99001,category));}
+function rows(title,data,category){return Array.from(harness().app.parseCashFlowEntry(log(title,data,99001,category)));}
 test('live Torn logtypes supply IDs for supported domains without guessed hardcoded IDs',()=>{
   const {app}=harness();
   const ids=app.relevantLogTypes([
