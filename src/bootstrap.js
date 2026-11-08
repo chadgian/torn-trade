@@ -17,7 +17,7 @@
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Accounting rules were updated. Full Resync reparses historical cash events, including exact bounty placement costs and fees.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Full Resync rechecks older purchase, sale, interest, casino and service events with conservative cash rules; past totals may change.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});

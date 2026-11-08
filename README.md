@@ -2,9 +2,12 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.8.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.9.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
 
 ## Features
+
+- Financial event coverage includes guarded parsing of gyms, education, racing purchases with explicit money fields, casino outcomes, property transactions, bank interest/principal, stock trades, hunting, checks, bail, loans, auction fees and selected service payments. Capital transfers and business-level P/L are excluded from personal earned/spent totals. Uncertain log values are quarantined in the Data Quality audit instead of being guessed. See [coverage and evidence limitations](docs/FINANCIAL_LOG_COVERAGE.md). A Full Resync is needed to reclassify older logs.
+
 
 - Cross-tab sync activity indicators distinguish **manual sync here** (animated icon), **background Quick Sync here** (static dark-green border and badge), and **sync in another tab** (yellow monitor badge) in the header and floating launcher, with sync type/progress on hover or tap. A short-lived heartbeat clears abandoned status; the existing Web Lock continues to enforce exclusive synchronization where supported.
 
