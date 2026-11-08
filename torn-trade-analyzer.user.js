@@ -3259,7 +3259,7 @@
         add('out',out([...CASH_OUT_KEYS,'amount']),domain);
       }else if(/\b(?:received|collected|earned|landlord|rental income|rent income)\b/.test(s)){
         add('in',incoming(['rent','rent_received','money_received','cash_received','amount_received','payment_received']),domain);
-      }else if(/\b(?:paid|payment|charged|renting|rented)\b/.test(s)){
+      }else if(/\b(?:paid|charged|tenant)\b/.test(s)){
         add('out',out(['rent','rent_paid',...CASH_OUT_KEYS,'amount_paid']),domain);
       }
     }else if(domain==='Banking'){
