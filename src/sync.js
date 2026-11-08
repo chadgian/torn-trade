@@ -480,7 +480,8 @@
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
-        cashLogIds.push(`cashlog:${r.id}`);
+        const cashBase=`cashlog:${r.id}`;
+        cashLogIds.push(cashBase,...['stake','payout','cost','reward','interest','principal','fee'].map(role=>cashBase+':'+role));
         if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
         // Multi-workspace projection: do not consume a raw event after the first match.
         // Item transactions, cash flow, transfers and consumption are independent views.
