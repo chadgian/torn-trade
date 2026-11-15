@@ -77,15 +77,20 @@
     if(inField)rows.push(make('in',inField,'in'));
     return rows;
   }
-  function huntingIncomeMissing(entry) {
-    if(financialDomain(entry?.details?.title)!=='Hunting')return false;
+  function huntingMissingCashComponent(entry) {
+    if(financialDomain(entry?.details?.title)!=='Hunting')return '';
     const payload={...(entry?.params||{}),...(entry?.data||{})};
-    if(!financialCashField(payload,['money_spent','cash_spent','money_paid','cash_paid','cost','fee']))return false;
-    // Zero income is a valid, fully observed hunting outcome.
-    return !HUNTING_INCOME_KEYS.some(k=>{
+    // Zero is an observed amount, not a missing field. Only missing or invalid
+    // numeric components require a Data Quality review.
+    const known=keys=>keys.some(k=>{
       const v=nestedValue(payload,k);
       return v!=null&&v!==''&&typeof v!=='boolean'&&typeof v!=='object'&&Number.isFinite(Number(v))&&Number(v)>=0;
     });
+    const hasCost=known(['money_spent','cash_spent','money_paid','cash_paid','cost','fee']);
+    const hasIncome=known(HUNTING_INCOME_KEYS);
+    if(hasCost&&!hasIncome)return 'income';
+    if(hasIncome&&!hasCost)return 'cost';
+    return '';
   }
 
   // A matched domain owns the event, including when no reliable amount can be read:
