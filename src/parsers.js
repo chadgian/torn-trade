@@ -93,11 +93,19 @@
     const itemMovement=/(item|plushie|flower|drug|weapon|armor|armour|temporary).*(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win)|(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win).*(item|plushie|flower|drug|weapon|armor|armour|temporary)/i;
     const freeContext=/(crime success|organized crime success|city find|mission reward|seasonal gift|christmas town|easter egg hunt|halloween basket|job special|company special|event reward|competition reward|reward|loot|items? incoming|item.*received|item.*gained|item.*found)/i;
     const moneyContext=/(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime|points|award|income|expense|cost|profit|loss)/i;
+    // Broaden title/category discovery, but don't scan high-volume noncash
+    // training, points or merit logs just because they say "spent".
+    const generalMoneyTitle=/\b(?:paid|received|earned|spent|refunded|payout|collected|credited|debited|compensated|prize)\b/i;
+    const financialCategory=/\b(?:finance|financial|money|cash|banking|hunting)\b/i;
     const byId=new Map();
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || isMissionCreditPurchase(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      const category=String(x?.category||x?.category_name||'');
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) ||
+        financialDomain(title) || isMissionCreditPurchase(title) ||
+        (!nonCashFinancialTitle(title)&&(generalMoneyTitle.test(title)||financialCategory.test(category))) ||
+        KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     FORCE_FINANCE_LOG_IDS.forEach(id=>{if(!byId.has(id))byId.set(id,{id,title:EXPLICIT_CASH_LOGS.get(id)?.label||PLAYER_ITEM_LOGS.get(id)?.label||`Financial log ${id}`});});
@@ -210,7 +218,10 @@
     const rows=flattenNumericFields(payload),financial=financialTitleContext(title),bad=/(^|\.)(id|item_id|itemid|qty|quantity|count|timestamp|time|duration|rate|percent|percentage|balance|maximum|current|points)(\.|$)/i;
     let best=null;
     for(const row of rows){
-      if(bad.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
+      // Item payloads can contain notional prices or reward values; those are
+      // not independent wallet movements. Only direct or finance-container
+      // money fields may contribute to the generic cash extractor.
+      if(bad.test(row.path)||/(^|\.)(?:items?|loot)(\.|$)/i.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
       let score=0;
       if(/money|cash/.test(row.path))score+=12;
       if(/received|gained|earned|winnings|payout|salary|wage|interest|dividend|reward|profit/.test(row.path))score+=10;
@@ -385,6 +396,8 @@
     if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return[];
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return[];
     const domainRows=parseDomainCashFlowEntry(entry);if(domainRows!==null)return domainRows;
+    const generalRows=parseGeneralCashFlowEntry(entry);if(generalRows.length)return generalRows;
+    if(nonCashFinancialTitle(title))return[];
     if(!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
     if(crimeContext){
@@ -438,6 +451,15 @@
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
     if(isMissionCreditPurchase(title))return null;
+    const huntingMissing=huntingMissingCashComponent(entry);
+    if(huntingMissing){
+      return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title,category:'Hunting',
+        field:huntingMissing+' (missing)',amount:0,amountKnown:false,
+        reason:huntingMissing==='income'?'Hunting cash cost recorded; payout missing or unverified':'Hunting payout recorded; cash cost missing or unverified'};
+    }
+    // A hunt with verified cost and payout (including explicit zero income)
+    // is fully recognized; do not classify it as an unmapped cash log.
+    if(financialDomain(title)==='Hunting'&&parseDomainCashFlowEntry(entry)?.length)return null;
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
@@ -447,7 +469,7 @@
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
     const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
+    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
     rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
   }
 

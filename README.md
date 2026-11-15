@@ -2,10 +2,11 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.11.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.12.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
 
 ## Features
 
+- Hunting: logs with both `cost` and `income` now record separate cash expenses and receipts, including loss-making and zero-income hunts. Missing cash components appear in Data Quality as partially classified; Full Resync is required to repair historical hunting payouts. A generalized cash layer recognizes explicitly named `money_*` and `cash_*` direction fields in newly discovered log types without counting noncash resources or item valuations. This is not an exhaustive guarantee of every Torn financial event.
 - Mission Shop acquisitions purchased with mission credits are recorded with $0 dollar cash cost (not a dollar expense), labeled Mission Credits and counted as items in acquisition/FIFO history. Previously cached mission-credit dollar purchases are repaired on startup. For uncertain historical credit counts, Full Resync is required to recover the exact credit amount when the log exposes it.
 
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.11
+// @version      0.5.12
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -369,9 +369,9 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.11';
+  const VERSION = '0.5.12';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.11';
+  const ACCOUNTING_VERSION = '0.5.12';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -926,7 +926,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Mission Shop purchases use mission credits, not dollar spending. Cached purchases are corrected on load; Full Resync verifies historical credit amounts and other log changes.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial rules changed. Hunting income and explicitly marked cash fields are now recognized; Full Resync is needed to reclassify older logs.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
@@ -961,7 +961,7 @@
     const backend=st.backend==='pda'?'Torn PDA native storage':st.backend==='indexeddb'?'Browser IndexedDB':'Browser localStorage fallback';
     const usage=st.quota>0?((st.used/1048576).toFixed(1)+' / '+(st.quota/1048576).toFixed(1)+' MB'):(st.backend==='localStorage'?'Shared browser quota':'Available');
     const unknownRows=(state.unrecognizedFinancial||[]).slice(0,50);
-    const unknownHtml=`<section class="tta-fin-section"><h3>Unclassified Financial Logs (${qty((state.unrecognizedFinancial||[]).length)})</h3><p class="tta-note">These events are not included in personal cash flow because their amounts, directions or currencies cannot yet be verified. Only log ID, title, sanitized amount-field name and review reason are stored. No raw API responses or keys are kept.</p>${unknownRows.map(row=>`<div class="tta-fin-row"><span><strong>${esc(row.title||'Unknown log')}</strong> / ID ${Number(row.logId)||0} / ${esc(row.reason||'Needs manual verification')}<small>${esc(row.field||'No verified cash field')}</small></span><b>${row.amountKnown===false?'Review amount':money(row.amount||0)}</b></div>`).join('')||'<div class="tta-empty">No unclassified financial log entries saved.</div>'}${(state.unrecognizedFinancial||[]).length>unknownRows.length?`<p class="tta-note">Showing ${unknownRows.length} of ${(state.unrecognizedFinancial||[]).length} saved events.</p>`:''}</section>`;
+    const unknownHtml=`<section class="tta-fin-section"><h3>Unclassified Financial Logs (${qty((state.unrecognizedFinancial||[]).length)})</h3><p class="tta-note">These events, or individual parts of them, could not be classified safely. Recognized cash amounts in partially classified events may still appear in personal Cash Flow. Only log ID, title, sanitized field name and review reason are stored. No raw API responses or keys are kept.</p>${unknownRows.map(row=>`<div class="tta-fin-row"><span><strong>${esc(row.title||'Unknown log')}</strong> / ID ${Number(row.logId)||0} / ${esc(row.reason||'Needs manual verification')}<small>${esc(row.field||'No verified cash field')}</small></span><b>${row.amountKnown===false?'Review amount':money(row.amount||0)}</b></div>`).join('')||'<div class="tta-empty">No unclassified financial log entries saved.</div>'}${(state.unrecognizedFinancial||[]).length>unknownRows.length?`<p class="tta-note">Showing ${unknownRows.length} of ${(state.unrecognizedFinancial||[]).length} saved events.</p>`:''}</section>`;
     const storageHtml=`<section class="tta-fin-section"><h3>Storage</h3><div class="tta-fin-row"><span>History backend</span><b>${esc(backend)}</b></div><div class="tta-fin-row"><span>Usage</span><b>${esc(usage)}</b></div>${st.migrated?'<div class="tta-note">'+qty(st.migrated)+' legacy data sets were moved safely from localStorage during this session.</div>':''}</section>`;
     return `${header('Data Quality','Accuracy, freshness and report details',true)}<div class="tta-content"><div class="tta-sectionhead"><h3>Current data quality</h3><button class="tta-btn secondary" data-act="exportDiagnostics">Export report</button></div><div class="tta-note"><strong>Fresh diagnostic cycle:</strong> Starting a manual Quick Sync or Full Resync clears previously recorded notices before the new check begins. If an issue still exists, TCFA records it again; if it has been fixed, the old notice stays gone. Background syncs do not clear notices.</div>${notices.map((n,index)=>`<details class="tta-diagnostic ${n.severity}"><summary><code>${esc(n.code)}</code> ${esc(n.message)}</summary><p>${esc(n.severity)}${n.lastAt?' / '+esc(tctDateTimeStr(n.lastAt))+' TCT':''}</p>${diagnosticGuidanceHtml(n,index)}<pre>${esc(JSON.stringify(safeDiagnosticContext(n.context),null,2))}</pre></details>`).join('')||'<div class="tta-empty">No current data-quality warnings.</div>'}${unknownHtml}${storageHtml}<section class="tta-fin-section"><h3>Last scan</h3><div class="tta-fin-row"><span>Latest successful sync</span><b>${state.sync.lastSync?esc(tctDateTimeStr(state.sync.lastSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Manual Quick Sync</span><b>${state.sync.lastManualQuickSync?esc(tctDateTimeStr(state.sync.lastManualQuickSync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Last Full Resync</span><b>${state.sync.lastFullResync?esc(tctDateTimeStr(state.sync.lastFullResync))+' TCT':'Never'}</b></div><div class="tta-fin-row"><span>Log pages / trade details / deferred trades</span><b>${qty(d.pages)} / ${qty(d.tradeDetails)} / ${qty(d.tradeDetailsDeferred)}</b></div></section><button class="tta-btn secondary" data-act="clearDiagnostics">Clear recorded notices</button></div>`;
   }
@@ -2349,7 +2349,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.11',label:'Current',items:['Mission Shop purchases paid with mission credits no longer appear as Torn-dollar spending, whether cached or newly synced.','Credit-purchased items stay in inventory and FIFO acquisition history with a $0 cash basis, labeled Mission Credits rather than Free.','Previously cached misclassified purchases are repaired on startup, and Full Resync can recover credit amounts from unambiguous logs.','Fixed Full Resync stalling on a 100-trade Player Trades page with a repeated or unusable cursor by checking every trade in its oldest second before paging backward.','The safe recovery preserves additional boundary-second trades and pauses instead of skipping transactions when the boundary cannot be verified.']},
+      {version:'0.5.12',label:'Current',items:['Fixed hunting sessions to record both cost and income as distinct Torn-dollar movements; zero-income hunts correctly count their cost only.','Added currency-aware generic cash detection for explicit money_received, cash_spent and similar directional fields, while preserving specialized transfer, item and noncash-currency rules.','Hunting logs with missing payout or cost now appear as partially unclassified in Data Quality. Full Resync is required to reparse historical hunting income and expanded financial coverage.']},
+      {version:'0.5.11',items:['Mission Shop purchases paid with mission credits no longer appear as Torn-dollar spending, whether cached or newly synced.','Credit-purchased items stay in inventory and FIFO acquisition history with a $0 cash basis, labeled Mission Credits rather than Free.','Previously cached misclassified purchases are repaired on startup, and Full Resync can recover credit amounts from unambiguous logs.','Fixed Full Resync stalling on a 100-trade Player Trades page with a repeated or unusable cursor by checking every trade in its oldest second before paging backward.','The safe recovery preserves additional boundary-second trades and pauses instead of skipping transactions when the boundary cannot be verified.']},
       {version:'0.5.10',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
       {version:'0.5.9',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
       {version:'0.5.8',items:['Automatic background Quick Sync now keeps the normal TCFA launcher icon with a static dark-green border and corner badge instead of a manual-style spinner.','The in-app sync status also shows a static dark-green glyph for background Quick Sync on this tab; manual syncs retain their animated spinner, and other-tab syncs stay yellow.','Background/manual status transitions refresh correctly without restarting the analyzer or changing synchronization behavior.']},
@@ -2773,11 +2774,19 @@
     const itemMovement=/(item|plushie|flower|drug|weapon|armor|armour|temporary).*(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win)|(buy|bought|purchase|purchased|sell|sold|sale|receive|received|gain|gained|find|found|reward|loot|won|win).*(item|plushie|flower|drug|weapon|armor|armour|temporary)/i;
     const freeContext=/(crime success|organized crime success|city find|mission reward|seasonal gift|christmas town|easter egg hunt|halloween basket|job special|company special|event reward|competition reward|reward|loot|items? incoming|item.*received|item.*gained|item.*found)/i;
     const moneyContext=/(money|cash|bank|vault|wage|salary|pay|payment|deposit|withdraw|interest|dividend|casino|bookie|lottery|stock|share|bounty|rent|loan|fee|tax|rehab|travel|property|company|faction|donat|mug|crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime|points|award|income|expense|cost|profit|loss)/i;
+    // Broaden title/category discovery, but don't scan high-volume noncash
+    // training, points or merit logs just because they say "spent".
+    const generalMoneyTitle=/\b(?:paid|received|earned|spent|refunded|payout|collected|credited|debited|compensated|prize)\b/i;
+    const financialCategory=/\b(?:finance|financial|money|cash|banking|hunting)\b/i;
     const byId=new Map();
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || isMissionCreditPurchase(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      const category=String(x?.category||x?.category_name||'');
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) ||
+        financialDomain(title) || isMissionCreditPurchase(title) ||
+        (!nonCashFinancialTitle(title)&&(generalMoneyTitle.test(title)||financialCategory.test(category))) ||
+        KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     FORCE_FINANCE_LOG_IDS.forEach(id=>{if(!byId.has(id))byId.set(id,{id,title:EXPLICIT_CASH_LOGS.get(id)?.label||PLAYER_ITEM_LOGS.get(id)?.label||`Financial log ${id}`});});
@@ -2890,7 +2899,10 @@
     const rows=flattenNumericFields(payload),financial=financialTitleContext(title),bad=/(^|\.)(id|item_id|itemid|qty|quantity|count|timestamp|time|duration|rate|percent|percentage|balance|maximum|current|points)(\.|$)/i;
     let best=null;
     for(const row of rows){
-      if(bad.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
+      // Item payloads can contain notional prices or reward values; those are
+      // not independent wallet movements. Only direct or finance-container
+      // money fields may contribute to the generic cash extractor.
+      if(bad.test(row.path)||/(^|\.)(?:items?|loot)(\.|$)/i.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
       let score=0;
       if(/money|cash/.test(row.path))score+=12;
       if(/received|gained|earned|winnings|payout|salary|wage|interest|dividend|reward|profit/.test(row.path))score+=10;
@@ -3065,6 +3077,8 @@
     if(KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return[];
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return[];
     const domainRows=parseDomainCashFlowEntry(entry);if(domainRows!==null)return domainRows;
+    const generalRows=parseGeneralCashFlowEntry(entry);if(generalRows.length)return generalRows;
+    if(nonCashFinancialTitle(title))return[];
     if(!financialTitleContext(title))return[];
     if(/company/i.test(title)&&/\b(deposit|withdraw(?:al)?)\b/i.test(title))return[];
     if(crimeContext){
@@ -3118,6 +3132,15 @@
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
     if(isMissionCreditPurchase(title))return null;
+    const huntingMissing=huntingMissingCashComponent(entry);
+    if(huntingMissing){
+      return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title,category:'Hunting',
+        field:huntingMissing+' (missing)',amount:0,amountKnown:false,
+        reason:huntingMissing==='income'?'Hunting cash cost recorded; payout missing or unverified':'Hunting payout recorded; cash cost missing or unverified'};
+    }
+    // A hunt with verified cost and payout (including explicit zero income)
+    // is fully recognized; do not classify it as an unmapped cash log.
+    if(financialDomain(title)==='Hunting'&&parseDomainCashFlowEntry(entry)?.length)return null;
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
@@ -3127,7 +3150,7 @@
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
     const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
+    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
     rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
   }
 
@@ -3294,7 +3317,8 @@
     if(/\b(?:stock|shares?|dividend)\b/.test(t))return 'Stocks / Investing';
     if(/\b(?:property|estate|rental|landlord|rent|upkeep)\b/.test(t))return 'Property';
     if(/\b(?:bank|investment)\b/.test(t)&&/\b(?:interest|deposit|withdraw|invest|matur(?:e|ed|ing|ity)?|renew|collect|received|paid|cash)\b/.test(t))return 'Banking';
-    if(/\bhunt(?:ing|ed)?\b/.test(t))return 'Hunting';
+    // Seasonal "egg hunt" and similar events are not South Africa hunting.
+    if(/\bhunting\b/.test(t)||(/\bhunt(?:ed)?\b/.test(t)&&/\b(?:animal|safari|expedition|session)\b/.test(t)))return 'Hunting';
     if(/\b(?:cashier.?s? check|cashier.?s? cheque|cheque|cashier check)\b/.test(t))return 'Checks';
     if(/\bbail\b/.test(t))return 'Bail';
     if(/\bloan\b/.test(t))return 'Loans';
@@ -3315,6 +3339,66 @@
   }
   const CASH_OUT_KEYS=['money_spent','cash_spent','money_paid','cash_paid','money_lost','cash_lost','amount_paid','cost_total','total_cost','cost_paid','price_paid','cost','fee'];
   const CASH_IN_KEYS=['money_received','cash_received','money_gained','cash_gained','money_earned','cash_earned','money_won','cash_won','proceeds','sale_total','total_proceeds','payout','refund','interest'];
+  const HUNTING_INCOME_KEYS=['income','money_gained','cash_gained','money_received','cash_received','money_earned','cash_earned'];
+  const GENERAL_IN_KEYS=['money_gained','money_received','money_earned','money_won','money_rewarded','money_refunded','cash_gained','cash_received','cash_earned','cash_won','cash_rewarded','cash_refunded'];
+  const GENERAL_OUT_KEYS=['money_spent','money_paid','money_lost','money_sent','cash_spent','cash_paid','cash_lost','cash_sent'];
+  // The cash key must identify its currency and direction. Generic "amount",
+  // "cost", "income", "points", "balance" or "value" are NOT proof of dollars.
+  function generalCashField(payload,keys) {
+    const accepted=new Set(keys);
+    const safeContainers=new Set(['transaction','payment','result','outcome','reward','cash','money','financial','finance']);
+    const fields=flattenNumericFields(payload);
+    for(const key of keys){
+      const matched=fields.find(row=>{
+        const parts=String(row.path||'').split('.');
+        if(parts.at(-1)!==key||!accepted.has(key)||parts.length>3)return false;
+        return parts.slice(0,-1).every(p=>safeContainers.has(p));
+      });
+      if(matched&&Number.isFinite(matched.value)&&matched.value>0)return {path:matched.path,value:matched.value};
+    }
+    return null;
+  }
+  function nonCashFinancialTitle(title) {
+    const s=String(title||'');
+    // Points market purchases really use dollars; other points/credits are
+    // generally noncash currencies unless a dedicated domain proves otherwise.
+    if(/\bpoints? market\b/i.test(s))return false;
+    return /\b(?:points?|credits?|merits?|tokens?|energy|nerve|happiness|happy points?)\b/i.test(s);
+  }
+  // Applies only if no verified domain or explicitly mapped transaction owns
+  // the event. One in/out row per source-log ID prevents alias double counts.
+  function parseGeneralCashFlowEntry(entry) {
+    const title=String(entry?.details?.title||'');
+    if(nonCashFinancialTitle(title)||isMissionCreditPurchase(title))return [];
+    const payload={...(entry?.params||{}),...(entry?.data||{})};
+    const inField=generalCashField(payload,GENERAL_IN_KEYS);
+    const outField=generalCashField(payload,GENERAL_OUT_KEYS);
+    if(!inField&&!outField)return [];
+    const id='cashlog:'+String(entry?.id||''),timestamp=Number(entry?.timestamp)||0,logId=Number(entry?.details?.id)||0;
+    const category=String(entry?.details?.category||'');
+    const make=(direction,field,suffix)=>({id:id+(inField&&outField?':'+suffix:''),timestamp,direction,amount:field.value,
+      category:cashFlowCategory(title+' '+category,direction),source:'Torn Log',title:title||'Cash transaction',
+      detail:'Explicit cash field: '+field.path,logId,field:field.path,transfer:false});
+    const rows=[];
+    if(outField)rows.push(make('out',outField,'out'));
+    if(inField)rows.push(make('in',inField,'in'));
+    return rows;
+  }
+  function huntingMissingCashComponent(entry) {
+    if(financialDomain(entry?.details?.title)!=='Hunting')return '';
+    const payload={...(entry?.params||{}),...(entry?.data||{})};
+    // Zero is an observed amount, not a missing field. Only missing or invalid
+    // numeric components require a Data Quality review.
+    const known=keys=>keys.some(k=>{
+      const v=nestedValue(payload,k);
+      return v!=null&&v!==''&&typeof v!=='boolean'&&typeof v!=='object'&&Number.isFinite(Number(v))&&Number(v)>=0;
+    });
+    const hasCost=known(['money_spent','cash_spent','money_paid','cash_paid','cost','fee']);
+    const hasIncome=known(HUNTING_INCOME_KEYS);
+    if(hasCost&&!hasIncome)return 'income';
+    if(hasIncome&&!hasCost)return 'cost';
+    return '';
+  }
 
   // A matched domain owns the event, including when no reliable amount can be read:
   // this prevents older fuzzy generic rules from reversing a property sale or
@@ -3379,8 +3463,10 @@
         add('transfer-out',out(['money_spent','cash_spent','deposit','invested','amount_paid','amount']),domain);
       }
     }else if(domain==='Hunting'){
+      // Log 6020 has {cost, income, ...skill fields}; income is cash earned
+      // from the animals sold, not a skill value or points balance.
       add('out',out(['money_spent','cash_spent','money_paid','cash_paid','cost','fee']),domain,'cost');
-      add('in',incoming(['money_gained','cash_gained','money_received','cash_received','money_earned','cash_earned']),domain,'reward');
+      add('in',incoming(HUNTING_INCOME_KEYS),domain,'reward');
     }else if(domain==='Checks'){
       if(/\b(?:cash(?:ed|ing)|redeem(?:ed)?|receive(?:d)?)\b/.test(s))add('transfer-in',incoming(['money_received','cash_received','value','amount']),domain);
       else if(/\b(?:issued|bought|purchase|created|sent|paid)\b/.test(s))add('transfer-out',out(['money_spent','cash_spent','cost','value','amount_paid','amount']),domain);
@@ -3411,7 +3497,10 @@
 
   function financialAuditCandidate(entry) {
     const title=String(entry?.details?.title||''),domain=financialDomain(title);
-    if(!domain)return false;
+    if(!domain){
+      const p={...(entry?.params||{}),...(entry?.data||{})};
+      return !!generalCashField(p,GENERAL_IN_KEYS)||!!generalCashField(p,GENERAL_OUT_KEYS);
+    }
     if(domain==='Gym Memberships'||domain==='Education'||domain==='Racing'||domain==='Stocks / Investing'||domain==='Loans'||domain==='Bail')return true;
     const p={...(entry?.params||{}),...(entry?.data||{})};
     return !!financialCashField(p,[...CASH_OUT_KEYS,...CASH_IN_KEYS,'rent','bet','stake','wager','amount','value','principal','winnings'])||
@@ -3955,7 +4044,7 @@
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
         const cashBase=`cashlog:${r.id}`;
-        cashLogIds.push(cashBase,...['stake','payout','cost','reward','interest','principal','fee'].map(role=>cashBase+':'+role));
+        cashLogIds.push(cashBase,...['stake','payout','cost','reward','interest','principal','fee','in','out'].map(role=>cashBase+':'+role));
         if(ts>Number(job.diagnostics.latestRawLogTimestamp||0))job.diagnostics.latestRawLogTimestamp=ts;
         // Multi-workspace projection: do not consume a raw event after the first match.
         // Item transactions, cash flow, transfers and consumption are independent views.
@@ -4313,7 +4402,7 @@
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Mission Shop purchases spend credits, not dollars; older items are corrected when available, and Full Resync verifies historical credit amounts.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Financial cash rules expanded. Hunting logs now record both cost and income, including zero income. Full Resync is required to recover historical hunting proceeds and newly supported explicit money movements.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
