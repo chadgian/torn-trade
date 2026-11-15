@@ -135,7 +135,7 @@ test('dense repeated Player Trades pages remain incomplete rather than skipping 
   const rows=Array.from({length:99},(_,i)=>({id:i+1,completed_at:100}));
   const responses=baseResponses();responses['/user/trades']={trades:rows,_metadata:{links:{next:'https://api.torn.com/v2/user/trades?cat=finished&limit=100&sort=DESC&from=50&to=300'}}};
   const {app}=harness({stored:{apiKey:key},responses});const job={id:'dense-repeated-trades',tradeScanPeriod:{from:50,to:300},diagnostics:{},tradeHeaders:[]};
-  await assert.rejects(app.runResumableTradeList(job),e=>e.code==='PAGE_REPEATED');
+  await assert.rejects(app.runResumableTradeList(job),e=>e.code==='PAGE_BOUNDARY_UNVERIFIED');
 });
 test('stalled pages retry without mutating committed cursors or skipping same-second rows',async()=>{
   let requests=0;const {app}=harness({stored:{apiKey:key},responses:{'/user/log':()=>({log:[log('sale',4210,'Item shop sell',100,{item:206,quantity:1,cost_total:20})],_metadata:{nanostamp:++requests<3?'100000000003':'100000000002'}})}});
