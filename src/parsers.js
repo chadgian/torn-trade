@@ -43,25 +43,32 @@
     );
   }
   function missionCreditPurchaseAmount(payload,quantity) {
-    const direct=flattenNumericFields(payload);
-    for(const key of ['mission_credits_spent','credits_spent','mission_credits','credit_cost','credits']) {
-      const row=direct.find(r=>r.path===key||r.path.endsWith('.'+key));
+    const fields=flattenNumericFields(payload);
+    const find=key=>fields.find(r=>r.path===key||r.path.endsWith('.'+key));
+    for(const key of ['mission_credits_spent','credits_spent','mission_credit_cost','credit_cost','cost_total','total_cost']) {
+      const row=find(key);
       if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value;
     }
-    return cashTotal(payload,quantity);
+    for(const key of ['credits_each','credit_cost_each','cost_each','price_each','cost','price']) {
+      const row=find(key);
+      if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value*Math.max(1,Number(quantity)||1);
+    }
+    return null; // Generic value, money, credits and balance fields are ambiguous.
   }
   function normalizeMissionCreditTransaction(row) {
     if(!row||!isMissionCreditPurchase(row.title)||row.side!=='buy')return row;
+    if(row.currency==='mission_credits'&&row.free===true&&Number(row.total)===0&&Number(row.fee||0)===0)return row;
+    // Cached legacy dollar fields may be item value, not credits. The original
+    // currency payload is unavailable, so do not invent a mission-credit total.
     const previous=Number(row.missionCreditsSpent);
-    const legacy=Number(row.total);
-    const creditValue=Number.isFinite(previous)&&previous>=0&&row.missionCreditsSpent!=null
-      ?previous:Number.isFinite(legacy)&&legacy>=0?legacy:null;
+    const creditValue=Number.isFinite(previous)&&previous>=0&&row.missionCreditsSpent!=null?previous:null;
     return {...row,source:'Mission Credits',currency:'mission_credits',
       missionCreditsSpent:creditValue,free:true,total:0,netTotal:0,fee:0,
       costKnown:true,proceedsKnown:true,estimated:false};
   }
   function repairMissionCreditAccounting() {
-    const old=state.transactions||[],match=old.filter(t=>isMissionCreditPurchase(t?.title)&&t?.side==='buy');
+    const old=state.transactions||[],match=old.filter(t=>isMissionCreditPurchase(t?.title)&&t?.side==='buy'&&
+      !(t.currency==='mission_credits'&&t.free===true&&Number(t.total)===0&&Number(t.fee||0)===0));
     if(match.length){
       state.transactions=old.map(normalizeMissionCreditTransaction);
       save('transactions',state.transactions);
