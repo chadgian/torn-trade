@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {harness}=require('./harness.cjs');
 
-const key='test-token';
+const key='fixture0123456789';
 const head=Array.from({length:100},(_,i)=>({id:i+1,completed_at:200-i}));
 const sameSecond=[{id:100,completed_at:101},{id:101,completed_at:101}];
 const older=[{id:102,completed_at:98},{id:103,completed_at:80}];
