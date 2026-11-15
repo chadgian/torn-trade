@@ -3138,6 +3138,9 @@
         field:huntingMissing+' (missing)',amount:0,amountKnown:false,
         reason:huntingMissing==='income'?'Hunting cash cost recorded; payout missing or unverified':'Hunting payout recorded; cash cost missing or unverified'};
     }
+    // A hunt with verified cost and payout (including explicit zero income)
+    // is fully recognized; do not classify it as an unmapped cash log.
+    if(financialDomain(title)==='Hunting'&&parseDomainCashFlowEntry(entry)?.length)return null;
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
