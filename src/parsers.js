@@ -38,7 +38,7 @@
   function isMissionCreditPurchase(title) {
     const s=String(title||'').toLowerCase();
     return /\bmission(?:s)?\b/.test(s)&&(
-      (/\b(?:buy|bought|purchas(?:e|ed)|shop)\b/.test(s)&&/\b(?:reward|item|ammo|mod|attachment|upgrade|shop|credit)\b/.test(s))||
+      (/\b(?:buy|bought|purchas(?:e|ed))\b/.test(s)&&/\b(?:reward|item|ammo|mod|attachment|upgrade|shop|credit)\b/.test(s))||
       (/\bcredits?\b/.test(s)&&/\b(?:exchang(?:e|ed)|redeem(?:ed)?|spent|spend)\b/.test(s))
     );
   }
