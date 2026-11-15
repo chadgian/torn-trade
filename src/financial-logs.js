@@ -52,7 +52,11 @@
     return null;
   }
   function nonCashFinancialTitle(title) {
-    return /\b(?:mission credits?|job points?|racing points?|merits?|casino tokens?|energy|nerve|happiness|happy points?)\b/i.test(String(title||''));
+    const s=String(title||'');
+    // Points market purchases really use dollars; other points/credits are
+    // generally noncash currencies unless a dedicated domain proves otherwise.
+    if(/\bpoints? market\b/i.test(s))return false;
+    return /\b(?:points?|credits?|merits?|tokens?|energy|nerve|happiness|happy points?)\b/i.test(s);
   }
   // Applies only if no verified domain or explicitly mapped transaction owns
   // the event. One in/out row per source-log ID prevents alias double counts.
