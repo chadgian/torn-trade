@@ -266,7 +266,7 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,logBatchSplits:0,denseBoundaryRecoveries:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,logBatchSplits:0,denseBoundaryRecoveries:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeBoundaryRecoveries:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
   function initialLogBatches(ids=[]) {
     const list=ids.map(Number).filter(x=>x>0),batches=[];
@@ -339,6 +339,12 @@
     let requests=0;
     for(let attempt=0;attempt<3;attempt++){
       const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];requests++;
+      // Date bounds are authoritative for trade checkpoints. If the provider
+      // ignores a narrowed to/from window, stop rather than loop or skip rows.
+      if(key==='trades'&&rows.some(row=>{
+        const ts=Number(row?.completed_at||row?.timestamp)||0;
+        return ts<=Number(params.from??0)||ts>Number(params.to);
+      }))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Player Trades returned records outside the requested scan boundary. No trade history was skipped.',{source:key,phase:'trade-range-check',from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length});
       try{
         const next=nextHistoryPage(data,params,rows,cursors,key);
         if(rows.length&&!next&&zeroHistoryPage(data,params,key)){
@@ -387,6 +393,31 @@
               reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',probeNext?'A dense history page was recovered with an independent date-boundary cursor; older logs are still being loaded.':'A dense history page was independently verified as the end of this log batch.',{source:key,phase:'dense-date-probe',from,to:oldest,count:older.length});
               return {rows:savedRows,next:probeNext,seen:[...seen],requests,boundaryRecovered:true,denseBoundaryRecovered:true};
             }
+          }
+          if(key==='trades'&&['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code)&&rows.length>=Math.max(1,Number(params.limit||100)-1)){
+            // The provider may repeat a full-page link or return no usable link.
+            // Never advance past a second until an independent inclusive
+            // one-second query proves every already observed boundary trade is
+            // present and there are fewer records than the page capacity.
+            const limit=Math.max(1,Math.min(100,Number(params.limit)||100)),from=Number(params.from)||0,to=Number(params.to)||0;
+            const times=rows.map(row=>Number(row?.completed_at||row?.timestamp));
+            if(times.some(ts=>!Number.isFinite(ts)||ts<=from||ts>to))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Player Trades returned invalid timestamps at a dense-page boundary. Full Resync remains paused.',{source:key,phase:'trade-second-probe',from,to,count:rows.length});
+            const oldest=Math.min(...times);
+            const boundary={...params,cat:'finished',sort:'DESC',from:Math.max(from,oldest-1),to:oldest,limit};
+            delete boundary.nanostamp;delete boundary.offset;
+            setSyncProgress('Verifying every trade in the oldest recorded second');
+            const checked=await syncApiGet(path,boundary),sameSecond=pageRows(checked,key);requests++;
+            const ids=new Set(sameSecond.map(row=>String(row.id)));
+            const observed=rows.filter(row=>Number(row?.completed_at||row?.timestamp)===oldest);
+            if(sameSecond.length>=Math.max(1,limit-1)||ids.size!==sameSecond.length||sameSecond.some(row=>Number(row?.completed_at||row?.timestamp)!==oldest)||
+                observed.some(row=>!ids.has(String(row.id)))){
+              throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','The dense Player Trades timestamp could not be verified completely. Resume later without resetting history.',{source:key,phase:'trade-second-probe',from:boundary.from,to:oldest,count:sameSecond.length});
+            }
+            const previousTo=oldest-1;
+            const next=previousTo<=from?null:{...params,cat:'finished',sort:'DESC',to:previousTo};
+            if(next){delete next.nanostamp;delete next.offset;}
+            reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',next?'A full Player Trades page with a repeated cursor was verified by a one-second trade check; older trades will be fetched safely.':'The oldest dense Player Trades second was independently verified as the end of the requested scan.',{source:key,phase:'trade-second-probe',from,to:oldest,count:rows.length});
+            return {rows,next,seen:[...seen],requests,boundaryRecovered:true,tradeBoundaryRecovered:true};
           }
           if(key==='trades'&&error.code==='PAGE_REPEATED'){
             const limit=Math.max(1,Number(params.limit||100));
@@ -548,7 +579,8 @@
     let params={...(job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to}),from:scanPeriod.from};
     while(!syncJobCancelled(job)){
       const page=(Number(job.diagnostics.tradeListPages)||0)+1;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
-      const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
+      const {rows,next,seen,tradeBoundaryRecovered}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
+      if(tradeBoundaryRecovered)job.diagnostics.tradeBoundaryRecoveries=(Number(job.diagnostics.tradeBoundaryRecoveries)||0)+1;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
       if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;await checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
