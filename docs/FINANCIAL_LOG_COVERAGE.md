@@ -1,8 +1,6 @@
-# TCFA financial log coverage: v0.5.9 review candidate
+# TCFA financial log coverage: field-aware review
 
-**Status: PR review / not merged.** This is a conservative extension, **not a claim that every
-Torn log payload has been independently verified**. Do not release until example logs
-are checked against an authorized account or sanitized fixture corpus.
+**Status: v0.5.9 domain classification shipped; v0.5.12 hunting/general cash updates under review.** This design is conservative, **not a claim that every Torn log payload has been independently verified**. Real sanitized log samples are still necessary to validate unfamiliar types.
 
 ## Evidence and source of truth
 
@@ -49,7 +47,7 @@ diagnostic export.
 | Bank maturity/interest | interest, principal_returned | Interest income and separate capital principal return | Never treat full matured balance as interest |
 | Stock buy/sell | cost / total_cost for buy; proceeds / money_received for sale | Capital transfer OUT/IN | Stock sale profit/loss requires acquisition basis not available from one log |
 | Cash stock dividend | money_received / money_gained | Income | Pre-existing type 5531 remains authoritative |
-| Hunting | money_spent/cost and money_gained | Expense and income as separate components | Noncash rewards excluded from cash, but may appear in item history |
+| Hunting | `cost` and `income` (or explicitly named money/cash alternatives) | One cash expense and one cash receipt; net equals `income - cost` | Third-party documented example for type 6020. `hunting_skill`, session type and skill gain do not imply cash. A missing cost or income is flagged as partial in Data Quality; zero income is valid |
 | Cashier's check | issued/paid amount or cashing/received amount | Transfer, not earned/spent | Check issuer/recipient differences still require sample logs |
 | Bail | cost / amount, with paid/posting title | Expense | Being bailed by another player is not a personal expense |
 | Loans | principal and interest when separate, or total_paid minus known interest | Principal transfer plus interest expense | Unsplit repayments treated as principal transfer rather than invented interest |
@@ -62,6 +60,16 @@ personal Cash Flow/Dashboard earned/spent totals. Business profit is not a
 wallet credit until the player receives an actual payment. Company wages and
 advertising are still available as business-level daily breakdown, not
 individually reconstructed historical payments.
+
+**General cash identification:** Unknown activity titles may still supply explicit
+cash-direction fields. TCFA now recognizes a small allowlist of top-level and
+safe nested `money_*` / `cash_*` keys without requiring a known financial title.
+It captures one incoming and one outgoing component per event at most, choosing
+one alias for each direction to avoid duplication. Mere `cost`, `income`,
+`value`, `points`, `credits` or `balance` are never sufficient on their own,
+and specialized handling for item acquisitions, transfers, gambling, banking,
+property, and mission credits takes precedence. Actual account-lifetime
+completeness requires API availability and verified `/torn/logtypes` coverage.
 
 **Unclassified financial events:** Events whose name suggests financial activity,
 but whose payment, direction, currency or amount cannot be confirmed, are
@@ -76,15 +84,11 @@ after verifying mappings.
    parser; domain cash parsing does not double-count it.
 2. Transfers and capital asset purchases are visible as transfers, not operating
    income/spending. The Net Worth snapshot remains authoritative for valuation.
-3. The new parser runs before the old generic fuzzy cash parser only for named
-   domains, preventing a property sale's `cost` from being assumed cash OUT.
+3. Specialized domains run before the currency-aware general cash parser. The general parser accepts only explicit positive amount fields identifying **both cash currency and direction**, e.g. `money_received` and `cash_spent`, including a small set of safe nested containers. These take priority over the older inferred generic fallback. They do not reclassify capital asset transfers or infer dollars from ambiguous `amount`, `cost`, `income`, `value`, balance or points fields.
 4. Multi-component logs use deterministic IDs and are replaced on re-scan,
    protecting against double counting.
-5. **Accounting version changes to 0.5.9.** Existing history is not silently
-   overwritten. The UI warns that Full Resync is required to reparse historical
-   records and recompute classifications.
-6. No synchronization, retry, API permission, or cloud-storage behavior was
-   modified by this PR.
+5. **Accounting version changes to 0.5.12.** Existing cached records are not silently interpreted as newly discovered hunting income. The UI warns that Full Resync is required to reparse past hunting sessions and newly included cash events.
+6. Existing sync scheduling, API-key permissions, privacy controls and cloud-storage behavior are unchanged. The logtype catalogue selects a broader but still targeted set of monetary-looking titles/categories. **It does not scan all 1,000+ Torn log types**, and the generic rules cannot infer missing or ambiguous monetary units.
 
 ## Before approval or live deployment
 
@@ -101,5 +105,4 @@ after verifying mappings.
   vs gross payout, bank principal vs total maturity, stock broker fees, and
   company P/L reconciliation.
 
-This is intentionally a **review-gated** PR. Passing synthetic tests confirms
-the stated *rules*, not unobserved Torn API payload formats.
+**Verification limits:** The hunting `{cost, income}` schema and log type 6020 are evidenced by an external TornCashflow userscript's documented examples (https://greasyfork.org/en/scripts/584478-torncashflow/code); they have not yet been compared to a consenting TCFA user's current API output. Passing synthetic tests confirms the *rules*, not every live log payload. This change remains review-gated until merged.
