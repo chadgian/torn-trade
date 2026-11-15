@@ -417,7 +417,10 @@
             const next=previousTo<=from?null:{...params,cat:'finished',sort:'DESC',to:previousTo};
             if(next){delete next.nanostamp;delete next.offset;}
             reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',next?'A full Player Trades page with a repeated cursor was verified by a one-second trade check; older trades will be fetched safely.':'The oldest dense Player Trades second was independently verified as the end of the requested scan.',{source:key,phase:'trade-second-probe',from,to:oldest,count:rows.length});
-            return {rows,next,seen:[...seen],requests,boundaryRecovered:true,tradeBoundaryRecovered:true};
+            // Include extra boundary-second trades discovered by the verification
+            // probe, even if the original full page did not show them.
+            const savedRows=Array.from(new Map([...rows,...sameSecond].map(row=>[String(row.id),row])).values());
+            return {rows:savedRows,next,seen:[...seen],requests,boundaryRecovered:true,tradeBoundaryRecovered:true};
           }
           if(key==='trades'&&error.code==='PAGE_REPEATED'){
             const limit=Math.max(1,Number(params.limit||100));
