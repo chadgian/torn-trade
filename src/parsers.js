@@ -218,7 +218,10 @@
     const rows=flattenNumericFields(payload),financial=financialTitleContext(title),bad=/(^|\.)(id|item_id|itemid|qty|quantity|count|timestamp|time|duration|rate|percent|percentage|balance|maximum|current|points)(\.|$)/i;
     let best=null;
     for(const row of rows){
-      if(bad.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
+      // Item payloads can contain notional prices or reward values; those are
+      // not independent wallet movements. Only direct or finance-container
+      // money fields may contribute to the generic cash extractor.
+      if(bad.test(row.path)||/(^|\.)(?:items?|loot)(\.|$)/i.test(row.path)||!Number.isFinite(row.value)||row.value===0)continue;
       let score=0;
       if(/money|cash/.test(row.path))score+=12;
       if(/received|gained|earned|winnings|payout|salary|wage|interest|dividend|reward|profit/.test(row.path))score+=10;
