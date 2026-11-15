@@ -1,6 +1,6 @@
-  const VERSION = '0.5.10';
+  const VERSION = '0.5.11';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.9';
+  const ACCOUNTING_VERSION = '0.5.11';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
