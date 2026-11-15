@@ -451,9 +451,11 @@
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
     if(isMissionCreditPurchase(title))return null;
-    if(huntingIncomeMissing(entry)){
+    const huntingMissing=huntingMissingCashComponent(entry);
+    if(huntingMissing){
       return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title,category:'Hunting',
-        field:'income (missing)',amount:0,amountKnown:false,reason:'Hunting cash cost recorded; payout missing or unverified'};
+        field:huntingMissing+' (missing)',amount:0,amountKnown:false,
+        reason:huntingMissing==='income'?'Hunting cash cost recorded; payout missing or unverified':'Hunting payout recorded; cash cost missing or unverified'};
     }
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
@@ -464,7 +466,7 @@
   }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
     const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized||huntingIncomeMissing(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
+    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
     rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
   }
 
