@@ -13,7 +13,7 @@
       const quantity=Number(t.qty);if(!(quantity>0)||!Number.isFinite(quantity))continue;
       if(t.side==='buy') {
         const cost=Number(t.total),known=t.costKnown!==false&&Number.isFinite(cost)&&cost>=0;
-        const row={id:String(t.id),acquiredAt:Number(t.timestamp),itemId:Number(item.id),itemName:item.name,itemType:item.type||'Item',qty:quantity,method:acquisitionMethod(t),source:String(t.source||''),title:String(t.title||''),free:!!t.free,costKnown:known,estimated:!!t.estimated,costTotal:known?cost:0,unitCost:known?cost/quantity:0,soldQty:0,transferredQty:0,consumedQty:0,soldProceeds:0,realizedCost:0,realizedProfit:0,unknownCostQty:0,unsoldQty:quantity,status:'unsold',saleCount:0,firstSoldAt:0,lastSoldAt:0,lastSaleSource:'',lastTransferredAt:0,lastConsumedAt:0,saleSources:[]};
+        const row={id:String(t.id),acquiredAt:Number(t.timestamp),itemId:Number(item.id),itemName:item.name,itemType:item.type||'Item',qty:quantity,method:acquisitionMethod(t),source:String(t.source||''),title:String(t.title||''),free:!!t.free,currency:String(t.currency||'cash'),missionCreditsSpent:Math.max(0,Number(t.missionCreditsSpent)||0),costKnown:known,estimated:!!t.estimated,costTotal:known?cost:0,unitCost:known?cost/quantity:0,soldQty:0,transferredQty:0,consumedQty:0,soldProceeds:0,realizedCost:0,realizedProfit:0,unknownCostQty:0,unsoldQty:quantity,status:'unsold',saleCount:0,firstSoldAt:0,lastSoldAt:0,lastSaleSource:'',lastTransferredAt:0,lastConsumedAt:0,saleSources:[]};
         lots.push({remaining:quantity,row});ledger.push(row);
         events.push({...t,realizedProfit:0,matchedQty:0,unmatchedQty:0,unknownCostQty:0});continue;
       }

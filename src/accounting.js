@@ -28,6 +28,7 @@
     fees_taxes:'Fees / taxes',
     wages_job:'Wages / job income',
     points:'Points market',
+    mission_credits:'Mission-credit acquisitions (noncash)',
     faction_income:'Faction income / payouts',
     company_profit_loss:'Company profit / loss',
     internal_transfers:'Internal transfers'
@@ -60,6 +61,7 @@
     const direction=String(record.direction||'');
     const side=String(record.side||'');
 
+    if(String(record.currency||'')==='mission_credits'||isMissionCreditPurchase(record.title))return 'mission_credits';
     if(source==='Player Trade'||category==='Player Trades')return 'player_trades';
     if(category==='Player Transfers')return direction==='in'?'player_money_received':direction==='out'?'player_money_sent':'category:player-transfers';
     if(category==='Item Purchases')return 'item_purchases';
@@ -143,7 +145,7 @@
   }
 
   function analysisTransactions() {
-    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded);
+    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded).map(normalizeMissionCreditTransaction);
   }
 
   function financialExclusionSignature() {
@@ -280,7 +282,7 @@
     const txRef=effectiveTransactions(),transferRef=state.playerTransfers,consumeRef=state.itemConsumptions;
     if(rawFifoCache.txRef!==txRef||rawFifoCache.transferRef!==transferRef||rawFifoCache.consumeRef!==consumeRef){rawFifoCache.txRef=txRef;rawFifoCache.transferRef=transferRef;rawFifoCache.consumeRef=consumeRef;rawFifoCache.rows.clear();}
     const id=Number(itemId);if(rawFifoCache.rows.has(id))return rawFifoCache.rows.get(id);
-    const tx=txRef.filter(x=>Number(x?.itemId)===id);
+    const tx=txRef.filter(x=>Number(x?.itemId)===id).map(normalizeMissionCreditTransaction);
     const sent=(state.playerTransfers||[]).filter(x=>x?.type==='item'&&x?.direction==='out'&&Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`transfer:${x.id}`,side:'transfer-out',total:0,netTotal:0,source:'Player Transfer'}));
     const consumed=(state.itemConsumptions||[]).filter(x=>Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`consume:${x.id}`,side:'consume-out',total:0,netTotal:0,source:'Item Use'}));
     const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));rawFifoCache.rows.set(id,result);return result;
@@ -306,6 +308,7 @@
 
   function acquisitionMethod(t) {
     const source=String(t?.source||''),text=`${source} ${t?.title||''}`.toLowerCase();
+    if(isMissionCreditPurchase(t?.title)||String(t?.currency||'')==='mission_credits')return 'Mission Credits';
     if(source==='Player Trade')return 'Player Trade';
     if(/item receive|item received|player transfer/i.test(`${source} ${t?.title||''}`))return 'Player Transfer / Gift';
     if(/crime/.test(text))return 'Crime';
@@ -372,7 +375,7 @@
 
   function ledgerRowHtml(row) {
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
-    const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
+    const costText=row.method==='Mission Credits'?('$0 \u00B7 '+(Number(row.missionCreditsSpent)>0?qty(row.missionCreditsSpent)+' mission credits':'Mission credits')):row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
     const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
     const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Exclude</button>`;

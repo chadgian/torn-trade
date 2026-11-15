@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.10
+// @version      0.5.11
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -369,9 +369,9 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.10';
+  const VERSION = '0.5.11';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.9';
+  const ACCOUNTING_VERSION = '0.5.11';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -926,7 +926,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Full Resync rechecks older cash events with verified directions and capital transfers.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Mission Shop purchases use mission credits, not dollar spending. Cached purchases are corrected on load; Full Resync verifies historical credit amounts and other log changes.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
@@ -967,7 +967,7 @@
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
-    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
+    for(const key of ['rawRows','pages','tradeListPages','tradeBoundaryRecoveries','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
     const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;
@@ -1187,7 +1187,7 @@
       const quantity=Number(t.qty);if(!(quantity>0)||!Number.isFinite(quantity))continue;
       if(t.side==='buy') {
         const cost=Number(t.total),known=t.costKnown!==false&&Number.isFinite(cost)&&cost>=0;
-        const row={id:String(t.id),acquiredAt:Number(t.timestamp),itemId:Number(item.id),itemName:item.name,itemType:item.type||'Item',qty:quantity,method:acquisitionMethod(t),source:String(t.source||''),title:String(t.title||''),free:!!t.free,costKnown:known,estimated:!!t.estimated,costTotal:known?cost:0,unitCost:known?cost/quantity:0,soldQty:0,transferredQty:0,consumedQty:0,soldProceeds:0,realizedCost:0,realizedProfit:0,unknownCostQty:0,unsoldQty:quantity,status:'unsold',saleCount:0,firstSoldAt:0,lastSoldAt:0,lastSaleSource:'',lastTransferredAt:0,lastConsumedAt:0,saleSources:[]};
+        const row={id:String(t.id),acquiredAt:Number(t.timestamp),itemId:Number(item.id),itemName:item.name,itemType:item.type||'Item',qty:quantity,method:acquisitionMethod(t),source:String(t.source||''),title:String(t.title||''),free:!!t.free,currency:String(t.currency||'cash'),missionCreditsSpent:Math.max(0,Number(t.missionCreditsSpent)||0),costKnown:known,estimated:!!t.estimated,costTotal:known?cost:0,unitCost:known?cost/quantity:0,soldQty:0,transferredQty:0,consumedQty:0,soldProceeds:0,realizedCost:0,realizedProfit:0,unknownCostQty:0,unsoldQty:quantity,status:'unsold',saleCount:0,firstSoldAt:0,lastSoldAt:0,lastSaleSource:'',lastTransferredAt:0,lastConsumedAt:0,saleSources:[]};
         lots.push({remaining:quantity,row});ledger.push(row);
         events.push({...t,realizedProfit:0,matchedQty:0,unmatchedQty:0,unknownCostQty:0});continue;
       }
@@ -1250,6 +1250,7 @@
     fees_taxes:'Fees / taxes',
     wages_job:'Wages / job income',
     points:'Points market',
+    mission_credits:'Mission-credit acquisitions (noncash)',
     faction_income:'Faction income / payouts',
     company_profit_loss:'Company profit / loss',
     internal_transfers:'Internal transfers'
@@ -1282,6 +1283,7 @@
     const direction=String(record.direction||'');
     const side=String(record.side||'');
 
+    if(String(record.currency||'')==='mission_credits'||isMissionCreditPurchase(record.title))return 'mission_credits';
     if(source==='Player Trade'||category==='Player Trades')return 'player_trades';
     if(category==='Player Transfers')return direction==='in'?'player_money_received':direction==='out'?'player_money_sent':'category:player-transfers';
     if(category==='Item Purchases')return 'item_purchases';
@@ -1365,7 +1367,7 @@
   }
 
   function analysisTransactions() {
-    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded);
+    return effectiveTransactions().filter(t=>!financialExclusionStatus(t).excluded).map(normalizeMissionCreditTransaction);
   }
 
   function financialExclusionSignature() {
@@ -1502,7 +1504,7 @@
     const txRef=effectiveTransactions(),transferRef=state.playerTransfers,consumeRef=state.itemConsumptions;
     if(rawFifoCache.txRef!==txRef||rawFifoCache.transferRef!==transferRef||rawFifoCache.consumeRef!==consumeRef){rawFifoCache.txRef=txRef;rawFifoCache.transferRef=transferRef;rawFifoCache.consumeRef=consumeRef;rawFifoCache.rows.clear();}
     const id=Number(itemId);if(rawFifoCache.rows.has(id))return rawFifoCache.rows.get(id);
-    const tx=txRef.filter(x=>Number(x?.itemId)===id);
+    const tx=txRef.filter(x=>Number(x?.itemId)===id).map(normalizeMissionCreditTransaction);
     const sent=(state.playerTransfers||[]).filter(x=>x?.type==='item'&&x?.direction==='out'&&Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`transfer:${x.id}`,side:'transfer-out',total:0,netTotal:0,source:'Player Transfer'}));
     const consumed=(state.itemConsumptions||[]).filter(x=>Number(x.itemId)===id&&Number(x.qty)>0).map(x=>({...x,id:`consume:${x.id}`,side:'consume-out',total:0,netTotal:0,source:'Item Use'}));
     const result=computeFifo([...tx,...sent,...consumed],catalogItem(id));rawFifoCache.rows.set(id,result);return result;
@@ -1528,6 +1530,7 @@
 
   function acquisitionMethod(t) {
     const source=String(t?.source||''),text=`${source} ${t?.title||''}`.toLowerCase();
+    if(isMissionCreditPurchase(t?.title)||String(t?.currency||'')==='mission_credits')return 'Mission Credits';
     if(source==='Player Trade')return 'Player Trade';
     if(/item receive|item received|player transfer/i.test(`${source} ${t?.title||''}`))return 'Player Transfer / Gift';
     if(/crime/.test(text))return 'Crime';
@@ -1594,7 +1597,7 @@
 
   function ledgerRowHtml(row) {
     const saleWhen=row.lastSoldAt?dateTimeStr(row.lastSoldAt):'Not sold yet',saleSources=row.saleSources.length?row.saleSources.join(' \u00B7 '):'',transferText=row.transferredQty>0?` \u00B7 Sent ${qty(row.transferredQty)}${row.lastTransferredAt?` (${dateTimeStr(row.lastTransferredAt)})`:''}`:'',consumeText=row.consumedQty>0?` \u00B7 Used ${qty(row.consumedQty)}${row.lastConsumedAt?` (${dateTimeStr(row.lastConsumedAt)})`:''}`:'';
-    const costText=row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
+    const costText=row.method==='Mission Credits'?('$0 \u00B7 '+(Number(row.missionCreditsSpent)>0?qty(row.missionCreditsSpent)+' mission credits':'Mission credits')):row.costKnown===false?'Unknown':row.free&&row.costTotal<=1e-7?'$0 \u00B7 Free':money(row.costTotal);
     const profitText=row.soldQty>0?money(row.realizedProfit):'\u2014';
     const exclusionNote=row._financialExcluded?`<span class="tta-excludedbadge">${esc(row._financialReason||'Excluded')} \u00B7 not included in calculations</span>`:'';
     const exclusionAction=row._financialExcluded?`<button class="tta-rowaction" data-act="includeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Include</button>`:`<button class="tta-rowaction" data-act="excludeFinancial" data-fin-key="${esc(row._financialKey||('tx:'+String(row.id)))}">Exclude</button>`;
@@ -1844,7 +1847,7 @@
       if(cashOut>0)out.push({id:`tradecash:${tradeId}:out`,timestamp:ts,direction:'out',amount:cashOut,category:'Player Trades',source:'Player Trade',title,detail,transfer:false,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
     }
     for(const t of transactions){
-      const ts=Number(t?.timestamp)||0;if(!(ts>0)||t.source==='Player Trade')continue;
+      const ts=Number(t?.timestamp)||0;if(!(ts>0)||t.source==='Player Trade'||isMissionCreditPurchase(t.title)||t.currency==='mission_credits')continue;
       const total=Math.max(0,Number(t.total)||0),fee=Math.max(0,Number(t.fee)||0),itemId=Number(t.itemId)||0,itemName=itemId>0?catalogItem(itemId).name:'',itemQty=Math.max(0,Number(t.qty)||0),detail=transactionItemDetail(t);
       const common={transfer:false,itemId,itemName,qty:itemQty,detail};
       if(t.side==='buy'&&total>0)out.push({id:`txcash:${t.id}:buy`,timestamp:ts,direction:'out',amount:total,category:t.source==='Foreign Market'?'Travel Trading':'Item Purchases',source:t.source||'Item purchase',title:t.title||`${t.source||'Item'} purchase`,...common});
@@ -1854,7 +1857,7 @@
     return out;
   }
   function allCashFlows() {
-    const map=new Map();for(const x of state.cashFlows||[])if(x?.id&&x?.nonPersonal!==true&&String(x?.source||'')!=='Company Daily Adjustment')map.set(String(x.id),x);for(const x of transactionCashFlows())map.set(String(x.id),x);
+    const map=new Map();for(const x of state.cashFlows||[])if(x?.id&&x?.nonPersonal!==true&&!isMissionCreditPurchase(x.title)&&String(x?.source||'')!=='Company Daily Adjustment')map.set(String(x.id),x);for(const x of transactionCashFlows())map.set(String(x.id),x);
     return [...map.values()].map(annotateFinancialRecord).sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));
   }
   function cashFlowBoundsToday() {const now=nowSec();return {from:tctDayStart(now),to:now};}
@@ -2180,7 +2183,7 @@
     const before=(state.financialSnapshots||[]).filter(x=>x?.networth&&(Number(x?.networth?.timestamp||x?.timestamp)||0)<from).slice().sort((a,b)=>(Number(b?.networth?.timestamp||b?.timestamp)||0)-(Number(a?.networth?.timestamp||a?.timestamp)||0))[0]||null;
     const latest=snapshots[snapshots.length-1]||null,baseline=snapshots.length>=2?snapshots[0]:null;
     const latestTotal=Number(latest?.networth?.total),baselineTotal=Number(baseline?.networth?.total);const delta=Number.isFinite(latestTotal)&&Number.isFinite(baselineTotal)&&latest!==baseline?latestTotal-baselineTotal:null,rows=[];let companyNet=0,companySeen=false;
-    for(const t of state.transactions||[]){const ts=Number(t?.timestamp)||0;if(ts<from||ts>to||Number(t?.logId)===4103||t?.source==='Player Trade')continue;const item=catalogItem(t.itemId),q=Math.max(0,Number(t.qty)||0);if(!(q>0))continue;if(t.side==='buy'){const cost=Math.max(0,Number(t.total)||0),market=q*Math.max(0,Number(item.marketPrice)||0),free=!!t.free,marketKnown=market>0,impact=free?(marketKnown?market:0):(marketKnown?market-cost:0),impactKnown=free?marketKnown:marketKnown,costLabel=t.source==='Player Trade'?'Allocated trade cash':'Cash paid',impactMeta=impactKnown?` \u00B7 Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:' \u00B7 Net-worth impact unavailable (no item market value)';rows.push({timestamp:ts,kind:'item-in',icon:'\uFF0B',title:`${free?'Acquired':'Bought'} ${qty(q)} \u00D7 ${item.name}`,meta:`${t.source||'Item acquisition'} \u00B7 ${free?'Free / $0 cost':`${costLabel} -${money(cost)}`}${marketKnown?` \u00B7 Item value +${money(market)}`:''}${impactMeta}`,value:impactKnown?Math.abs(impact):0,valueClass:impactKnown?(impact>=0?'pos':'neg'):'',prefix:impactKnown?(impact>=0?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});}else if(t.side==='sell'){const proceeds=Math.max(0,Number(t.netTotal??t.total)||0),market=q*Math.max(0,Number(item.marketPrice)||0),marketKnown=market>0,impact=marketKnown?proceeds-market:0,evt=(rawFifoAnalytics(t.itemId).events||[]).find(e=>String(e.id)===String(t.id)),profit=Number(evt?.realizedProfit),profitKnown=Number.isFinite(profit),impactMeta=marketKnown?` \u00B7 Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:' \u00B7 Net-worth impact unavailable (no item market value)';rows.push({timestamp:ts,kind:'item-sale',icon:'\u2197',title:`Sold ${qty(q)} \u00D7 ${item.name}`,meta:`${t.source||'Item sale'} \u00B7 Cash received +${money(proceeds)}${marketKnown?` \u00B7 Item value removed -${money(market)}`:''}${impactMeta}${profitKnown?` \u00B7 FIFO trade ${profit>=0?'profit':'loss'} ${money(Math.abs(profit))}`:' \u00B7 FIFO profit/loss unavailable'}`,value:marketKnown?Math.abs(impact):0,valueClass:marketKnown?(impact>=0?'pos':'neg'):'',prefix:marketKnown?(impact>=0?'+':'-'):'',impact:marketKnown?impact:null,impactKnown:marketKnown});}}
+    for(const stored of state.transactions||[]){const t=normalizeMissionCreditTransaction(stored);const ts=Number(t?.timestamp)||0;if(ts<from||ts>to||Number(t?.logId)===4103||t?.source==='Player Trade')continue;const item=catalogItem(t.itemId),q=Math.max(0,Number(t.qty)||0);if(!(q>0))continue;if(t.side==='buy'){const cost=Math.max(0,Number(t.total)||0),market=q*Math.max(0,Number(item.marketPrice)||0),free=!!t.free,marketKnown=market>0,impact=free?(marketKnown?market:0):(marketKnown?market-cost:0),impactKnown=free?marketKnown:marketKnown,costLabel=t.source==='Player Trade'?'Allocated trade cash':'Cash paid',impactMeta=impactKnown?` \u00B7 Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:' \u00B7 Net-worth impact unavailable (no item market value)';rows.push({timestamp:ts,kind:'item-in',icon:'\uFF0B',title:`${free?'Acquired':'Bought'} ${qty(q)} \u00D7 ${item.name}`,meta:`${t.source||'Item acquisition'} \u00B7 ${t.currency==='mission_credits'?(Number(t.missionCreditsSpent)>0?`${qty(t.missionCreditsSpent)} mission credits spent \u00B7 $0 cash`:'Mission credits \u00B7 $0 cash'):free?'Free / $0 cost':`${costLabel} -${money(cost)}`}${marketKnown?` \u00B7 Item value +${money(market)}`:''}${impactMeta}`,value:impactKnown?Math.abs(impact):0,valueClass:impactKnown?(impact>=0?'pos':'neg'):'',prefix:impactKnown?(impact>=0?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});}else if(t.side==='sell'){const proceeds=Math.max(0,Number(t.netTotal??t.total)||0),market=q*Math.max(0,Number(item.marketPrice)||0),marketKnown=market>0,impact=marketKnown?proceeds-market:0,evt=(rawFifoAnalytics(t.itemId).events||[]).find(e=>String(e.id)===String(t.id)),profit=Number(evt?.realizedProfit),profitKnown=Number.isFinite(profit),impactMeta=marketKnown?` \u00B7 Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:' \u00B7 Net-worth impact unavailable (no item market value)';rows.push({timestamp:ts,kind:'item-sale',icon:'\u2197',title:`Sold ${qty(q)} \u00D7 ${item.name}`,meta:`${t.source||'Item sale'} \u00B7 Cash received +${money(proceeds)}${marketKnown?` \u00B7 Item value removed -${money(market)}`:''}${impactMeta}${profitKnown?` \u00B7 FIFO trade ${profit>=0?'profit':'loss'} ${money(Math.abs(profit))}`:' \u00B7 FIFO profit/loss unavailable'}`,value:marketKnown?Math.abs(impact):0,valueClass:marketKnown?(impact>=0?'pos':'neg'):'',prefix:marketKnown?(impact>=0?'+':'-'):'',impact:marketKnown?impact:null,impactKnown:marketKnown});}}
     for(const evt of effectivePlayerTradeEvents()){
       const ts=Number(evt?.timestamp)||0;if(ts<from||ts>to)continue;const incoming=evt.incomingItems||[],outgoing=evt.outgoingItems||[],cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0);
       let itemInValue=0,itemOutValue=0,missingValue=false;for(const x of incoming){const q=Math.max(0,Number(x.qty)||0),v=q*Math.max(0,Number(catalogItem(x.itemId).marketPrice)||0);if(q>0&&!(v>0))missingValue=true;itemInValue+=v;}for(const x of outgoing){const q=Math.max(0,Number(x.qty)||0),v=q*Math.max(0,Number(catalogItem(x.itemId).marketPrice)||0);if(q>0&&!(v>0))missingValue=true;itemOutValue+=v;}
@@ -2192,7 +2195,7 @@
     const consumptionGroups=new Map();
     for(const t of state.itemConsumptions||[]){const ts=Number(t?.timestamp)||0;if(ts<from||ts>to)continue;const itemId=Number(t?.itemId)||0,q=Math.max(0,Number(t?.qty)||0);if(!(itemId>0&&q>0))continue;const item=catalogItem(itemId),market=q*Math.max(0,Number(item.marketPrice)||0),evt=(rawFifoAnalytics(itemId).events||[]).find(e=>String(e.id)===`consume:${t.id}`),basis=Math.max(0,Number(evt?.costBasis)||0),minute=Math.floor(ts/60),useTitle=String(t?.title||'Item use'),key=`${itemId}|${useTitle}|${minute}`;let g=consumptionGroups.get(key);if(!g){g={timestamp:ts,itemId,itemName:item.name,title:useTitle,qty:0,market:0,basis:0,count:0};consumptionGroups.set(key,g);}g.timestamp=Math.min(g.timestamp,ts);g.qty+=q;g.market+=market;g.basis+=basis;g.count++;}
     for(const g of consumptionGroups.values()){const impactValue=g.market||g.basis,impact=impactValue>0?-impactValue:0,impactKnown=impactValue>0;rows.push({timestamp:g.timestamp,kind:'item-consumed',icon:'\u2212',title:`Used ${qty(g.qty)} \u00D7 ${g.itemName}`,meta:`${g.title}${g.count>1?` \u00B7 ${qty(g.count)} use logs combined`:''}${g.market?` \u00B7 Est. value removed ${money(g.market)}`:''}${g.basis?` \u00B7 FIFO cost basis removed ${money(g.basis)}`:''}${!g.market&&g.basis?' \u00B7 Using FIFO cost basis as value fallback':''}`,value:impactKnown?impactValue:0,valueClass:impactKnown?'neg':'',prefix:impactKnown?'-':'',impact:impactKnown?impact:null,impactKnown});}
-    for(const x of state.cashFlows||[]){const ts=Number(x?.timestamp)||0;if(ts<from||ts>to||x?.transfer||String(x?.direction||'').startsWith('transfer')||isNonCashCompanyAdminLog(x?.title))continue;const amount=Math.max(0,Number(x?.amount)||0);if(!(amount>0))continue;const incoming=x.direction==='in',impact=incoming?amount:-amount,isCompany=x.category==='Company Profit / Loss'||x.source==='Company Daily Adjustment',impactKnown=isCompany||cashFlowNetWorthImpactKnown(x);if(isCompany){companySeen=true;companyNet+=impact;}const companyMeta=isCompany?`Company daily adjustment \u00B7 Gross ${money(x.grossIncome)} \u00B7 Wages ${money(x.wages)} \u00B7 Advertising ${money(x.advertisementBudget)}`:`${x.category||'Cash'} \u00B7 ${x.source||'Torn Log'}${impactKnown?'':' \u00B7 Cash side shown; counterpart asset value is not safely known'}`;rows.push({timestamp:ts,kind:isCompany?'company-pl':(incoming?'money-in':'money-out'),icon:isCompany?'\u25A3':(incoming?'\u2191':'\u2193'),title:x.title||x.category||(incoming?'Money received':'Money spent'),meta:companyMeta,value:impactKnown?amount:0,valueClass:impactKnown?(incoming?'pos':'neg'):'',prefix:impactKnown?(incoming?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});}
+    for(const x of state.cashFlows||[]){const ts=Number(x?.timestamp)||0;if(ts<from||ts>to||x?.transfer||String(x?.direction||'').startsWith('transfer')||isNonCashCompanyAdminLog(x?.title)||isMissionCreditPurchase(x?.title))continue;const amount=Math.max(0,Number(x?.amount)||0);if(!(amount>0))continue;const incoming=x.direction==='in',impact=incoming?amount:-amount,isCompany=x.category==='Company Profit / Loss'||x.source==='Company Daily Adjustment',impactKnown=isCompany||cashFlowNetWorthImpactKnown(x);if(isCompany){companySeen=true;companyNet+=impact;}const companyMeta=isCompany?`Company daily adjustment \u00B7 Gross ${money(x.grossIncome)} \u00B7 Wages ${money(x.wages)} \u00B7 Advertising ${money(x.advertisementBudget)}`:`${x.category||'Cash'} \u00B7 ${x.source||'Torn Log'}${impactKnown?'':' \u00B7 Cash side shown; counterpart asset value is not safely known'}`;rows.push({timestamp:ts,kind:isCompany?'company-pl':(incoming?'money-in':'money-out'),icon:isCompany?'\u25A3':(incoming?'\u2191':'\u2193'),title:x.title||x.category||(incoming?'Money received':'Money spent'),meta:companyMeta,value:impactKnown?amount:0,valueClass:impactKnown?(incoming?'pos':'neg'):'',prefix:impactKnown?(incoming?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});}
     const valuedRows=rows.filter(x=>x.impactKnown!==false&&Number.isFinite(Number(x.impact))),detectedNet=valuedRows.reduce((n,x)=>n+Number(x.impact),0),unvaluedEvents=rows.length-valuedRows.length;const componentChanges=baseline&&latest?netWorthComponentChanges(baseline.networth,latest.networth):[];rows.sort((a,b)=>b.timestamp-a.timestamp||String(a.title).localeCompare(String(b.title)));return {from,to,snapshots,before,latest,baseline,delta,rows,companyNet:companySeen?companyNet:null,detectedNet,valuedEvents:valuedRows.length,unvaluedEvents,componentChanges};
   }
   function dailyNetWorthChangesHtml() {
@@ -2346,7 +2349,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.10',label:'Current',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
+      {version:'0.5.11',label:'Current',items:['Mission Shop purchases paid with mission credits no longer appear as Torn-dollar spending, whether cached or newly synced.','Credit-purchased items stay in inventory and FIFO acquisition history with a $0 cash basis, labeled Mission Credits rather than Free.','Previously cached misclassified purchases are repaired on startup, and Full Resync can recover credit amounts from unambiguous logs.','Fixed Full Resync stalling on a 100-trade Player Trades page with a repeated or unusable cursor by checking every trade in its oldest second before paging backward.','The safe recovery preserves additional boundary-second trades and pauses instead of skipping transactions when the boundary cannot be verified.']},
+      {version:'0.5.10',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
       {version:'0.5.9',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
       {version:'0.5.8',items:['Automatic background Quick Sync now keeps the normal TCFA launcher icon with a static dark-green border and corner badge instead of a manual-style spinner.','The in-app sync status also shows a static dark-green glyph for background Quick Sync on this tab; manual syncs retain their animated spinner, and other-tab syncs stay yellow.','Background/manual status transitions refresh correctly without restarting the analyzer or changing synchronization behavior.']},
       {version:'0.5.7',items:['Active syncs now show a compact live badge in the header and floating launcher, distinguishing this tab from another Torn tab.','Quick Sync, background Quick Sync and Full Resync show their type and recent progress in the badge tooltip without interrupting the financial workspace.','Activity announcements use BroadcastChannel and local storage, with automatic expiry after interrupted tabs; the existing single-writer Web Lock remains authoritative.']},
@@ -2710,6 +2714,59 @@
     state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();await saveDurable('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
   }
 
+  // Torn's "Mission buy reward item" consumes mission credits, not dollars.
+  function isMissionCreditPurchase(title) {
+    const s=String(title||'').toLowerCase();
+    return /\bmission(?:s)?\b/.test(s)&&(
+      (/\b(?:buy|bought|purchas(?:e|ed))\b/.test(s)&&/\b(?:reward|item|ammo|mod|attachment|upgrade|shop|credit)\b/.test(s))||
+      (/\bcredits?\b/.test(s)&&/\b(?:exchang(?:e|ed)|redeem(?:ed)?|spent|spend)\b/.test(s))
+    );
+  }
+  function missionCreditPurchaseAmount(payload,quantity) {
+    const fields=flattenNumericFields(payload);
+    const find=key=>fields.find(r=>r.path===key||r.path.endsWith('.'+key));
+    for(const key of ['mission_credits_spent','credits_spent','mission_credit_cost','credit_cost','cost_total','total_cost']) {
+      const row=find(key);
+      if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value;
+    }
+    for(const key of ['credits_each','credit_cost_each','cost_each','price_each','cost','price']) {
+      const row=find(key);
+      if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value*Math.max(1,Number(quantity)||1);
+    }
+    return null; // Generic value, money, credits and balance fields are ambiguous.
+  }
+  function normalizeMissionCreditTransaction(row) {
+    if(!row||!isMissionCreditPurchase(row.title)||row.side!=='buy')return row;
+    if(row.currency==='mission_credits'&&row.free===true&&Number(row.total)===0&&Number(row.fee||0)===0)return row;
+    // Cached legacy dollar fields may be item value, not credits. The original
+    // currency payload is unavailable, so do not invent a mission-credit total.
+    const previous=Number(row.missionCreditsSpent);
+    const creditValue=Number.isFinite(previous)&&previous>=0&&row.missionCreditsSpent!=null?previous:null;
+    return {...row,source:'Mission Credits',currency:'mission_credits',
+      missionCreditsSpent:creditValue,free:true,total:0,netTotal:0,fee:0,
+      costKnown:true,proceedsKnown:true,estimated:false};
+  }
+  function repairMissionCreditAccounting() {
+    const old=state.transactions||[],match=old.filter(t=>isMissionCreditPurchase(t?.title)&&t?.side==='buy'&&
+      !(t.currency==='mission_credits'&&t.free===true&&Number(t.total)===0&&Number(t.fee||0)===0));
+    if(match.length){
+      state.transactions=old.map(normalizeMissionCreditTransaction);
+      save('transactions',state.transactions);
+      resetAnalyticsCache();
+    }
+    const prior=state.cashFlows||[],removed=prior.filter(t=>isMissionCreditPurchase(t?.title)).length;
+    if(removed){
+      state.cashFlows=prior.filter(t=>!isMissionCreditPurchase(t?.title));
+      save('cashFlows',state.cashFlows);
+    }
+    const unknown=state.unrecognizedFinancial||[];
+    if(unknown.some(t=>isMissionCreditPurchase(t?.title))){
+      state.unrecognizedFinancial=unknown.filter(t=>!isMissionCreditPurchase(t?.title));
+      save('unrecognizedFinancial',state.unrecognizedFinancial);
+    }
+    return {transactions:match.length,cashFlows:removed};
+  }
+
   function relevantLogTypes(all) {
     const paidContext=/(item market|bazaar|abroad|foreign|travel|shop|auction|market)/i;
     const paidAction=/\b(buy|bought|purchase|purchased|sell|sold|sale|listed|listing|win|won)\b/i;
@@ -2720,7 +2777,7 @@
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || isMissionCreditPurchase(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     FORCE_FINANCE_LOG_IDS.forEach(id=>{if(!byId.has(id))byId.set(id,{id,title:EXPLICIT_CASH_LOGS.get(id)?.label||PLAYER_ITEM_LOGS.get(id)?.label||`Financial log ${id}`});});
@@ -2735,6 +2792,7 @@
   }
   function sourceFrom(title) {
     const s=String(title||'').toLowerCase();
+    if(isMissionCreditPurchase(s))return'Mission Credits';
     if(s.includes('item receive')||s.includes('item received'))return'Player Transfer'; if(s.includes('item market'))return'Item Market'; if(s.includes('bazaar'))return'Bazaar'; if(s.includes('abroad')||s.includes('travel'))return'Foreign Market'; if(s.includes('auction'))return'Auction House'; if(s.includes('city find'))return'City Find'; if(s.includes('crime'))return'Crime Reward'; if(s.includes('mission'))return'Mission Reward'; if(s.includes('seasonal')||s.includes('christmas')||s.includes('easter')||s.includes('halloween'))return'Seasonal Reward'; if(s.includes('job')||s.includes('company special'))return'Job / Company Reward'; if(s.includes('shop'))return'Torn Shop'; return title||'Other';
   }
   function isFreeAcquisition(title,data) {
@@ -2794,12 +2852,14 @@
     const title=entry.details?.title||'';
     if(/\btrade\b/i.test(title))return[];
     const payload={...(entry.params||{}),...(entry.data||{})};
+    const missionCredits=isMissionCreditPurchase(title);
     const monetaryContext=!!known||/(item market|bazaar|abroad|foreign market|torn shop|auction)/i.test(title);
-    const free=isFreeAcquisition(title,payload)&&!monetaryContext;
-    const side=known?.side||classify(title)||(free?'buy':null); if(!side)return[];
+    const free=missionCredits||(isFreeAcquisition(title,payload)&&!monetaryContext);
+    const side=missionCredits?'buy':known?.side||classify(title)||(free?'buy':null); if(!side)return[];
     const items=normalizeItems(payload); if(!items.length){if(known)reportDiagnostic('ITEM_PARSE','warning','An item transaction could not be read and is excluded.',{logId:logTypeId,timestamp:Number(entry.timestamp),source:known.source});return[];}
-    const totalAll=free?0:cashTotal(payload,items.reduce((s,x)=>s+x.qty,0)); const fee=side==='sell'?fees(payload):0;
     const totalQty=items.reduce((s,x)=>s+x.qty,0)||1;
+    const missionCreditsTotal=missionCredits?missionCreditPurchaseAmount(payload,totalQty):null;
+    const totalAll=free?0:cashTotal(payload,totalQty); const fee=side==='sell'?fees(payload):0;
     const amountKnown=totalAll!==null;
     if(!amountKnown)reportDiagnostic('ITEM_VALUE_MISSING','warning','Item quantity is recorded, but its cash value is unavailable. Affected profit is excluded.',{logId:logTypeId,timestamp:Number(entry.timestamp),source:known?.source||sourceFrom(title)});
     const detectedSource=sourceFrom(title),detectedSide=classify(title);
@@ -2807,7 +2867,7 @@
     if(items.length>1&&!free)reportDiagnostic('ITEM_ALLOCATION','warning','A multi-item log uses quantity-based cash allocation.',{logId:logTypeId,source:known?.source||detectedSource});
     return items.map(it=>{
       const ratio=it.qty/totalQty; const total=totalAll*ratio; const feeShare=fee*ratio;
-      return {id:`${entry.id}:${it.id}`,logId:logTypeId,timestamp:Number(entry.timestamp),nanostamp:entry.nanostamp?String(entry.nanostamp):undefined,itemId:it.id,side,qty:it.qty,total,fee:feeShare,netTotal:side==='sell'?Math.max(0,total-feeShare):total,source:known?.source||sourceFrom(title),title,free,costKnown:amountKnown,proceedsKnown:amountKnown,estimated:items.length>1&&!free};
+      return {id:`${entry.id}:${it.id}`,logId:logTypeId,timestamp:Number(entry.timestamp),nanostamp:entry.nanostamp?String(entry.nanostamp):undefined,itemId:it.id,side,qty:it.qty,total,fee:feeShare,netTotal:side==='sell'?Math.max(0,total-feeShare):total,source:missionCredits?'Mission Credits':known?.source||sourceFrom(title),title,free,currency:missionCredits?'mission_credits':'cash',missionCreditsSpent:missionCredits&&missionCreditsTotal!=null?missionCreditsTotal*ratio:null,costKnown:amountKnown,proceedsKnown:amountKnown,estimated:items.length>1&&!free};
     });
   }
 
@@ -2983,6 +3043,7 @@
   }
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
     const entryTitle=String(entry?.details?.title||'');
+    if(isMissionCreditPurchase(entryTitle))return[]; // Credits do not debit the wallet.
     const crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(entryTitle);
     // A raw Torn event may legitimately project into several analyzer workspaces at once.
     // Only suppress generic cash extraction when a normalized paid item buy/sell already
@@ -3056,6 +3117,7 @@
   }
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
+    if(isMissionCreditPurchase(title))return null;
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
@@ -3644,7 +3706,7 @@
     resumableTxMap=null;resumableTxJob='';resetAnalyticsCache();
   }
   function newSyncDiagnostics(job,mode,logTypes,batches) {
-    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,logBatchSplits:0,denseBoundaryRecoveries:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
+    return {rawRows:0,parsedRows:0,matchedRows:0,cashFlowRows:0,playerTransferRows:0,unrecognizedFinancialRows:0,existingRowsSkipped:0,batches,logTypes,pages:0,logBatchSplits:0,denseBoundaryRecoveries:0,oldestTimestamp:0,latestRawLogTimestamp:0,latestParsedAcquisitionTimestamp:0,mode,syncMode:job.syncMode||'quick',periodFrom:job.period.from,periodTo:job.period.to,tradeHeaders:0,tradeListPages:0,tradeBoundaryRecoveries:0,tradeDetails:0,tradeDetailsSkipped:0,playerTradeEvents:0,tradesWithItems:0,tradeTransactions:0,tradeSoldQty:0,tradeBoughtQty:0,foreignBuyRows:0,foreignBuyQty:0,abroadVerifyPages:0,abroadVerifyRawRows:0,abroadVerifyParsedRows:0,abroadVerifyQty:0,abroadVerifyLatestRawTimestamp:0,recentLogRecheckHours:RECENT_LOG_RECHECK_SEC/3600,recentTradeRecheckHours:RECENT_TRADE_RECHECK_SEC/3600,tctNow:Number(job.tctNow)||0,missingLogDays:Number(job.logScanPeriod?.missingDays)||0,missingTradeDays:Number(job.tradeScanPeriod?.missingDays)||0,incrementalLogs:!!job.logScanPeriod?.incremental,incrementalTrades:!!job.tradeScanPeriod?.incremental};
   }
   function initialLogBatches(ids=[]) {
     const list=ids.map(Number).filter(x=>x>0),batches=[];
@@ -3717,6 +3779,12 @@
     let requests=0;
     for(let attempt=0;attempt<3;attempt++){
       const data=await syncApiGet(path,params),rows=pageRows(data,key),cursors=[...seen];requests++;
+      // Date bounds are authoritative for trade checkpoints. If the provider
+      // ignores a narrowed to/from window, stop rather than loop or skip rows.
+      if(key==='trades'&&rows.some(row=>{
+        const ts=Number(row?.completed_at||row?.timestamp)||0;
+        return ts<=Number(params.from??0)||ts>Number(params.to);
+      }))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Player Trades returned records outside the requested scan boundary. No trade history was skipped.',{source:key,phase:'trade-range-check',from:Number(params.from)||0,to:Number(params.to)||0,count:rows.length});
       try{
         const next=nextHistoryPage(data,params,rows,cursors,key);
         if(rows.length&&!next&&zeroHistoryPage(data,params,key)){
@@ -3765,6 +3833,34 @@
               reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',probeNext?'A dense history page was recovered with an independent date-boundary cursor; older logs are still being loaded.':'A dense history page was independently verified as the end of this log batch.',{source:key,phase:'dense-date-probe',from,to:oldest,count:older.length});
               return {rows:savedRows,next:probeNext,seen:[...seen],requests,boundaryRecovered:true,denseBoundaryRecovered:true};
             }
+          }
+          if(key==='trades'&&['PAGE_REPEATED','PAGE_INCOMPLETE'].includes(error.code)&&rows.length>=Math.max(1,Number(params.limit||100)-1)){
+            // The provider may repeat a full-page link or return no usable link.
+            // Never advance past a second until an independent inclusive
+            // one-second query proves every already observed boundary trade is
+            // present and there are fewer records than the page capacity.
+            const limit=Math.max(1,Math.min(100,Number(params.limit)||100)),from=Number(params.from)||0,to=Number(params.to)||0;
+            const times=rows.map(row=>Number(row?.completed_at||row?.timestamp));
+            if(times.some(ts=>!Number.isFinite(ts)||ts<=from||ts>to))throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','Player Trades returned invalid timestamps at a dense-page boundary. Full Resync remains paused.',{source:key,phase:'trade-second-probe',from,to,count:rows.length});
+            const oldest=Math.min(...times);
+            const boundary={...params,cat:'finished',sort:'DESC',from:Math.max(from,oldest-1),to:oldest,limit};
+            delete boundary.nanostamp;delete boundary.offset;
+            setSyncProgress('Verifying every trade in the oldest recorded second');
+            const checked=await syncApiGet(path,boundary),sameSecond=pageRows(checked,key);requests++;
+            const ids=new Set(sameSecond.map(row=>String(row.id)));
+            const observed=rows.filter(row=>Number(row?.completed_at||row?.timestamp)===oldest);
+            if(sameSecond.length>=Math.max(1,limit-1)||ids.size!==sameSecond.length||sameSecond.some(row=>Number(row?.completed_at||row?.timestamp)!==oldest)||
+                observed.some(row=>!ids.has(String(row.id)))){
+              throw new AnalyzerError('PAGE_BOUNDARY_UNVERIFIED','The dense Player Trades timestamp could not be verified completely. Resume later without resetting history.',{source:key,phase:'trade-second-probe',from:boundary.from,to:oldest,count:sameSecond.length});
+            }
+            const previousTo=oldest-1;
+            const next=previousTo<=from?null:{...params,cat:'finished',sort:'DESC',to:previousTo};
+            if(next){delete next.nanostamp;delete next.offset;}
+            reportDiagnostic('PAGE_BOUNDARY_RECOVERED','info',next?'A full Player Trades page with a repeated cursor was verified by a one-second trade check; older trades will be fetched safely.':'The oldest dense Player Trades second was independently verified as the end of the requested scan.',{source:key,phase:'trade-second-probe',from,to:oldest,count:rows.length});
+            // Include extra boundary-second trades discovered by the verification
+            // probe, even if the original full page did not show them.
+            const savedRows=Array.from(new Map([...rows,...sameSecond].map(row=>[String(row.id),row])).values());
+            return {rows:savedRows,next,seen:[...seen],requests,boundaryRecovered:true,tradeBoundaryRecovered:true};
           }
           if(key==='trades'&&error.code==='PAGE_REPEATED'){
             const limit=Math.max(1,Number(params.limit||100));
@@ -3926,7 +4022,8 @@
     let params={...(job.tradeListParams||{cat:'finished',limit:100,sort:'DESC',to:scanPeriod.to}),from:scanPeriod.from};
     while(!syncJobCancelled(job)){
       const page=(Number(job.diagnostics.tradeListPages)||0)+1;await checkpointSyncJob(job,`Player trades \u00B7 list page ${page} \u00B7 ${qty(found.size)} completed trades checkpointed`);
-      const {rows,next,seen}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
+      const {rows,next,seen,tradeBoundaryRecovered}=await historyPage('/user/trades',params,job.tradeListSeen||[],'trades');job.diagnostics.tradeListPages=page;
+      if(tradeBoundaryRecovered)job.diagnostics.tradeBoundaryRecoveries=(Number(job.diagnostics.tradeBoundaryRecoveries)||0)+1;
       for(const row of rows){const h=compactTradeHeader(row);if(h&&h.completed_at>=scanPeriod.from&&h.completed_at<=scanPeriod.to)found.set(h.id,h);}
       job.tradeHeaders=[...found.values()];job.diagnostics.tradeHeaders=job.tradeHeaders.length;
       if(!next){job.completedSources={...(job.completedSources||{}),trade:true};job.tradeListParams=null;job.phase='trade-details';job.tradeDetailIndex=Number(job.tradeDetailIndex)||0;await checkpointSyncJob(job,`Player trades \u00B7 ${qty(job.tradeHeaders.length)} completed trades listed`);return true;}
@@ -4209,11 +4306,14 @@
     try{await restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     purgeBogusCrimeCashRows();
+    const missionRepair=repairMissionCreditAccounting();
+    if(missionRepair.transactions||missionRepair.cashFlows)reportDiagnostic('MISSION_CREDITS_RECLASSIFIED','info',
+      'Corrected cached Mission Shop purchases: mission credits are not Torn dollar spending. Full Resync can recover verified credit costs.',{source:'migration',count:missionRepair.transactions+missionRepair.cashFlows});
     repairCashFlowAccountingRows();
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Full Resync rechecks older purchase, sale, interest, casino and service events with conservative cash rules; past totals may change.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Mission Shop purchases spend credits, not dollars; older items are corrected when available, and Full Resync verifies historical credit amounts.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});

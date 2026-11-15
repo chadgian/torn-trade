@@ -344,7 +344,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Full Resync rechecks older cash events with verified directions and capital transfers.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial-log rules changed. Mission Shop purchases use mission credits, not dollar spending. Cached purchases are corrected on load; Full Resync verifies historical credit amounts and other log changes.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
@@ -385,7 +385,7 @@
   }
   function diagnosticReport() {
     const d=state.sync?.diagnostics||{},counts={};
-    for(const key of ['rawRows','pages','tradeListPages','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
+    for(const key of ['rawRows','pages','tradeListPages','tradeBoundaryRecoveries','tradeHeaders','tradeDetails','tradeDetailsDeferred','transactionRowsUpdated','boundaryRecoveries','logBatchSplits','denseBoundaryRecoveries'])counts[key]=Number(d[key])||0;
     const job=loadSyncJob(),attemptCounts={};
     for(const key of Object.keys(counts))attemptCounts[key]=Number(job?.diagnostics?.[key])||0;
     const pendingSync=job?{mode:job.syncMode==='full'?'full':'quick',phase:redactText(job.phase),updatedAt:Number(job.updatedAt)||0,paused:!!job.lastError,counts:attemptCounts,context:safeDiagnosticContext({from:Number(job.period?.from)||0,to:Number(job.period?.to)||0,cursor:job.logPageParams?.nanostamp}),lastErrorCode:redactText(job.lastErrorCode||''),lastErrorContext:safeDiagnosticContext(job.lastErrorContext||{}),recoveryAvailable:!!load('fullResyncBackup',null)}:null;

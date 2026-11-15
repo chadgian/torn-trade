@@ -13,11 +13,14 @@
     try{await restoreImportRecovery();}catch(_){reportDiagnostic('IMPORT_RECOVERY','error','Previous history could not be restored. Free browser storage and reload.',{source:'import'});}
     if(load('fullResyncBackup',null)&&!loadSyncJob()?.fullResetDone)await restoreFullResyncBackup({fullResetDone:true});
     purgeBogusCrimeCashRows();
+    const missionRepair=repairMissionCreditAccounting();
+    if(missionRepair.transactions||missionRepair.cashFlows)reportDiagnostic('MISSION_CREDITS_RECLASSIFIED','info',
+      'Corrected cached Mission Shop purchases: mission credits are not Torn dollar spending. Full Resync can recover verified credit costs.',{source:'migration',count:missionRepair.transactions+missionRepair.cashFlows});
     repairCashFlowAccountingRows();
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Full Resync rechecks older purchase, sale, interest, casino and service events with conservative cash rules; past totals may change.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Financial-log classification changed. Mission Shop purchases spend credits, not dollars; older items are corrected when available, and Full Resync verifies historical credit amounts.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});

@@ -2,9 +2,12 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.10.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.11.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
 
 ## Features
+
+- Mission Shop acquisitions purchased with mission credits are recorded with $0 dollar cash cost (not a dollar expense), labeled Mission Credits and counted as items in acquisition/FIFO history. Previously cached mission-credit dollar purchases are repaired on startup. For uncertain historical credit counts, Full Resync is required to recover the exact credit amount when the log exposes it.
+
 
 - Fixed stale cross-tab sync status after reloading a page with an active background Quick Sync: page exit clears its own status promptly and reload recovery distinguishes the old document from a real second tab.
 
@@ -75,7 +78,7 @@ Single-item cash trades use actual cash. Multi-item/mixed trades retain the prev
 - One-minute background checks use 15-minute log and one-hour trade repair windows, widening to 72 hours at least hourly.
 - Recent/modified trades are reverified. Incomplete details remain pending after leaving the recent scan window.
 - Exact Torn links/nanostamps are retained. Missing/repeated cursors cannot silently establish complete coverage.
-- Full Resync loads all API-available history. Previous history is recoverable on cancellation; older parsed caches remain flagged until a successful full rebuild.
+- Full Resync attempts all API-available history. A full, repeated Player Trades page is independently checked at its oldest second before walking to older dates; any unverified second remains paused to avoid skipping trades. Full history completeness still depends on API-available records and log-type coverage. Previous history is recoverable on cancellation; older parsed caches remain flagged until a successful full rebuild.
 - Rebuilds commit a recovery copy before clearing history. IndexedDB avoids the old double-history localStorage quota failure; browsers without it retain the legacy backup path and refuse to clear history when the backup cannot fit. Long rebuilds retain their frozen scan endpoint across reloads; Quick Sync subsequently repairs freshness.
 - Diagnostic exports separate the last successful scan from the pending/failed attempt. Permanently stalled cursors pause after three attempts without advancing coverage or skipping same-second events.
 - Web Locks coordinate sync/recovery writes across Torn tabs when available. Every tab may still read local history; secondary tabs refresh after sync/import/reset notifications and on focus. During Full Resync they can display the last safe recovery snapshot while the writer rebuilds live history. Without Web Locks the interface still warns to keep only one tab syncing.

@@ -34,6 +34,59 @@
     state.logTypes=data.logtypes;state.logTypesUpdatedAt=nowSec();await saveDurable('logTypes',state.logTypes);save('logTypesUpdatedAt',state.logTypesUpdatedAt);return state.logTypes;
   }
 
+  // Torn's "Mission buy reward item" consumes mission credits, not dollars.
+  function isMissionCreditPurchase(title) {
+    const s=String(title||'').toLowerCase();
+    return /\bmission(?:s)?\b/.test(s)&&(
+      (/\b(?:buy|bought|purchas(?:e|ed))\b/.test(s)&&/\b(?:reward|item|ammo|mod|attachment|upgrade|shop|credit)\b/.test(s))||
+      (/\bcredits?\b/.test(s)&&/\b(?:exchang(?:e|ed)|redeem(?:ed)?|spent|spend)\b/.test(s))
+    );
+  }
+  function missionCreditPurchaseAmount(payload,quantity) {
+    const fields=flattenNumericFields(payload);
+    const find=key=>fields.find(r=>r.path===key||r.path.endsWith('.'+key));
+    for(const key of ['mission_credits_spent','credits_spent','mission_credit_cost','credit_cost','cost_total','total_cost']) {
+      const row=find(key);
+      if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value;
+    }
+    for(const key of ['credits_each','credit_cost_each','cost_each','price_each','cost','price']) {
+      const row=find(key);
+      if(row&&Number.isFinite(row.value)&&row.value>=0)return row.value*Math.max(1,Number(quantity)||1);
+    }
+    return null; // Generic value, money, credits and balance fields are ambiguous.
+  }
+  function normalizeMissionCreditTransaction(row) {
+    if(!row||!isMissionCreditPurchase(row.title)||row.side!=='buy')return row;
+    if(row.currency==='mission_credits'&&row.free===true&&Number(row.total)===0&&Number(row.fee||0)===0)return row;
+    // Cached legacy dollar fields may be item value, not credits. The original
+    // currency payload is unavailable, so do not invent a mission-credit total.
+    const previous=Number(row.missionCreditsSpent);
+    const creditValue=Number.isFinite(previous)&&previous>=0&&row.missionCreditsSpent!=null?previous:null;
+    return {...row,source:'Mission Credits',currency:'mission_credits',
+      missionCreditsSpent:creditValue,free:true,total:0,netTotal:0,fee:0,
+      costKnown:true,proceedsKnown:true,estimated:false};
+  }
+  function repairMissionCreditAccounting() {
+    const old=state.transactions||[],match=old.filter(t=>isMissionCreditPurchase(t?.title)&&t?.side==='buy'&&
+      !(t.currency==='mission_credits'&&t.free===true&&Number(t.total)===0&&Number(t.fee||0)===0));
+    if(match.length){
+      state.transactions=old.map(normalizeMissionCreditTransaction);
+      save('transactions',state.transactions);
+      resetAnalyticsCache();
+    }
+    const prior=state.cashFlows||[],removed=prior.filter(t=>isMissionCreditPurchase(t?.title)).length;
+    if(removed){
+      state.cashFlows=prior.filter(t=>!isMissionCreditPurchase(t?.title));
+      save('cashFlows',state.cashFlows);
+    }
+    const unknown=state.unrecognizedFinancial||[];
+    if(unknown.some(t=>isMissionCreditPurchase(t?.title))){
+      state.unrecognizedFinancial=unknown.filter(t=>!isMissionCreditPurchase(t?.title));
+      save('unrecognizedFinancial',state.unrecognizedFinancial);
+    }
+    return {transactions:match.length,cashFlows:removed};
+  }
+
   function relevantLogTypes(all) {
     const paidContext=/(item market|bazaar|abroad|foreign|travel|shop|auction|market)/i;
     const paidAction=/\b(buy|bought|purchase|purchased|sell|sold|sale|listed|listing|win|won)\b/i;
@@ -44,7 +97,7 @@
     (all||[]).forEach(x=>{
       const id=Number(x?.id),title=String(x?.title||'');
       if(/\btrade\b/i.test(title))return;
-      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
+      if(id && ((paidContext.test(title) && paidAction.test(title)) || itemMovement.test(title) || /^item use\b/i.test(title) || freeContext.test(title) || moneyContext.test(title) || financialDomain(title) || isMissionCreditPurchase(title) || KNOWN_TRANSACTION_LOGS.has(id))) byId.set(id,{...x,id});
     });
     KNOWN_TRANSACTION_LOGS.forEach((meta,id)=>{if(!byId.has(id))byId.set(id,{id,title:`${meta.source} ${meta.side}`});});
     FORCE_FINANCE_LOG_IDS.forEach(id=>{if(!byId.has(id))byId.set(id,{id,title:EXPLICIT_CASH_LOGS.get(id)?.label||PLAYER_ITEM_LOGS.get(id)?.label||`Financial log ${id}`});});
@@ -59,6 +112,7 @@
   }
   function sourceFrom(title) {
     const s=String(title||'').toLowerCase();
+    if(isMissionCreditPurchase(s))return'Mission Credits';
     if(s.includes('item receive')||s.includes('item received'))return'Player Transfer'; if(s.includes('item market'))return'Item Market'; if(s.includes('bazaar'))return'Bazaar'; if(s.includes('abroad')||s.includes('travel'))return'Foreign Market'; if(s.includes('auction'))return'Auction House'; if(s.includes('city find'))return'City Find'; if(s.includes('crime'))return'Crime Reward'; if(s.includes('mission'))return'Mission Reward'; if(s.includes('seasonal')||s.includes('christmas')||s.includes('easter')||s.includes('halloween'))return'Seasonal Reward'; if(s.includes('job')||s.includes('company special'))return'Job / Company Reward'; if(s.includes('shop'))return'Torn Shop'; return title||'Other';
   }
   function isFreeAcquisition(title,data) {
@@ -118,12 +172,14 @@
     const title=entry.details?.title||'';
     if(/\btrade\b/i.test(title))return[];
     const payload={...(entry.params||{}),...(entry.data||{})};
+    const missionCredits=isMissionCreditPurchase(title);
     const monetaryContext=!!known||/(item market|bazaar|abroad|foreign market|torn shop|auction)/i.test(title);
-    const free=isFreeAcquisition(title,payload)&&!monetaryContext;
-    const side=known?.side||classify(title)||(free?'buy':null); if(!side)return[];
+    const free=missionCredits||(isFreeAcquisition(title,payload)&&!monetaryContext);
+    const side=missionCredits?'buy':known?.side||classify(title)||(free?'buy':null); if(!side)return[];
     const items=normalizeItems(payload); if(!items.length){if(known)reportDiagnostic('ITEM_PARSE','warning','An item transaction could not be read and is excluded.',{logId:logTypeId,timestamp:Number(entry.timestamp),source:known.source});return[];}
-    const totalAll=free?0:cashTotal(payload,items.reduce((s,x)=>s+x.qty,0)); const fee=side==='sell'?fees(payload):0;
     const totalQty=items.reduce((s,x)=>s+x.qty,0)||1;
+    const missionCreditsTotal=missionCredits?missionCreditPurchaseAmount(payload,totalQty):null;
+    const totalAll=free?0:cashTotal(payload,totalQty); const fee=side==='sell'?fees(payload):0;
     const amountKnown=totalAll!==null;
     if(!amountKnown)reportDiagnostic('ITEM_VALUE_MISSING','warning','Item quantity is recorded, but its cash value is unavailable. Affected profit is excluded.',{logId:logTypeId,timestamp:Number(entry.timestamp),source:known?.source||sourceFrom(title)});
     const detectedSource=sourceFrom(title),detectedSide=classify(title);
@@ -131,7 +187,7 @@
     if(items.length>1&&!free)reportDiagnostic('ITEM_ALLOCATION','warning','A multi-item log uses quantity-based cash allocation.',{logId:logTypeId,source:known?.source||detectedSource});
     return items.map(it=>{
       const ratio=it.qty/totalQty; const total=totalAll*ratio; const feeShare=fee*ratio;
-      return {id:`${entry.id}:${it.id}`,logId:logTypeId,timestamp:Number(entry.timestamp),nanostamp:entry.nanostamp?String(entry.nanostamp):undefined,itemId:it.id,side,qty:it.qty,total,fee:feeShare,netTotal:side==='sell'?Math.max(0,total-feeShare):total,source:known?.source||sourceFrom(title),title,free,costKnown:amountKnown,proceedsKnown:amountKnown,estimated:items.length>1&&!free};
+      return {id:`${entry.id}:${it.id}`,logId:logTypeId,timestamp:Number(entry.timestamp),nanostamp:entry.nanostamp?String(entry.nanostamp):undefined,itemId:it.id,side,qty:it.qty,total,fee:feeShare,netTotal:side==='sell'?Math.max(0,total-feeShare):total,source:missionCredits?'Mission Credits':known?.source||sourceFrom(title),title,free,currency:missionCredits?'mission_credits':'cash',missionCreditsSpent:missionCredits&&missionCreditsTotal!=null?missionCreditsTotal*ratio:null,costKnown:amountKnown,proceedsKnown:amountKnown,estimated:items.length>1&&!free};
     });
   }
 
@@ -307,6 +363,7 @@
   }
   function parseCashFlowEntry(entry,parsedItemRows=[]) {
     const entryTitle=String(entry?.details?.title||'');
+    if(isMissionCreditPurchase(entryTitle))return[]; // Credits do not debit the wallet.
     const crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(entryTitle);
     // A raw Torn event may legitimately project into several analyzer workspaces at once.
     // Only suppress generic cash extraction when a normalized paid item buy/sell already
@@ -380,6 +437,7 @@
   }
   function unrecognizedRowFor(entry) {
     const logTypeId=Number(entry?.details?.id)||0,title=String(entry?.details?.title||''),category=String(entry?.details?.category||entry?.category||'');
+    if(isMissionCreditPurchase(title))return null;
     if(/\b(?:education|course)\b/i.test(title)&&/\b(?:completed?|finished|graduated|cancelled)\b/i.test(title))return null;
     if(isNonCashCompanyAdminLog(title)||(!financialTitleContext(`${title} ${category}`)&&!financialAuditCandidate(entry))||EXPLICIT_CASH_LOGS.has(logTypeId)||PLAYER_ITEM_LOGS.has(logTypeId)||BOUNTY_LOGS.has(logTypeId)||KNOWN_TRANSACTION_LOGS.has(logTypeId)||(/\btrade\b/i.test(title)&&!/\b(?:stock|shares?|property|auction|bank|investment)\b/i.test(title)))return null;
     const payload={...(entry?.params||{}),...(entry?.data||{})},crimeContext=/crime|burglary|shoplift|theft|robbery|pickpocket|fraud|hustl|bootleg|disposal|cybercrime/i.test(title),domain=financialDomain(title),field=crimeContext?strictCrimeCashField(payload,title):bestMoneyField(payload,title);
