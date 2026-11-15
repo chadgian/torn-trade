@@ -2,9 +2,12 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.10.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.11.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
 
 ## Features
+
+- Mission Shop acquisitions purchased with mission credits are recorded with $0 dollar cash cost (not a dollar expense), labeled Mission Credits and counted as items in acquisition/FIFO history. Previously cached mission-credit dollar purchases are repaired on startup. For uncertain historical credit counts, Full Resync is required to recover the exact credit amount when the log exposes it.
+
 
 - Fixed stale cross-tab sync status after reloading a page with an active background Quick Sync: page exit clears its own status promptly and reload recovery distinguishes the old document from a real second tab.
 
