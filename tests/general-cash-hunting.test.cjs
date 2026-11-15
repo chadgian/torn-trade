@@ -45,6 +45,17 @@ test('hunting income missing raises a partial-classification Data Quality record
   assert.match(app.diagnosticsHtml(),/Hunting cash cost recorded/);
 });
 
+test('missing hunting cost is flagged despite income being recorded',()=>{
+  const {app}=harness(),event=log('hunt-no-cost','Hunting session',{income:850});
+  const result=app.parseCashFlowEntry(event);
+  assert.equal(result.length,1);
+  assert.equal(result[0].direction,'in');
+  assert.equal(result[0].amount,850);
+  app.checkpointUnrecognizedFinancial(event,true);
+  assert.equal(app.state.unrecognizedFinancial.length,1);
+  assert.equal(app.state.unrecognizedFinancial[0].field,'cost (missing)');
+});
+
 test('a later complete hunting record resolves the old partial-classification audit',()=>{
   const {app}=harness();
   const first=log('hunt-recheck','Hunting session',{cost:500});
