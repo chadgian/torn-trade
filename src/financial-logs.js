@@ -10,7 +10,8 @@
     if(/\b(?:stock|shares?|dividend)\b/.test(t))return 'Stocks / Investing';
     if(/\b(?:property|estate|rental|landlord|rent|upkeep)\b/.test(t))return 'Property';
     if(/\b(?:bank|investment)\b/.test(t)&&/\b(?:interest|deposit|withdraw|invest|matur(?:e|ed|ing|ity)?|renew|collect|received|paid|cash)\b/.test(t))return 'Banking';
-    if(/\bhunt(?:ing|ed)?\b/.test(t))return 'Hunting';
+    // Seasonal "egg hunt" and similar events are not South Africa hunting.
+    if(/\bhunting\b/.test(t)||(/\bhunt(?:ed)?\b/.test(t)&&/\b(?:animal|safari|expedition|session)\b/.test(t)))return 'Hunting';
     if(/\b(?:cashier.?s? check|cashier.?s? cheque|cheque|cashier check)\b/.test(t))return 'Checks';
     if(/\bbail\b/.test(t))return 'Bail';
     if(/\bloan\b/.test(t))return 'Loans';
@@ -31,6 +32,57 @@
   }
   const CASH_OUT_KEYS=['money_spent','cash_spent','money_paid','cash_paid','money_lost','cash_lost','amount_paid','cost_total','total_cost','cost_paid','price_paid','cost','fee'];
   const CASH_IN_KEYS=['money_received','cash_received','money_gained','cash_gained','money_earned','cash_earned','money_won','cash_won','proceeds','sale_total','total_proceeds','payout','refund','interest'];
+  const HUNTING_INCOME_KEYS=['income','money_gained','cash_gained','money_received','cash_received','money_earned','cash_earned'];
+  const GENERAL_IN_KEYS=['money_gained','money_received','money_earned','money_won','money_rewarded','money_refunded','cash_gained','cash_received','cash_earned','cash_won','cash_rewarded','cash_refunded'];
+  const GENERAL_OUT_KEYS=['money_spent','money_paid','money_lost','money_sent','cash_spent','cash_paid','cash_lost','cash_sent'];
+  // The cash key must identify its currency and direction. Generic "amount",
+  // "cost", "income", "points", "balance" or "value" are NOT proof of dollars.
+  function generalCashField(payload,keys) {
+    const accepted=new Set(keys);
+    const safeContainers=new Set(['transaction','payment','result','outcome','reward','cash','money','financial','finance']);
+    const fields=flattenNumericFields(payload);
+    for(const key of keys){
+      const matched=fields.find(row=>{
+        const parts=String(row.path||'').split('.');
+        if(parts.at(-1)!==key||!accepted.has(key)||parts.length>3)return false;
+        return parts.slice(0,-1).every(p=>safeContainers.has(p));
+      });
+      if(matched&&Number.isFinite(matched.value)&&matched.value>0)return {path:matched.path,value:matched.value};
+    }
+    return null;
+  }
+  function nonCashFinancialTitle(title) {
+    return /\b(?:mission credits?|job points?|racing points?|merits?|casino tokens?|energy|nerve|happiness|happy points?)\b/i.test(String(title||''));
+  }
+  // Applies only if no verified domain or explicitly mapped transaction owns
+  // the event. One in/out row per source-log ID prevents alias double counts.
+  function parseGeneralCashFlowEntry(entry) {
+    const title=String(entry?.details?.title||'');
+    if(nonCashFinancialTitle(title)||isMissionCreditPurchase(title))return [];
+    const payload={...(entry?.params||{}),...(entry?.data||{})};
+    const inField=generalCashField(payload,GENERAL_IN_KEYS);
+    const outField=generalCashField(payload,GENERAL_OUT_KEYS);
+    if(!inField&&!outField)return [];
+    const id='cashlog:'+String(entry?.id||''),timestamp=Number(entry?.timestamp)||0,logId=Number(entry?.details?.id)||0;
+    const category=String(entry?.details?.category||'');
+    const make=(direction,field,suffix)=>({id:id+(inField&&outField?':'+suffix:''),timestamp,direction,amount:field.value,
+      category:cashFlowCategory(title+' '+category,direction),source:'Torn Log',title:title||'Cash transaction',
+      detail:'Explicit cash field: '+field.path,logId,field:field.path,transfer:false});
+    const rows=[];
+    if(outField)rows.push(make('out',outField,'out'));
+    if(inField)rows.push(make('in',inField,'in'));
+    return rows;
+  }
+  function huntingIncomeMissing(entry) {
+    if(financialDomain(entry?.details?.title)!=='Hunting')return false;
+    const payload={...(entry?.params||{}),...(entry?.data||{})};
+    if(!financialCashField(payload,['money_spent','cash_spent','money_paid','cash_paid','cost','fee']))return false;
+    // Zero income is a valid, fully observed hunting outcome.
+    return !HUNTING_INCOME_KEYS.some(k=>{
+      const v=nestedValue(payload,k);
+      return v!=null&&v!==''&&typeof v!=='boolean'&&typeof v!=='object'&&Number.isFinite(Number(v))&&Number(v)>=0;
+    });
+  }
 
   // A matched domain owns the event, including when no reliable amount can be read:
   // this prevents older fuzzy generic rules from reversing a property sale or
@@ -95,8 +147,10 @@
         add('transfer-out',out(['money_spent','cash_spent','deposit','invested','amount_paid','amount']),domain);
       }
     }else if(domain==='Hunting'){
+      // Log 6020 has {cost, income, ...skill fields}; income is cash earned
+      // from the animals sold, not a skill value or points balance.
       add('out',out(['money_spent','cash_spent','money_paid','cash_paid','cost','fee']),domain,'cost');
-      add('in',incoming(['money_gained','cash_gained','money_received','cash_received','money_earned','cash_earned']),domain,'reward');
+      add('in',incoming(HUNTING_INCOME_KEYS),domain,'reward');
     }else if(domain==='Checks'){
       if(/\b(?:cash(?:ed|ing)|redeem(?:ed)?|receive(?:d)?)\b/.test(s))add('transfer-in',incoming(['money_received','cash_received','value','amount']),domain);
       else if(/\b(?:issued|bought|purchase|created|sent|paid)\b/.test(s))add('transfer-out',out(['money_spent','cash_spent','cost','value','amount_paid','amount']),domain);
@@ -127,7 +181,10 @@
 
   function financialAuditCandidate(entry) {
     const title=String(entry?.details?.title||''),domain=financialDomain(title);
-    if(!domain)return false;
+    if(!domain){
+      const p={...(entry?.params||{}),...(entry?.data||{})};
+      return !!generalCashField(p,GENERAL_IN_KEYS)||!!generalCashField(p,GENERAL_OUT_KEYS);
+    }
     if(domain==='Gym Memberships'||domain==='Education'||domain==='Racing'||domain==='Stocks / Investing'||domain==='Loans'||domain==='Bail')return true;
     const p={...(entry?.params||{}),...(entry?.data||{})};
     return !!financialCashField(p,[...CASH_OUT_KEYS,...CASH_IN_KEYS,'rent','bet','stake','wager','amount','value','principal','winnings'])||
