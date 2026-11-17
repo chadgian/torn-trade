@@ -467,10 +467,28 @@
     const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
     return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field&&!uncertainCurrency,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
   }
+  function checkpointUnrecognizedFinancialBatch(events=[]) {
+    if(!events.length)return false;
+    const previous=state.unrecognizedFinancial||[],byId=new Map(previous.map(row=>[String(row.id),row]));
+    let changed=false;
+    for(const {entry,recognized=false} of events){
+      if(entry?.id==null)continue;
+      const key=`unmapped:${entry.id}`;
+      const row=(!recognized||huntingMissingCashComponent(entry))?unrecognizedRowFor(entry):null;
+      if(row){
+        if(JSON.stringify(byId.get(key))!==JSON.stringify(row)){byId.set(key,row);changed=true;}
+      }else if(byId.delete(key))changed=true;
+    }
+    if(!changed)return false;
+    const next=[...byId.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0)).slice(0,300);
+    // An old event beyond the 300-record audit cap must not trigger a write.
+    if(JSON.stringify(previous)===JSON.stringify(next))return false;
+    state.unrecognizedFinancial=next;
+    if(!save('unrecognizedFinancial',next))throw new AnalyzerError('STORAGE_WRITE','Financial audit history could not be queued for durable storage.',{source:'unrecognizedFinancial'});
+    return true;
+  }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
-    const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
-    rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
+    return checkpointUnrecognizedFinancialBatch([{entry,recognized}]);
   }
 
   function checkpointCashFlowRows(rows,replaceIds=[]) {
