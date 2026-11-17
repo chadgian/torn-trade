@@ -307,6 +307,7 @@
       FIFO_COST_UNKNOWN:'Refresh the item catalog and run Full Resync. The affected profit will remain excluded until a reliable acquisition cost or sale value is available.',
       ITEM_VALUE_MISSING:'Refresh the item catalog. If Torn does not provide a market value for that item, no user-side fix is required; the analyzer will keep the affected value excluded.',
       TRADE_DEFERRED:'Run Quick Sync again later. Torn may expose a completed trade before its full item detail is ready.',
+      TRADE_ASSET_UNVALUED:'This Player Trade contains non-item assets such as a property, company, faction or NAP. TCFA preserves the exact cash transfer, but it cannot verify the price allocated to traded items. This is a valuation limitation, not missing trade history. Do not reset the analyzer; view the trade details if precise item profit is needed.',
       ACCOUNT_MISMATCH:'The saved history belongs to another Torn account. Export a backup first. Only reset analyzer data if you intentionally want to switch the analyzer to the current API-key account.',
       IMPORT_SYNC_ACTIVE:'Stop the active sync, then retry the import.',
       IMPORT_READ:'Confirm the selected file is the analyzer JSON backup and try importing it again.',
