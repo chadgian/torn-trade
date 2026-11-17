@@ -578,7 +578,7 @@
       const types=[...new Set(assets.filter(a=>a.direction===dir).map(a=>String(a.type||'Other')))];
       if(types.length)parts.push((dir==='out'?'Gave ':'Received ')+types.join(', '));
     }
-    return parts.join(' \\u00B7 ');
+    return parts.join(' \u00B7 ');
   }
   function parsePlayerTradeEvent(trade,userId) {
     const tradeId=Number(trade?.id)||0,ts=Number(trade?.completed_at||trade?.timestamp)||0,me=Number(userId),entries=Array.isArray(trade?.items)?trade.items:[];
