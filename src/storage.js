@@ -3,7 +3,8 @@
   const DURABLE_STORAGE_KEYS=new Set(['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','catalog','logTypes']);
   const durableCache=new Map();
   const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
-  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,crossTabSequence=0;
+  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,durableDraining=false,crossTabSequence=0;
+  const durablePendingWrites=new Map();
   const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
   function crossTabSignalKey(){return NS+'crossTabSignal';}
 
@@ -161,7 +162,8 @@
     const quota=isQuotaError(error),message=quota
       ? 'Analyzer storage is full. Increase the Torn PDA script limit or free browser site storage, then retry.'
       : 'Analyzer data could not be written to durable storage. Cached data remains in memory until the page closes.';
-    storageDiagnostic(quota?'STORAGE_QUOTA':'STORAGE_WRITE','error',message,{source:key||'storage'});
+    const type=String(error?.name||'UnknownError').replace(/[^A-Za-z0-9_-]/g,'').slice(0,50);
+    storageDiagnostic(quota?'STORAGE_QUOTA':'STORAGE_WRITE','error',message,{source:key||'storage',status:type});
     durableStorageState.lastError=String(error?.code||error?.name||error?.message||error||'storage error').slice(0,120);
   }
   function saveLocal(k,v) {
@@ -271,16 +273,52 @@
     }
     return durableStorageState;
   }
-  function queueDurableWrite(k,v) {
-    if(!DURABLE_STORAGE_KEYS.has(k)||!durableStorageState.ready||durableBackend?.kind==='localStorage')return;
-    durableWriteChain=durableWriteChain.then(async()=>{
+  function transientDurableError(error) {
+    return ['AbortError','UnknownError','TransactionInactiveError','InvalidStateError','TimeoutError','NotReadableError'].includes(String(error?.name||''));
+  }
+  async function persistDurableValue(k,v) {
+    // A transient WebKit/IndexedDB transaction abort may succeed on retry;
+    // quota and data-clone errors must fail immediately to protect history.
+    for(let attempt=0;attempt<3;attempt++){
       try{
         await durableBackend.set(NS+k,v);
-        durableCache.set(k,v);
         try{localStorage.removeItem(NS+k);}catch(_){}
-        durableWriteFailure=null;
-      }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
-    }).catch(()=>{});
+        return true;
+      }catch(error){
+        if(isQuotaError(error)||!transientDurableError(error)||attempt===2)throw error;
+        await sleep(100*(attempt+1));
+      }
+    }
+  }
+  function startDurableWriteDrain() {
+    if(durableDraining||!durablePendingWrites.size)return;
+    durableDraining=true;
+    durableWriteChain=Promise.resolve().then(async()=>{
+      while(durablePendingWrites.size){
+        const [key,value]=durablePendingWrites.entries().next().value;
+        durablePendingWrites.delete(key);
+        try{
+          await persistDurableValue(key,value);
+          if(durableWriteFailure?.key===key)durableWriteFailure=null;
+          // Do not replace durableCache here: a newer version may have been
+          // queued while an older IndexedDB transaction was still in flight.
+        }catch(error){
+          // Keep the latest version for a later resume. A failed write is
+          // never silently discarded or masked by a later successful key.
+          if(!durablePendingWrites.has(key))durablePendingWrites.set(key,value);
+          durableWriteFailure={key,error};
+          storageError(error,key);
+          break;
+        }
+      }
+    }).finally(()=>{durableDraining=false;});
+  }
+  function queueDurableWrite(k,v) {
+    if(!DURABLE_STORAGE_KEYS.has(k)||!durableStorageState.ready||durableBackend?.kind==='localStorage')return;
+    // Coalesce writes for the same key before and during the asynchronous
+    // drain. Checkpoints still await every pending durable write.
+    durablePendingWrites.set(k,v);
+    startDurableWriteDrain();
   }
   async function reloadDurableStorage(keys=[...DURABLE_STORAGE_KEYS]) {
     if(!durableStorageState.ready)await initializeDurableStorage();
@@ -318,20 +356,26 @@
       return true;
     }
     if(!durableStorageState.ready)await initializeDurableStorage();
+    // Keep direct migration/import writes ordered after all earlier queued
+    // changes, or an older background write could overwrite a newer value.
+    await flushDurableStorage();
     durableCache.set(k,v);
     if(durableBackend.kind==='localStorage'){
       if(!saveLocal(k,v))throw new Error('Local storage write failed');
       return true;
     }
     try{
-      await durableBackend.set(NS+k,v);
-      try{localStorage.removeItem(NS+k);}catch(_){}
-      durableWriteFailure=null;return true;
-    }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
+      await persistDurableValue(k,v);
+      return true;
+    }catch(error){storageError(error,k);throw error;}
   }
   async function flushDurableStorage() {
+    // A previously failed key stays pending. A later checkpoint can retry it,
+    // but a successful write of a different key cannot erase the failure.
+    if(!durableDraining&&durablePendingWrites.size)startDurableWriteDrain();
     await durableWriteChain;
-    if(durableWriteFailure){const error=durableWriteFailure;durableWriteFailure=null;throw error;}
+    if(durableWriteFailure)throw durableWriteFailure.error;
+    if(durablePendingWrites.size)throw new AnalyzerError('STORAGE_WRITE','Durable storage has unsaved changes. Sync checkpoint was not advanced.',{source:'storage'});
     return true;
   }
   async function removeStoredKey(k) {
