@@ -8,7 +8,9 @@ A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO tra
 
 - Page-batched, change-only unclassified-finance persistence reduces large Full Resync audit writes from one per raw log to at most one per changed page.
 - Durable writes coalesce by storage key and retry transient IndexedDB transaction aborts. A failed save remains pending and blocks sync checkpoints until confirmed; other successful writes cannot mask it.
-- IndexedDB reopens invalidated connections on iOS. Sanitized storage error names are included in diagnostics. No accounting-rule change, and no mandatory Full Resync purely for upgrading this storage fix.
+- IndexedDB reopens invalidated connections on iOS. Sanitized storage error names are included in diagnostics. Storage-only changes do not require a new Full Resync.
+- Player Trades containing Property, Company, Faction, or NAP legs are retained even when no regular items or cash changed hands. Asset categories are recorded without assuming a sale price from company valuation, property happiness, faction respect or NAP terms.
+- Cash in Player Trades with non-item assets is shown separately as a transfer rather than ordinary personal earned/spent totals. Mixed item/non-item trades continue excluding unverifiable item profit. Net Worth daily activity marks these trades as unvalued, rather than computing a misleading cash-only impact. **Full Resync is required to reclassify historical asset trades** because older saved events did not preserve asset types.
 
 ## Features
 
