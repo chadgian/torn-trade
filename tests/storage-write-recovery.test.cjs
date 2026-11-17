@@ -102,6 +102,6 @@ test('quota failures are not repeatedly retried and retain quota-specific diagno
   await app.initializeDurableStorage();
   app.save('unrecognizedFinancial',[{id:'quota'}]);
   await assert.rejects(app.flushDurableStorage(),/simulated storage failure/);
-  assert.equal(native.counts.get('tta:v1:unrecognizedFinancial'),2,'one initial attempt and one checkpoint retry; no transient retry loop');
+  assert.equal(native.counts.get('tta:v1:unrecognizedFinancial'),1,'quota errors are not retried within an attempted checkpoint');
   assert.equal(app.state.notices.some(n=>n.code==='STORAGE_QUOTA'),true);
 });
