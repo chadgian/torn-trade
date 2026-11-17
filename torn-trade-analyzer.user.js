@@ -427,7 +427,7 @@
   // Source: state.js
   const VERSION = '0.5.13';
   // UI-only releases must not invalidate previously verified accounting history.
-  const ACCOUNTING_VERSION = '0.5.12';
+  const ACCOUNTING_VERSION = '0.5.13';
   const HISTORY_PAGINATION_VERSION = 3;
   const API_KEY = '_###PDA-APIKEY###_';
   const NS = 'tta:v1:';
@@ -945,6 +945,7 @@
       FIFO_COST_UNKNOWN:'Refresh the item catalog and run Full Resync. The affected profit will remain excluded until a reliable acquisition cost or sale value is available.',
       ITEM_VALUE_MISSING:'Refresh the item catalog. If Torn does not provide a market value for that item, no user-side fix is required; the analyzer will keep the affected value excluded.',
       TRADE_DEFERRED:'Run Quick Sync again later. Torn may expose a completed trade before its full item detail is ready.',
+      TRADE_ASSET_UNVALUED:'This Player Trade contains non-item assets such as a property, company, faction or NAP. TCFA preserves the exact cash transfer, but it cannot verify the price allocated to traded items. This is a valuation limitation, not missing trade history. Do not reset the analyzer; view the trade details if precise item profit is needed.',
       ACCOUNT_MISMATCH:'The saved history belongs to another Torn account. Export a backup first. Only reset analyzer data if you intentionally want to switch the analyzer to the current API-key account.',
       IMPORT_SYNC_ACTIVE:'Stop the active sync, then retry the import.',
       IMPORT_READ:'Confirm the selected file is the analyzer JSON backup and try importing it again.',
@@ -982,7 +983,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial rules changed. Hunting income and explicitly marked cash fields are now recognized; Full Resync is needed to reclassify older logs.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Player Trade asset accounting changed. Full Resync is needed to reclassify older property, company, faction and NAP exchanges without guessing item profit.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');
@@ -1898,9 +1899,9 @@
     const out=[],transactions=state.transactions||[];
     for(const evt of effectivePlayerTradeEvents()){
       const tradeId=Number(evt.tradeId)||0,ts=Number(evt.timestamp)||0;if(!(tradeId>0&&ts>0))continue;
-      const cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0),detail=playerTradeItemDetail(playerTradeEventRows(evt)),title=evt.counterpartyName?`Player Trade with ${evt.counterpartyName}`:`Player Trade #${tradeId}`;
-      if(cashIn>0)out.push({id:`tradecash:${tradeId}:in`,timestamp:ts,direction:'in',amount:cashIn,category:'Player Trades',source:'Player Trade',title,detail,transfer:false,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
-      if(cashOut>0)out.push({id:`tradecash:${tradeId}:out`,timestamp:ts,direction:'out',amount:cashOut,category:'Player Trades',source:'Player Trade',title,detail,transfer:false,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
+      const cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0),assets=evt.otherAssets||[],assetDetail=playerTradeAssetDetail(evt),itemDetail=playerTradeItemDetail(playerTradeEventRows(evt)),detail=[itemDetail,assetDetail].filter(Boolean).join(' \u00B7 '),assetExchange=assets.length>0,title=evt.counterpartyName?`Player Trade with ${evt.counterpartyName}`:`Player Trade #${tradeId}`;
+      if(cashIn>0)out.push({id:`tradecash:${tradeId}:in`,timestamp:ts,direction:assetExchange?'transfer-in':'in',amount:cashIn,category:assetExchange?'Trade Asset Exchanges':'Player Trades',source:'Player Trade',title,detail,transfer:assetExchange,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
+      if(cashOut>0)out.push({id:`tradecash:${tradeId}:out`,timestamp:ts,direction:assetExchange?'transfer-out':'out',amount:cashOut,category:assetExchange?'Trade Asset Exchanges':'Player Trades',source:'Player Trade',title,detail,transfer:assetExchange,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
     }
     for(const t of transactions){
       const ts=Number(t?.timestamp)||0;if(!(ts>0)||t.source==='Player Trade'||isMissionCreditPurchase(t.title)||t.currency==='mission_credits')continue;
@@ -2243,8 +2244,8 @@
     for(const evt of effectivePlayerTradeEvents()){
       const ts=Number(evt?.timestamp)||0;if(ts<from||ts>to)continue;const incoming=evt.incomingItems||[],outgoing=evt.outgoingItems||[],cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0);
       let itemInValue=0,itemOutValue=0,missingValue=false;for(const x of incoming){const q=Math.max(0,Number(x.qty)||0),v=q*Math.max(0,Number(catalogItem(x.itemId).marketPrice)||0);if(q>0&&!(v>0))missingValue=true;itemInValue+=v;}for(const x of outgoing){const q=Math.max(0,Number(x.qty)||0),v=q*Math.max(0,Number(catalogItem(x.itemId).marketPrice)||0);if(q>0&&!(v>0))missingValue=true;itemOutValue+=v;}
-      const impactKnown=!missingValue,impact=cashIn-cashOut+itemInValue-itemOutValue,detail=playerTradeItemDetail(playerTradeEventRows(evt)),who=evt.counterpartyName||((Number(evt.counterpartyId)||0)>0?`#${evt.counterpartyId}`:`#${evt.tradeId}`),metaParts=[];
-      if(cashIn>0)metaParts.push(`Cash received +${money(cashIn)}`);if(cashOut>0)metaParts.push(`Cash given -${money(cashOut)}`);if(itemInValue>0)metaParts.push(`Items received +${money(itemInValue)}`);if(itemOutValue>0)metaParts.push(`Items given -${money(itemOutValue)}`);if(detail)metaParts.push(detail);metaParts.push(impactKnown?`Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:'Net-worth impact unavailable because at least one traded item has no market value');
+      const assetDetail=playerTradeAssetDetail(evt),assetUnvalued=(evt.otherAssets||[]).length>0,impactKnown=!missingValue&&!assetUnvalued,impact=cashIn-cashOut+itemInValue-itemOutValue,detail=playerTradeItemDetail(playerTradeEventRows(evt)),who=evt.counterpartyName||((Number(evt.counterpartyId)||0)>0?`#${evt.counterpartyId}`:`#${evt.tradeId}`),metaParts=[];
+      if(cashIn>0)metaParts.push(`Cash received +${money(cashIn)}`);if(cashOut>0)metaParts.push(`Cash given -${money(cashOut)}`);if(itemInValue>0)metaParts.push(`Items received +${money(itemInValue)}`);if(itemOutValue>0)metaParts.push(`Items given -${money(itemOutValue)}`);if(detail)metaParts.push(detail);if(assetDetail)metaParts.push(assetDetail);metaParts.push(impactKnown?`Est. net-worth impact ${impact>=0?'+':''}${money(impact)}`:assetUnvalued?'Net-worth impact unavailable: traded assets have no verified executed price':'Net-worth impact unavailable because at least one traded item has no market value');
       rows.push({timestamp:ts,kind:'player-trade',icon:'\u21C4',title:`Player Trade with ${who}`,meta:metaParts.join(' \u00B7 '),value:impactKnown?Math.abs(impact):0,valueClass:impactKnown?(impact>=0?'pos':'neg'):'',prefix:impactKnown?(impact>=0?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});
     }
     for(const t of state.playerTransfers||[]){const ts=Number(t?.timestamp)||0;if(ts<from||ts>to||t?.type!=='item')continue;const item=catalogItem(t.itemId),q=Math.max(0,Number(t.qty)||0),market=q*Math.max(0,Number(item.marketPrice)||0),incoming=t.direction==='in',who=t.counterpartyName||((Number(t.counterpartyId)||0)>0?`#${t.counterpartyId}`:'another player'),impactKnown=market>0,impact=impactKnown?(incoming?market:-market):0;rows.push({timestamp:ts,kind:incoming?'player-item-in':'player-item-out',icon:incoming?'\u21E3':'\u21E1',title:`${incoming?'Received':'Sent'} ${qty(q)} \u00D7 ${item.name}`,meta:`Player transfer ${incoming?'from':'to'} ${who}${t.message?` \u00B7 ${t.message}`:''}${market?` \u00B7 Est. value ${money(market)}`:' \u00B7 Net-worth impact unavailable (no item market value)'}`,value:impactKnown?market:0,valueClass:impactKnown?(incoming?'pos':'neg'):'',prefix:impactKnown?(incoming?'+':'-'):'',impact:impactKnown?impact:null,impactKnown});}
@@ -2405,7 +2406,7 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.13',label:'Current',items:['Fixed excessive IndexedDB writes during Full Resync: unclassified financial records now save once per changed log page, not once per log entry.','Durable writes are coalesced and short-lived transaction errors are retried. The sync checkpoint cannot advance while history data remains unsaved.','Recovered invalidated IndexedDB connections after iOS suspension, and storage errors now include a safe underlying error type in diagnostic context. Existing history is preserved; no mandatory Full Resync for this storage-only release.']},
+      {version:'0.5.13',label:'Current',items:['Fixed excessive IndexedDB writes during Full Resync: unclassified financial records now save once per changed log page, not once per log entry.','Durable writes are coalesced and short-lived transaction errors are retried. The sync checkpoint cannot advance while history data remains unsaved.','Recovered invalidated IndexedDB connections after iOS suspension, and storage errors now include a safe underlying error type in diagnostic context.','Recorded Property, Company, Faction and NAP trade legs, including asset-only trades. Cash exchanged for non-item assets is shown as a transfer, while unverified item profit and net-worth impact remain excluded.','A Full Resync is required to reclassify historical trades with these asset types; no Full Resync is necessary solely for the IndexedDB storage fix.']},
       {version:'0.5.12',items:['Fixed hunting sessions to record both cost and income as distinct Torn-dollar movements; zero-income hunts correctly count their cost only.','Added currency-aware generic cash detection for explicit money_received, cash_spent and similar directional fields, while preserving specialized transfer, item and noncash-currency rules.','Hunting logs with missing payout or cost now appear as partially unclassified in Data Quality. Full Resync is required to reparse historical hunting income and expanded financial coverage.']},
       {version:'0.5.11',items:['Mission Shop purchases paid with mission credits no longer appear as Torn-dollar spending, whether cached or newly synced.','Credit-purchased items stay in inventory and FIFO acquisition history with a $0 cash basis, labeled Mission Credits rather than Free.','Previously cached misclassified purchases are repaired on startup, and Full Resync can recover credit amounts from unambiguous logs.','Fixed Full Resync stalling on a 100-trade Player Trades page with a repeated or unusable cursor by checking every trade in its oldest second before paging backward.','The safe recovery preserves additional boundary-second trades and pauses instead of skipping transactions when the boundary cannot be verified.']},
       {version:'0.5.10',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
@@ -3297,13 +3298,34 @@
     return total;
   }
 
+  const TRADE_NONITEM_TYPES=new Map([['property','Property'],['company','Company'],['faction','Faction'],['nap','NAP']]);
+  function tradeNonItemAssets(entries,userId) {
+    const me=Number(userId),assets=[];
+    for(const entry of entries||[]){
+      const type=String(entry?.type||'').toLowerCase();
+      if(type==='item'||type==='money')continue;
+      const owner=Number(entry?.user_id);
+      if(!(owner>0))continue;
+      const details=entry?.details||{},assetId=Number(details?.id)||0;
+      assets.push({type:TRADE_NONITEM_TYPES.get(type)||'Other',direction:owner===me?'out':'in',assetId:assetId>0?assetId:0});
+    }
+    return assets;
+  }
+  function playerTradeAssetDetail(evt) {
+    const assets=evt?.otherAssets||[],parts=[];
+    for(const dir of ['out','in']){
+      const types=[...new Set(assets.filter(a=>a.direction===dir).map(a=>String(a.type||'Other')))];
+      if(types.length)parts.push((dir==='out'?'Gave ':'Received ')+types.join(', '));
+    }
+    return parts.join(' \u00B7 ');
+  }
   function parsePlayerTradeEvent(trade,userId) {
     const tradeId=Number(trade?.id)||0,ts=Number(trade?.completed_at||trade?.timestamp)||0,me=Number(userId),entries=Array.isArray(trade?.items)?trade.items:[];
     if(!(tradeId>0)||!(ts>0)||!(me>0)||!entries.length)return null;
-    const outgoing=tradeItemGroups(entries,me,true),incoming=tradeItemGroups(entries,me,false),cashOut=tradeMoneyFor(entries,me,true),cashIn=tradeMoneyFor(entries,me,false);
-    if(!outgoing.length&&!incoming.length&&!(cashOut>0)&&!(cashIn>0))return null;
+    const outgoing=tradeItemGroups(entries,me,true),incoming=tradeItemGroups(entries,me,false),cashOut=tradeMoneyFor(entries,me,true),cashIn=tradeMoneyFor(entries,me,false),otherAssets=tradeNonItemAssets(entries,me);
+    if(!outgoing.length&&!incoming.length&&!(cashOut>0)&&!(cashIn>0)&&!otherAssets.length)return null;
     const user=trade?.user||{},trader=trade?.trader||{},other=Number(user?.id)===me?trader:user;
-    return {id:`playertrade:${tradeId}`,tradeId,timestamp:ts,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),cashIn,cashOut,incomingItems:incoming.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),outgoingItems:outgoing.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0}))};
+    return {id:`playertrade:${tradeId}`,tradeId,timestamp:ts,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),cashIn,cashOut,incomingItems:incoming.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),outgoingItems:outgoing.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),otherAssets};
   }
   function checkpointPlayerTradeEvents(rows) {
     const list=(rows||[]).filter(Boolean);if(!list.length)return 0;const map=new Map((state.playerTrades||[]).map(x=>[String(x.id),x]));let changed=0;
@@ -3363,10 +3385,16 @@
     const user=trade?.user||{},trader=trade?.trader||{};
     const other=Number(user?.id)===me?trader:user;
     const tradeSurplus=(mvIn+cashIn)-(mvOut+cashOut);
-    const unsupported=entries.some(x=>!['item','money'].includes(String(x?.type).toLowerCase()));
+    const nonItemAssets=tradeNonItemAssets(entries,me),unsupported=nonItemAssets.length>0;
+    const types=[...new Set(nonItemAssets.map(x=>x.type))];
     const mixed=!!(outgoing.length&&incoming.length),estimated=mixed||outgoing.length>1||incoming.length>1;
     const missingMarket=mixed&&[...outgoing,...incoming].some(x=>!(x.marketPrice>0));
-    if(unsupported)reportDiagnostic('TRADE_ASSET_UNVALUED','warning','A trade includes assets other than items or money. Item profit is unavailable; actual cash is retained.',{tradeId,source:'Player Trade'});
+    // Property, Company, Faction and NAP are valid Torn trade components.
+    // They lack a reliable executed dollar price, so cash remains exact but
+    // item sale/acquisition basis cannot be allocated in a mixed-asset trade.
+    if(unsupported)reportDiagnostic('TRADE_ASSET_UNVALUED','warning',
+      'Trade includes '+types.join(', ')+' alongside items. Cash is recorded, but item profit cannot be allocated without a verified asset price.',
+      {tradeId,source:'Player Trade',status:types.join(', ')});
     if(missingMarket)reportDiagnostic('TRADE_MARKET_MISSING','warning','A mixed trade has missing market prices. Item profit is unavailable.',{tradeId,source:'Player Trade'});
     const common={timestamp:ts,fee:0,source:'Player Trade',title:`Player Trade${other?.name?` with ${other.name}`:''}`,tradeId,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),tradeCashIn:cashIn,tradeCashOut:cashOut,tradeSurplus,estimated,costKnown:!unsupported&&!missingMarket,proceedsKnown:!unsupported&&!missingMarket,allocationMethod:estimated?'market-value + equal cash delta':null};
     const sold=saleGroups.map(g=>({id:`trade:${tradeId}:1:sell:${g.itemId}`,logId:0,itemId:g.itemId,side:'sell',qty:g.qty,total:g.total,netTotal:g.total,free:false,marketPriceUsed:g.marketPrice,marketSubtotal:g.baseMarket,tradeAdjustment:g.adjustment,...common}));
@@ -4486,7 +4514,7 @@
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Financial cash rules expanded. Hunting logs now record both cost and income, including zero income. Full Resync is required to recover historical hunting proceeds and newly supported explicit money movements.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Trade accounting updated. Player Trades with property, company, faction or NAP legs now retain their asset types, and asset-exchange cash is classified as transfer rather than ordinary earnings or spending. Full Resync can reclassify older trades.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});
