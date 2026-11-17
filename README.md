@@ -2,7 +2,13 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.12.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.13.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+
+## v0.5.13 storage reliability
+
+- Page-batched, change-only unclassified-finance persistence reduces large Full Resync audit writes from one per raw log to at most one per changed page.
+- Durable writes coalesce by storage key and retry transient IndexedDB transaction aborts. A failed save remains pending and blocks sync checkpoints until confirmed; other successful writes cannot mask it.
+- IndexedDB reopens invalidated connections on iOS. Sanitized storage error names are included in diagnostics. No accounting-rule change, and no mandatory Full Resync purely for upgrading this storage fix.
 
 ## Features
 
