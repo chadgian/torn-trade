@@ -142,7 +142,7 @@
     const out=[],transactions=state.transactions||[];
     for(const evt of effectivePlayerTradeEvents()){
       const tradeId=Number(evt.tradeId)||0,ts=Number(evt.timestamp)||0;if(!(tradeId>0&&ts>0))continue;
-      const cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0),assets=evt.otherAssets||[],assetDetail=playerTradeAssetDetail(evt),itemDetail=playerTradeItemDetail(playerTradeEventRows(evt)),detail=[itemDetail,assetDetail].filter(Boolean).join(' \\u00B7 '),assetExchange=assets.length>0,title=evt.counterpartyName?`Player Trade with ${evt.counterpartyName}`:`Player Trade #${tradeId}`;
+      const cashIn=Math.max(0,Number(evt.cashIn)||0),cashOut=Math.max(0,Number(evt.cashOut)||0),assets=evt.otherAssets||[],assetDetail=playerTradeAssetDetail(evt),itemDetail=playerTradeItemDetail(playerTradeEventRows(evt)),detail=[itemDetail,assetDetail].filter(Boolean).join(' \u00B7 '),assetExchange=assets.length>0,title=evt.counterpartyName?`Player Trade with ${evt.counterpartyName}`:`Player Trade #${tradeId}`;
       if(cashIn>0)out.push({id:`tradecash:${tradeId}:in`,timestamp:ts,direction:assetExchange?'transfer-in':'in',amount:cashIn,category:assetExchange?'Trade Asset Exchanges':'Player Trades',source:'Player Trade',title,detail,transfer:assetExchange,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
       if(cashOut>0)out.push({id:`tradecash:${tradeId}:out`,timestamp:ts,direction:assetExchange?'transfer-out':'out',amount:cashOut,category:assetExchange?'Trade Asset Exchanges':'Player Trades',source:'Player Trade',title,detail,transfer:assetExchange,tradeId,counterpartyId:Number(evt.counterpartyId)||0,counterpartyName:String(evt.counterpartyName||'')});
     }
