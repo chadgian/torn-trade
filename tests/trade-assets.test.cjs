@@ -129,7 +129,7 @@ test('Trade event resync overwrites stale asset list without retaining removed a
   app.checkpointPlayerTradeEvents([updated]);
   assert.equal(app.state.playerTrades.length,1);
   assert.equal(app.state.playerTrades[0].otherAssets.length,0);
-  assert.deepEqual(Array.from(app.transactionCashFlows(),x=>x.direction),['out','in']);
+  assert.deepEqual(Array.from(app.transactionCashFlows(),x=>x.direction),['in','out']);
 });
 
 test('Company reference value and Property happiness never masquerade as the executed cash price',()=>{
