@@ -510,7 +510,7 @@
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
       if(denseBoundaryRecovered)job.diagnostics.denseBoundaryRecoveries=(Number(job.diagnostics.denseBoundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
-      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
+      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[],financialAuditPage=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
@@ -522,8 +522,13 @@
         const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
         const transferRows=parsePlayerTransferEntry(r);job.diagnostics.playerTransferRows=(Number(job.diagnostics.playerTransferRows)||0)+transferRows.length;transferPage.push(...transferRows);
         const consumptionRows=parseItemConsumptionEntry(r);job.diagnostics.itemConsumptionRows=(Number(job.diagnostics.itemConsumptionRows)||0)+consumptionRows.length;consumptionPage.push(...consumptionRows);
-        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);checkpointUnrecognizedFinancial(r,cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0);if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
+        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);
+        financialAuditPage.push({entry:r,recognized:cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0});
+        if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
       }
+      // Persist at most one financial-audit snapshot per completed log page.
+      // This used to queue a full IndexedDB write for every raw log row.
+      checkpointUnrecognizedFinancialBatch(financialAuditPage);
       checkpointPlayerTransferRows(transferPage);checkpointItemConsumptionRows(consumptionPage);checkpointCashFlowRows(cashPage,cashLogIds);
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
