@@ -20,7 +20,7 @@
     if((state.transactions.length||state.cashFlows.length)&&state.sync.accountingVersion!==ACCOUNTING_VERSION){
       state.transactions=state.transactions.map(row=>row.side==='buy'&&!row.free&&!(Number(row.total)>0)?{...row,costKnown:false}:row);
       save('transactions',state.transactions);
-      reportDiagnostic('PARSER_UPDATED','warning','Financial cash rules expanded. Hunting logs now record both cost and income, including zero income. Full Resync is required to recover historical hunting proceeds and newly supported explicit money movements.',{source:'migration'});
+      reportDiagnostic('PARSER_UPDATED','warning','Trade accounting updated. Player Trades with property, company, faction or NAP legs now retain their asset types, and asset-exchange cash is classified as transfer rather than ordinary earnings or spending. Full Resync can reclassify older trades.',{source:'migration'});
     }
     await flushDurableStorage();
     for(const source of storageIssues)reportDiagnostic('STORAGE_READ','warning','A saved value could not be read; a default was used.',{source});

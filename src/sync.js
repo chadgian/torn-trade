@@ -510,7 +510,7 @@
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
       if(denseBoundaryRecovered)job.diagnostics.denseBoundaryRecoveries=(Number(job.diagnostics.denseBoundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
-      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
+      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[],financialAuditPage=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
@@ -522,8 +522,13 @@
         const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
         const transferRows=parsePlayerTransferEntry(r);job.diagnostics.playerTransferRows=(Number(job.diagnostics.playerTransferRows)||0)+transferRows.length;transferPage.push(...transferRows);
         const consumptionRows=parseItemConsumptionEntry(r);job.diagnostics.itemConsumptionRows=(Number(job.diagnostics.itemConsumptionRows)||0)+consumptionRows.length;consumptionPage.push(...consumptionRows);
-        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);checkpointUnrecognizedFinancial(r,cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0);if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
+        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);
+        financialAuditPage.push({entry:r,recognized:cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0});
+        if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
       }
+      // Persist at most one financial-audit snapshot per completed log page.
+      // This used to queue a full IndexedDB write for every raw log row.
+      checkpointUnrecognizedFinancialBatch(financialAuditPage);
       checkpointPlayerTransferRows(transferPage);checkpointItemConsumptionRows(consumptionPage);checkpointCashFlowRows(cashPage,cashLogIds);
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
@@ -674,7 +679,7 @@
   async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
-    const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
+    const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
     if(job.manual&&job.syncMode==='quick')nextSync.lastManualQuickSync=serverNow;
     if(job.manual&&job.syncMode==='full')nextSync.lastFullResync=serverNow;
@@ -683,7 +688,11 @@
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
+    // Only mark trades and scan coverage as verified after every underlying
+    // history dataset has been confirmed durable.
     await flushDurableStorage();
+    commitTradeVerifications(job);
+    updateSyncCoverage(job);
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){

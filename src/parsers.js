@@ -467,10 +467,28 @@
     const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
     return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field&&!uncertainCurrency,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
   }
+  function checkpointUnrecognizedFinancialBatch(events=[]) {
+    if(!events.length)return false;
+    const previous=state.unrecognizedFinancial||[],byId=new Map(previous.map(row=>[String(row.id),row]));
+    let changed=false;
+    for(const {entry,recognized=false} of events){
+      if(entry?.id==null)continue;
+      const key=`unmapped:${entry.id}`;
+      const row=(!recognized||huntingMissingCashComponent(entry))?unrecognizedRowFor(entry):null;
+      if(row){
+        if(JSON.stringify(byId.get(key))!==JSON.stringify(row)){byId.set(key,row);changed=true;}
+      }else if(byId.delete(key))changed=true;
+    }
+    if(!changed)return false;
+    const next=[...byId.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0)).slice(0,300);
+    // An old event beyond the 300-record audit cap must not trigger a write.
+    if(JSON.stringify(previous)===JSON.stringify(next))return false;
+    state.unrecognizedFinancial=next;
+    if(!save('unrecognizedFinancial',next))throw new AnalyzerError('STORAGE_WRITE','Financial audit history could not be queued for durable storage.',{source:'unrecognizedFinancial'});
+    return true;
+  }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
-    const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
-    rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
+    return checkpointUnrecognizedFinancialBatch([{entry,recognized}]);
   }
 
   function checkpointCashFlowRows(rows,replaceIds=[]) {
@@ -541,13 +559,34 @@
     return total;
   }
 
+  const TRADE_NONITEM_TYPES=new Map([['property','Property'],['company','Company'],['faction','Faction'],['nap','NAP']]);
+  function tradeNonItemAssets(entries,userId) {
+    const me=Number(userId),assets=[];
+    for(const entry of entries||[]){
+      const type=String(entry?.type||'').toLowerCase();
+      if(type==='item'||type==='money')continue;
+      const owner=Number(entry?.user_id);
+      if(!(owner>0))continue;
+      const details=entry?.details||{},assetId=Number(details?.id)||0;
+      assets.push({type:TRADE_NONITEM_TYPES.get(type)||'Other',direction:owner===me?'out':'in',assetId:assetId>0?assetId:0});
+    }
+    return assets;
+  }
+  function playerTradeAssetDetail(evt) {
+    const assets=evt?.otherAssets||[],parts=[];
+    for(const dir of ['out','in']){
+      const types=[...new Set(assets.filter(a=>a.direction===dir).map(a=>String(a.type||'Other')))];
+      if(types.length)parts.push((dir==='out'?'Gave ':'Received ')+types.join(', '));
+    }
+    return parts.join(' \u00B7 ');
+  }
   function parsePlayerTradeEvent(trade,userId) {
     const tradeId=Number(trade?.id)||0,ts=Number(trade?.completed_at||trade?.timestamp)||0,me=Number(userId),entries=Array.isArray(trade?.items)?trade.items:[];
     if(!(tradeId>0)||!(ts>0)||!(me>0)||!entries.length)return null;
-    const outgoing=tradeItemGroups(entries,me,true),incoming=tradeItemGroups(entries,me,false),cashOut=tradeMoneyFor(entries,me,true),cashIn=tradeMoneyFor(entries,me,false);
-    if(!outgoing.length&&!incoming.length&&!(cashOut>0)&&!(cashIn>0))return null;
+    const outgoing=tradeItemGroups(entries,me,true),incoming=tradeItemGroups(entries,me,false),cashOut=tradeMoneyFor(entries,me,true),cashIn=tradeMoneyFor(entries,me,false),otherAssets=tradeNonItemAssets(entries,me);
+    if(!outgoing.length&&!incoming.length&&!(cashOut>0)&&!(cashIn>0)&&!otherAssets.length)return null;
     const user=trade?.user||{},trader=trade?.trader||{},other=Number(user?.id)===me?trader:user;
-    return {id:`playertrade:${tradeId}`,tradeId,timestamp:ts,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),cashIn,cashOut,incomingItems:incoming.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),outgoingItems:outgoing.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0}))};
+    return {id:`playertrade:${tradeId}`,tradeId,timestamp:ts,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),cashIn,cashOut,incomingItems:incoming.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),outgoingItems:outgoing.map(x=>({itemId:Number(x.itemId),qty:Number(x.qty)||0})),otherAssets};
   }
   function checkpointPlayerTradeEvents(rows) {
     const list=(rows||[]).filter(Boolean);if(!list.length)return 0;const map=new Map((state.playerTrades||[]).map(x=>[String(x.id),x]));let changed=0;
@@ -607,10 +646,16 @@
     const user=trade?.user||{},trader=trade?.trader||{};
     const other=Number(user?.id)===me?trader:user;
     const tradeSurplus=(mvIn+cashIn)-(mvOut+cashOut);
-    const unsupported=entries.some(x=>!['item','money'].includes(String(x?.type).toLowerCase()));
+    const nonItemAssets=tradeNonItemAssets(entries,me),unsupported=nonItemAssets.length>0;
+    const types=[...new Set(nonItemAssets.map(x=>x.type))];
     const mixed=!!(outgoing.length&&incoming.length),estimated=mixed||outgoing.length>1||incoming.length>1;
     const missingMarket=mixed&&[...outgoing,...incoming].some(x=>!(x.marketPrice>0));
-    if(unsupported)reportDiagnostic('TRADE_ASSET_UNVALUED','warning','A trade includes assets other than items or money. Item profit is unavailable; actual cash is retained.',{tradeId,source:'Player Trade'});
+    // Property, Company, Faction and NAP are valid Torn trade components.
+    // They lack a reliable executed dollar price, so cash remains exact but
+    // item sale/acquisition basis cannot be allocated in a mixed-asset trade.
+    if(unsupported)reportDiagnostic('TRADE_ASSET_UNVALUED','warning',
+      'Trade includes '+types.join(', ')+' alongside items. Cash is recorded, but item profit cannot be allocated without a verified asset price.',
+      {tradeId,source:'Player Trade',status:types.join(', ')});
     if(missingMarket)reportDiagnostic('TRADE_MARKET_MISSING','warning','A mixed trade has missing market prices. Item profit is unavailable.',{tradeId,source:'Player Trade'});
     const common={timestamp:ts,fee:0,source:'Player Trade',title:`Player Trade${other?.name?` with ${other.name}`:''}`,tradeId,counterpartyId:Number(other?.id)||0,counterpartyName:String(other?.name||''),tradeCashIn:cashIn,tradeCashOut:cashOut,tradeSurplus,estimated,costKnown:!unsupported&&!missingMarket,proceedsKnown:!unsupported&&!missingMarket,allocationMethod:estimated?'market-value + equal cash delta':null};
     const sold=saleGroups.map(g=>({id:`trade:${tradeId}:1:sell:${g.itemId}`,logId:0,itemId:g.itemId,side:'sell',qty:g.qty,total:g.total,netTotal:g.total,free:false,marketPriceUsed:g.marketPrice,marketSubtotal:g.baseMarket,tradeAdjustment:g.adjustment,...common}));

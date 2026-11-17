@@ -307,6 +307,7 @@
       FIFO_COST_UNKNOWN:'Refresh the item catalog and run Full Resync. The affected profit will remain excluded until a reliable acquisition cost or sale value is available.',
       ITEM_VALUE_MISSING:'Refresh the item catalog. If Torn does not provide a market value for that item, no user-side fix is required; the analyzer will keep the affected value excluded.',
       TRADE_DEFERRED:'Run Quick Sync again later. Torn may expose a completed trade before its full item detail is ready.',
+      TRADE_ASSET_UNVALUED:'This Player Trade contains non-item assets such as a property, company, faction or NAP. TCFA preserves the exact cash transfer, but it cannot verify the price allocated to traded items. This is a valuation limitation, not missing trade history. Do not reset the analyzer; view the trade details if precise item profit is needed.',
       ACCOUNT_MISMATCH:'The saved history belongs to another Torn account. Export a backup first. Only reset analyzer data if you intentionally want to switch the analyzer to the current API-key account.',
       IMPORT_SYNC_ACTIVE:'Stop the active sync, then retry the import.',
       IMPORT_READ:'Confirm the selected file is the analyzer JSON backup and try importing it again.',
@@ -344,7 +345,7 @@
     else if(nowSec()-last>300)add('HISTORY_STALE',`History was last checked ${tctDateTimeStr(last)} TCT. Recent sales may be missing.`,{timestamp:last});
     if(!state.sync?.firstSyncComplete)add('HISTORY_PARTIAL','Older acquisitions may be missing. Use Full Resync for historical FIFO coverage.');
     else if(state.sync.historyPaginationVersion!==HISTORY_PAGINATION_VERSION)add('HISTORY_COVERAGE_RECHECK','Earlier history was checked with older cursor handling. Full Resync verifies that no older batches were excluded.');
-    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Financial rules changed. Hunting income and explicitly marked cash fields are now recognized; Full Resync is needed to reclassify older logs.',{source:'migration'});
+    if((state.transactions.length||state.cashFlows.length)&&state.sync?.accountingVersion!==ACCOUNTING_VERSION&&!rows.some(row=>row.code==='PARSER_UPDATED'))add('PARSER_UPDATED','Player Trade asset accounting changed. Full Resync is needed to reclassify older property, company, faction and NAP exchanges without guessing item profit.',{source:'migration'});
     const legacyBountyCosts=(state.cashFlows||[]).filter(row=>Number(row?.logId)===6700&&row?.bountyCostVerified!==true&&String(row?.field||'')!=='cost').length;
     if(legacyBountyCosts)add('BOUNTY_COST_RECHECK',`${qty(legacyBountyCosts)} bounty placement${legacyBountyCosts===1?'':'s'} may still show the listed reward instead of Torn's total placement cost.`,{count:legacyBountyCosts,source:'migration'});
     if(state.sync?.diagnostics?.customLogPermissions&&!rows.some(row=>row.code==='LOG_SCOPE'))add('LOG_SCOPE','This key restricts log access. Events outside its permissions may be missing.');

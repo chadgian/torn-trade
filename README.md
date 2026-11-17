@@ -2,7 +2,15 @@
 
 A local-first Torn and Torn PDA userscript for cash flow, net worth and FIFO trading.
 
-**Source version: 0.5.12.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+**Source version: 0.5.13.** Individual Data Quality warnings and errors now open as a rendered HTML Torn Mail diagnostic report with inline styling, while Copy troubleshooting details remains plain text. The draft groups the specific notice, suggested action, TCFA/sync history, runtime/device/storage details, active sync state and sanitized context into readable sections. TCFA still never sends Torn Mail automatically; the player must review the compose screen and press Send manually.
+
+## v0.5.13 storage reliability and Player Trade assets
+
+- Page-batched, change-only unclassified-finance persistence reduces large Full Resync audit writes from one per raw log to at most one per changed page.
+- Durable writes coalesce by storage key and retry transient IndexedDB transaction aborts. A failed save remains pending and blocks sync checkpoints until confirmed; other successful writes cannot mask it.
+- IndexedDB reopens invalidated connections on iOS. Sanitized storage error names are included in diagnostics. Storage-only changes do not require a new Full Resync.
+- Player Trades containing Property, Company, Faction, or NAP legs are retained even when no regular items or cash changed hands. Asset categories are recorded without assuming a sale price from company valuation, property happiness, faction respect or NAP terms.
+- Cash in Player Trades with non-item assets is shown separately as a transfer rather than ordinary personal earned/spent totals. Mixed item/non-item trades continue excluding unverifiable item profit. Net Worth daily activity marks these trades as unvalued, rather than computing a misleading cash-only impact. **Full Resync is required to reclassify historical asset trades** because older saved events did not preserve asset types.
 
 ## Features
 
