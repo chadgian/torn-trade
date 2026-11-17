@@ -190,7 +190,8 @@
     });
   }
   async function indexedDbBackend() {
-    const db=await openAnalyzerDb();
+    let db=await openAnalyzerDb();
+    db.onversionchange=()=>{try{db.close();}catch(_){}};
     const transact=(mode,action)=>new Promise((resolve,reject)=>{
       let result,tx;
       try{
@@ -205,10 +206,21 @@
         tx.onerror=()=>{};
       }catch(error){reject(error);}
     });
+    const withReopen=async(mode,action)=>{
+      try{return await transact(mode,action);}
+      catch(error){
+        if(String(error?.name||'')!=='InvalidStateError')throw error;
+        // iOS Safari can invalidate a connection while Torn PDA is suspended.
+        try{db.close();}catch(_){}
+        db=await openAnalyzerDb();
+        db.onversionchange=()=>{try{db.close();}catch(_){}};
+        return transact(mode,action);
+      }
+    };
     return {kind:'indexeddb',
-      get:key=>transact('readonly',store=>store.get(key)),
-      set:(key,value)=>transact('readwrite',store=>store.put(value,key)),
-      delete:key=>transact('readwrite',store=>store.delete(key)),
+      get:key=>withReopen('readonly',store=>store.get(key)),
+      set:(key,value)=>withReopen('readwrite',store=>store.put(value,key)),
+      delete:key=>withReopen('readwrite',store=>store.delete(key)),
       usage:async()=>{try{const e=await navigator?.storage?.estimate?.();return {used:Number(e?.usage)||0,quota:Number(e?.quota)||0,scope:'origin'};}catch(_){return {used:0,quota:0,scope:'origin'};}}
     };
   }
