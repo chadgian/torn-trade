@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Cash Flow Analyzer
 // @namespace    obliviate.torn.trade.analyzer
-// @version      0.5.12
+// @version      0.5.13
 // @description  Local Torn finances, searchable transactions, FIFO trade accounting, configurable financial exclusions and transparent data-quality diagnostics.
 // @author       obliviate + ChatGPT
 // @match        https://www.torn.com/*
@@ -21,7 +21,8 @@
   const DURABLE_STORAGE_KEYS=new Set(['transactions','cashFlows','playerTransfers','playerTrades','itemConsumptions','unrecognizedFinancial','financialSnapshots','catalog','logTypes']);
   const durableCache=new Map();
   const durableStorageState={backend:'localStorage',ready:false,migrated:0,used:0,quota:0,lastError:''};
-  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,crossTabSequence=0;
+  let durableBackend=null,durableWriteChain=Promise.resolve(),durableWriteFailure=null,durableDraining=false,crossTabSequence=0;
+  const durablePendingWrites=new Map();
   const CROSS_TAB_CHANNEL_NAME='torn-cash-flow-analyzer-v1';
   function crossTabSignalKey(){return NS+'crossTabSignal';}
 
@@ -179,7 +180,8 @@
     const quota=isQuotaError(error),message=quota
       ? 'Analyzer storage is full. Increase the Torn PDA script limit or free browser site storage, then retry.'
       : 'Analyzer data could not be written to durable storage. Cached data remains in memory until the page closes.';
-    storageDiagnostic(quota?'STORAGE_QUOTA':'STORAGE_WRITE','error',message,{source:key||'storage'});
+    const type=String(error?.name||'UnknownError').replace(/[^A-Za-z0-9_-]/g,'').slice(0,50);
+    storageDiagnostic(quota?'STORAGE_QUOTA':'STORAGE_WRITE','error',message,{source:key||'storage',status:type});
     durableStorageState.lastError=String(error?.code||error?.name||error?.message||error||'storage error').slice(0,120);
   }
   function saveLocal(k,v) {
@@ -206,7 +208,8 @@
     });
   }
   async function indexedDbBackend() {
-    const db=await openAnalyzerDb();
+    let db=await openAnalyzerDb();
+    db.onversionchange=()=>{try{db.close();}catch(_){}};
     const transact=(mode,action)=>new Promise((resolve,reject)=>{
       let result,tx;
       try{
@@ -221,10 +224,21 @@
         tx.onerror=()=>{};
       }catch(error){reject(error);}
     });
+    const withReopen=async(mode,action)=>{
+      try{return await transact(mode,action);}
+      catch(error){
+        if(String(error?.name||'')!=='InvalidStateError')throw error;
+        // iOS Safari can invalidate a connection while Torn PDA is suspended.
+        try{db.close();}catch(_){}
+        db=await openAnalyzerDb();
+        db.onversionchange=()=>{try{db.close();}catch(_){}};
+        return transact(mode,action);
+      }
+    };
     return {kind:'indexeddb',
-      get:key=>transact('readonly',store=>store.get(key)),
-      set:(key,value)=>transact('readwrite',store=>store.put(value,key)),
-      delete:key=>transact('readwrite',store=>store.delete(key)),
+      get:key=>withReopen('readonly',store=>store.get(key)),
+      set:(key,value)=>withReopen('readwrite',store=>store.put(value,key)),
+      delete:key=>withReopen('readwrite',store=>store.delete(key)),
       usage:async()=>{try{const e=await navigator?.storage?.estimate?.();return {used:Number(e?.usage)||0,quota:Number(e?.quota)||0,scope:'origin'};}catch(_){return {used:0,quota:0,scope:'origin'};}}
     };
   }
@@ -289,16 +303,52 @@
     }
     return durableStorageState;
   }
-  function queueDurableWrite(k,v) {
-    if(!DURABLE_STORAGE_KEYS.has(k)||!durableStorageState.ready||durableBackend?.kind==='localStorage')return;
-    durableWriteChain=durableWriteChain.then(async()=>{
+  function transientDurableError(error) {
+    return ['AbortError','UnknownError','TransactionInactiveError','InvalidStateError','TimeoutError','NotReadableError'].includes(String(error?.name||''));
+  }
+  async function persistDurableValue(k,v) {
+    // A transient WebKit/IndexedDB transaction abort may succeed on retry;
+    // quota and data-clone errors must fail immediately to protect history.
+    for(let attempt=0;attempt<3;attempt++){
       try{
         await durableBackend.set(NS+k,v);
-        durableCache.set(k,v);
         try{localStorage.removeItem(NS+k);}catch(_){}
-        durableWriteFailure=null;
-      }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
-    }).catch(()=>{});
+        return true;
+      }catch(error){
+        if(isQuotaError(error)||!transientDurableError(error)||attempt===2)throw error;
+        await sleep(100*(attempt+1));
+      }
+    }
+  }
+  function startDurableWriteDrain() {
+    if(durableDraining||!durablePendingWrites.size)return;
+    durableDraining=true;
+    durableWriteChain=Promise.resolve().then(async()=>{
+      while(durablePendingWrites.size){
+        const [key,value]=durablePendingWrites.entries().next().value;
+        durablePendingWrites.delete(key);
+        try{
+          await persistDurableValue(key,value);
+          if(durableWriteFailure?.key===key)durableWriteFailure=null;
+          // Do not replace durableCache here: a newer version may have been
+          // queued while an older IndexedDB transaction was still in flight.
+        }catch(error){
+          // Keep the latest version for a later resume. A failed write is
+          // never silently discarded or masked by a later successful key.
+          if(!durablePendingWrites.has(key))durablePendingWrites.set(key,value);
+          durableWriteFailure={key,error};
+          storageError(error,key);
+          break;
+        }
+      }
+    }).finally(()=>{durableDraining=false;});
+  }
+  function queueDurableWrite(k,v) {
+    if(!DURABLE_STORAGE_KEYS.has(k)||!durableStorageState.ready||durableBackend?.kind==='localStorage')return;
+    // Coalesce writes for the same key before and during the asynchronous
+    // drain. Checkpoints still await every pending durable write.
+    durablePendingWrites.set(k,v);
+    startDurableWriteDrain();
   }
   async function reloadDurableStorage(keys=[...DURABLE_STORAGE_KEYS]) {
     if(!durableStorageState.ready)await initializeDurableStorage();
@@ -336,20 +386,26 @@
       return true;
     }
     if(!durableStorageState.ready)await initializeDurableStorage();
+    // Keep direct migration/import writes ordered after all earlier queued
+    // changes, or an older background write could overwrite a newer value.
+    await flushDurableStorage();
     durableCache.set(k,v);
     if(durableBackend.kind==='localStorage'){
       if(!saveLocal(k,v))throw new Error('Local storage write failed');
       return true;
     }
     try{
-      await durableBackend.set(NS+k,v);
-      try{localStorage.removeItem(NS+k);}catch(_){}
-      durableWriteFailure=null;return true;
-    }catch(error){durableWriteFailure=error;storageError(error,k);throw error;}
+      await persistDurableValue(k,v);
+      return true;
+    }catch(error){storageError(error,k);throw error;}
   }
   async function flushDurableStorage() {
+    // A previously failed key stays pending. A later checkpoint can retry it,
+    // but a successful write of a different key cannot erase the failure.
+    if(!durableDraining&&durablePendingWrites.size)startDurableWriteDrain();
     await durableWriteChain;
-    if(durableWriteFailure){const error=durableWriteFailure;durableWriteFailure=null;throw error;}
+    if(durableWriteFailure)throw durableWriteFailure.error;
+    if(durablePendingWrites.size)throw new AnalyzerError('STORAGE_WRITE','Durable storage has unsaved changes. Sync checkpoint was not advanced.',{source:'storage'});
     return true;
   }
   async function removeStoredKey(k) {
@@ -369,7 +425,7 @@
 
 
   // Source: state.js
-  const VERSION = '0.5.12';
+  const VERSION = '0.5.13';
   // UI-only releases must not invalidate previously verified accounting history.
   const ACCOUNTING_VERSION = '0.5.12';
   const HISTORY_PAGINATION_VERSION = 3;
@@ -2349,7 +2405,8 @@
 
   function updatesHtml() {
     const releases=[
-      {version:'0.5.12',label:'Current',items:['Fixed hunting sessions to record both cost and income as distinct Torn-dollar movements; zero-income hunts correctly count their cost only.','Added currency-aware generic cash detection for explicit money_received, cash_spent and similar directional fields, while preserving specialized transfer, item and noncash-currency rules.','Hunting logs with missing payout or cost now appear as partially unclassified in Data Quality. Full Resync is required to reparse historical hunting income and expanded financial coverage.']},
+      {version:'0.5.13',label:'Current',items:['Fixed excessive IndexedDB writes during Full Resync: unclassified financial records now save once per changed log page, not once per log entry.','Durable writes are coalesced and short-lived transaction errors are retried. The sync checkpoint cannot advance while history data remains unsaved.','Recovered invalidated IndexedDB connections after iOS suspension, and storage errors now include a safe underlying error type in diagnostic context. Existing history is preserved; no mandatory Full Resync for this storage-only release.']},
+      {version:'0.5.12',items:['Fixed hunting sessions to record both cost and income as distinct Torn-dollar movements; zero-income hunts correctly count their cost only.','Added currency-aware generic cash detection for explicit money_received, cash_spent and similar directional fields, while preserving specialized transfer, item and noncash-currency rules.','Hunting logs with missing payout or cost now appear as partially unclassified in Data Quality. Full Resync is required to reparse historical hunting income and expanded financial coverage.']},
       {version:'0.5.11',items:['Mission Shop purchases paid with mission credits no longer appear as Torn-dollar spending, whether cached or newly synced.','Credit-purchased items stay in inventory and FIFO acquisition history with a $0 cash basis, labeled Mission Credits rather than Free.','Previously cached misclassified purchases are repaired on startup, and Full Resync can recover credit amounts from unambiguous logs.','Fixed Full Resync stalling on a 100-trade Player Trades page with a repeated or unusable cursor by checking every trade in its oldest second before paging backward.','The safe recovery preserves additional boundary-second trades and pauses instead of skipping transactions when the boundary cannot be verified.']},
       {version:'0.5.10',items:['Fixed a stale Other tab synchronization badge appearing after reloading the tab that started a background Quick Sync.','Page exit immediately retires this document\'s sync activity, while a per-tab session identity recognizes abandoned reload markers if the browser misses the exit event.','Genuinely separate tabs keep their sync indicator and active manual Quick Sync / Full Resync status.']},
       {version:'0.5.9',items:['Added guarded transaction classification for gym memberships, education costs, cash-priced racing upgrades, property rental/sales, stock capital transfers, bank interest/principal, casino bets/payouts, hunting, checks, bail, loans, auction fees and select services.','Company operating P/L is now excluded from personal cash totals while remaining available for business and Net Worth review.','Unclassified financial events are displayed and can be exported from Data Quality with log ID and sanitized field names; ambiguous cash amounts and noncash currencies are not guessed. Historical reclassification requires Full Resync.']},
@@ -3148,10 +3205,28 @@
     const uncertainCurrency=!!(domain==='Racing'||domain==='Gambling'&&field?.path==='winnings'||domain==='Property'&&/\b(?:sale|sold|sell)\b/i.test(title)&&field?.path==='cost'||domain==='Stocks / Investing'&&/^(price|unit_price)$/.test(String(field?.path||'')));
     return {id:`unmapped:${entry.id}`,timestamp:Number(entry.timestamp)||0,logId:logTypeId,title:title||`Log ${logTypeId}`,category:domain||category||'Financial',field:field?.path||'',amount:Math.abs(Number(field?.value)||0),amountKnown:!!field&&!uncertainCurrency,reason:domain?'Domain log requires confirmed cash amount/direction':'Unclassified money-bearing log'};
   }
+  function checkpointUnrecognizedFinancialBatch(events=[]) {
+    if(!events.length)return false;
+    const previous=state.unrecognizedFinancial||[],byId=new Map(previous.map(row=>[String(row.id),row]));
+    let changed=false;
+    for(const {entry,recognized=false} of events){
+      if(entry?.id==null)continue;
+      const key=`unmapped:${entry.id}`;
+      const row=(!recognized||huntingMissingCashComponent(entry))?unrecognizedRowFor(entry):null;
+      if(row){
+        if(JSON.stringify(byId.get(key))!==JSON.stringify(row)){byId.set(key,row);changed=true;}
+      }else if(byId.delete(key))changed=true;
+    }
+    if(!changed)return false;
+    const next=[...byId.values()].sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0)).slice(0,300);
+    // An old event beyond the 300-record audit cap must not trigger a write.
+    if(JSON.stringify(previous)===JSON.stringify(next))return false;
+    state.unrecognizedFinancial=next;
+    if(!save('unrecognizedFinancial',next))throw new AnalyzerError('STORAGE_WRITE','Financial audit history could not be queued for durable storage.',{source:'unrecognizedFinancial'});
+    return true;
+  }
   function checkpointUnrecognizedFinancial(entry,recognized=false) {
-    const key=`unmapped:${entry?.id}`;let rows=(state.unrecognizedFinancial||[]).filter(x=>String(x.id)!==key);
-    if(!recognized||huntingMissingCashComponent(entry)){const row=unrecognizedRowFor(entry);if(row)rows.push(row);}
-    rows.sort((a,b)=>(Number(b.timestamp)||0)-(Number(a.timestamp)||0));state.unrecognizedFinancial=rows.slice(0,300);save('unrecognizedFinancial',state.unrecognizedFinancial);
+    return checkpointUnrecognizedFinancialBatch([{entry,recognized}]);
   }
 
   function checkpointCashFlowRows(rows,replaceIds=[]) {
@@ -4039,7 +4114,7 @@
       if(boundaryRecovered)job.diagnostics.boundaryRecoveries=(Number(job.diagnostics.boundaryRecoveries)||0)+1;
       if(denseBoundaryRecovered)job.diagnostics.denseBoundaryRecoveries=(Number(job.diagnostics.denseBoundaryRecoveries)||0)+1;
       if(!rows.length){advanceResumableLogBatch(job);await checkpointSyncJob(job,`${label} \u00B7 page ${page} complete`);continue;}
-      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[];
+      const parsedRows=[],transferPage=[],consumptionPage=[],cashPage=[],cashLogIds=[],financialAuditPage=[];
       job.diagnostics.rawRows=(Number(job.diagnostics.rawRows)||0)+rows.length;
       for(const r of rows){
         const ts=Number(r?.timestamp)||0;if(ts<scanPeriod.from||ts>scanPeriod.to)continue;
@@ -4051,8 +4126,13 @@
         const parsed=parseLogEntry(r);job.diagnostics.parsedRows+=parsed.length;job.diagnostics.matchedRows+=parsed.length;for(const t of parsed){if(t.side==='buy'){job.diagnostics.latestParsedAcquisitionTimestamp=Math.max(Number(job.diagnostics.latestParsedAcquisitionTimestamp)||0,Number(t.timestamp)||0);}if(t.side==='buy'&&t.source==='Foreign Market'){job.diagnostics.foreignBuyRows=(Number(job.diagnostics.foreignBuyRows)||0)+1;job.diagnostics.foreignBuyQty=(Number(job.diagnostics.foreignBuyQty)||0)+(Number(t.qty)||0);}}parsedRows.push(...parsed);
         const transferRows=parsePlayerTransferEntry(r);job.diagnostics.playerTransferRows=(Number(job.diagnostics.playerTransferRows)||0)+transferRows.length;transferPage.push(...transferRows);
         const consumptionRows=parseItemConsumptionEntry(r);job.diagnostics.itemConsumptionRows=(Number(job.diagnostics.itemConsumptionRows)||0)+consumptionRows.length;consumptionPage.push(...consumptionRows);
-        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);checkpointUnrecognizedFinancial(r,cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0);if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
+        const cashRows=parseCashFlowEntry(r,parsed);job.diagnostics.cashFlowRows=(Number(job.diagnostics.cashFlowRows)||0)+cashRows.length;cashPage.push(...cashRows);
+        financialAuditPage.push({entry:r,recognized:cashRows.length>0||transferRows.length>0||consumptionRows.length>0||parsed.length>0});
+        if(!cashRows.length&&!transferRows.length&&!parsed.length&&unrecognizedRowFor(r))job.diagnostics.unrecognizedFinancialRows=(Number(job.diagnostics.unrecognizedFinancialRows)||0)+1;
       }
+      // Persist at most one financial-audit snapshot per completed log page.
+      // This used to queue a full IndexedDB write for every raw log row.
+      checkpointUnrecognizedFinancialBatch(financialAuditPage);
       checkpointPlayerTransferRows(transferPage);checkpointItemConsumptionRows(consumptionPage);checkpointCashFlowRows(cashPage,cashLogIds);
       checkpointTransactionRows(job,parsedRows);
       const timestamps=rows.map(r=>Number(r?.timestamp)).filter(Number.isFinite);
@@ -4203,7 +4283,7 @@
   async function finishResumableSync(job) {
     const complete=!!(job.completedSources?.log&&job.completedSources?.trade);
     if(!complete)throw new AnalyzerError('SYNC_INCOMPLETE','History sources did not finish. The last successful sync has not advanced.');
-    const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();commitTradeVerifications(job);updateSyncCoverage(job);
+    const freshCount=finalizeResumableTransactions(job),d=job.diagnostics||{},serverNow=Number(job.tctNow)||nowSec();
     const nextSync={...state.sync,lastSync:serverNow,firstSyncComplete:!!(state.sync.firstSyncComplete||job.syncMode==='full'),autoDiscoveryComplete:true,diagnostics:d};
     if(job.manual&&job.syncMode==='quick')nextSync.lastManualQuickSync=serverNow;
     if(job.manual&&job.syncMode==='full')nextSync.lastFullResync=serverNow;
@@ -4212,7 +4292,11 @@
     const oldCoverage=state.sync.coverageFrom==null?NaN:Number(state.sync.coverageFrom);
     nextSync.coverageFrom=Number.isFinite(oldCoverage)?Math.min(oldCoverage,job.period.from):job.period.from;
     nextSync.coverageTo=Math.max(Number(state.sync.coverageTo)||0,Math.min(job.period.to,serverNow));
+    // Only mark trades and scan coverage as verified after every underlying
+    // history dataset has been confirmed durable.
     await flushDurableStorage();
+    commitTradeVerifications(job);
+    updateSyncCoverage(job);
     if(!save('sync',nextSync))throw new AnalyzerError('STORAGE_WRITE','The sync result could not be saved.');
     state.sync=nextSync;if(job.syncMode==='full')resolveDiagnostic('PARSER_UPDATED');
     if(job.syncMode==='full'){
